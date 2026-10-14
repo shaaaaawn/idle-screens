@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DANCES, GESTURES, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, VIGNETTES } from './vignette';
+import { actorTravel } from './dot';
+import { DANCES, GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseAcross, poseOf, resolveVignette, snapBetween, VIGNETTES } from './vignette';
 
 /** duet and trio are written for the open stage; the rest for the geode room. */
 const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
@@ -149,5 +150,67 @@ describe('vignettes', () => {
       });
       expect(moved, d).toBe(true);
     }
+  });
+});
+
+describe('a later `=mark` (X444a)', () => {
+  // `=` places with no travel: in a later beat the actor is there from the
+  // beat's first moment, not left where it was until the next beat cuts it over.
+  const v = parseVignette('3s: a =left, b =right | 4s: a =right | 4s: a >left', OPEN_MARKS);
+  const right = { x: OPEN_MARKS.right!.x, z: OPEN_MARKS.right!.z };
+
+  it('snaps at the start of its beat and holds the mark through it', () => {
+    expect(v.problems).toEqual([]);
+    const before = poseOf(v, 0, 2.9)!;
+    expect(before.x).toBeLessThan(-40); // at left
+    for (const t of [3.02, 4, 5.5, 6.95]) {
+      const p = poseOf(v, 0, t)!;
+      expect(Math.hypot(p.x - right.x, p.z - right.z), `t=${t}`).toBeLessThan(25); // its spot at right (a STANDOFF ring)
+    }
+    // No jump at the next boundary: the walk off starts from where it stood.
+    const end = poseOf(v, 0, 6.999)!, start = poseOf(v, 0, 7.001)!;
+    expect(Math.hypot(end.x - start.x, end.z - start.z)).toBeLessThan(0.5);
+  });
+
+  it('turns no heading toward the cut: the facing is steady across the snap', () => {
+    const h = (t: number): number => { const p = poseOf(v, 0, t)!; return Math.atan2(p.fx, p.fz); };
+    const turn = (a: number, b: number): number => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    // Just before the snap the actor stands at left; the lookahead must not see it across the room.
+    expect(turn(h(2.8), h(2.97))).toBeLessThan(0.05);
+    expect(poseOf(v, 0, 2.97)!.doing).toBe('idle');
+  });
+
+  it('a first-beat `=` is unchanged: the opening places, the loop walks home to it', () => {
+    const w = parseVignette('3s: a =left, b =right | 4s: a >right', OPEN_MARKS);
+    expect(poseOf(w, 0, 1)!.x).toBeLessThan(-40);
+  });
+});
+
+describe('a `=` cut, sampled across (X444a)', () => {
+  const v = parseVignette('3s: a =left, b =right | 4s: a =right | 4s: a >left', OPEN_MARKS);
+  it('snapBetween sees the cut only across its boundary; poseAcross reads no velocity through it', () => {
+    expect(snapBetween(v, 0, 2.9, 3.1)).toBe(true);
+    expect(snapBetween(v, 0, 3.1, 2.9)).toBe(true);
+    expect(snapBetween(v, 0, 3.0, 3.2)).toBe(false); // already cut
+    expect(snapBetween(v, 1, 2.9, 3.1)).toBe(false); // b is not cut
+    expect(snapBetween(v, 0, 2.9 + v.duration, 3.1 + v.duration)).toBe(true); // every loop
+    const now = poseOf(v, 0, 2.9)!, on = poseAcross(v, 0, 2.9, 0.25)!;
+    expect(Math.hypot(on.x - now.x, on.z - now.z)).toBeLessThan(1e-9);
+  });
+  it('a walking actor reads its walk: dot.actorTravel counts no steps for the jump', () => {
+    const before = actorTravel(v, 0, 2.95), after = actorTravel(v, 0, 3.05);
+    expect(after - before).toBeLessThan(1);
+  });
+});
+
+describe('the interior mark table (X447 docs)', () => {
+  it('names every furniture mark where INTERIOR_MARKS puts it', () => {
+    for (const [name, p] of Object.entries(INTERIOR_MARK_POLAR)) {
+      const m = INTERIOR_MARKS[name]!;
+      expect(Math.hypot(m.x, m.z), name).toBeCloseTo(p.r, 9);
+      expect(((Math.atan2(m.z, m.x) * 180) / Math.PI + 360) % 360, name).toBeCloseTo(p.deg, 9);
+      expect(m.y).toBe(p.y);
+    }
+    expect(Object.keys(INTERIOR_MARK_POLAR).length + 3).toBe(Object.keys(INTERIOR_MARKS).length); // + rug, centre, chandelier
   });
 });

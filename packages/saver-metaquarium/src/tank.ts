@@ -68,7 +68,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
-import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotPose, type ShotName, type ShotPose } from './shots';
+import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
@@ -90,7 +90,7 @@ import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLook, rigDolphin, t
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import {
-  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusPlaced, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
+  newOctopusOutput, octopusFrame, octopusIdle, octopusLook, octopusInkCue, octopusPlaced, octopusSkin, octopusSpot, octopusStart, rigOctopus, setOctopusSkin,
   type OctopusRig, type OctopusSkin,
 } from './octopus';
 import { InkLayer } from './ink';
@@ -109,7 +109,8 @@ import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
-import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
+import { roomScale } from './interior';
+import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseAcross, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
   clusterClearance, clusterMound, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
   type Cluster, type Emitter,
@@ -527,7 +528,11 @@ function buildTerrain(height: (x: number, z: number) => number, color: string, d
  * Rays are the only per-frame work in the room, which is why they are the
  * layer the cost model drops first on a weak device.
  */
-function buildRays(count: number, color: string, y: number, strength: number, rng: Rng): {
+/** A shaft's length (it spans the tank, y 0..150), and how far it sways about its source (radians). */
+const RAY_LENGTH = 150;
+const RAY_SWAY = 0.03;
+
+export function buildRays(count: number, color: string, y: number, strength: number, rng: Rng): {
   group: Group; material: ShaderMaterial;
 } {
   const group = new Group();
@@ -538,23 +543,36 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
     side: DoubleSide,
     uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
     vertexShader: `
+      uniform float uTime;
+      attribute float aPhase;
       varying float vY;
       varying vec3 vW;
+      varying float vPhase;
       void main() {
         vY = uv.y;
-        vW = (modelMatrix * vec4(position, 1.0)).xyz;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vPhase = aPhase;
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        // A slow, small sway about the shaft's source end (uv.y = 1): about
+        // 0.03 rad, its own phase and a different period each way, so the
+        // shafts drift out of step like light through a moving surface.
+        float reach = (1.0 - uv.y) * ${RAY_LENGTH.toFixed(1)};
+        w.x += sin(uTime * 0.15 + aPhase) * ${RAY_SWAY} * reach;
+        w.z += sin(uTime * 0.11 + aPhase * 1.7) * ${RAY_SWAY * 0.6} * reach;
+        vW = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: `
       ${CAUSTIC_FUNCS}
       uniform vec3 uColor; uniform float uStrength; uniform float uTime;
       varying float vY;
       varying vec3 vW;
+      varying float vPhase;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
-        // suspended matter rather than a solid cone.
+        // suspended matter rather than a solid cone — each shaft on its own
+        // phase (X122): in unison they read as one lamp dimming.
         float fade = smoothstep(0.0, 0.3, vY) * (1.0 - smoothstep(0.72, 1.0, vY));
-        float breathe = 0.75 + 0.25 * sin(uTime * 0.4);
+        float breathe = 0.75 + 0.25 * sin(uTime * 0.4 + vPhase);
         // 0.13, not more: with the shaft finally IN frame, alpha is the whole
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
@@ -578,9 +596,15 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
   // units past the ceiling. A QA pass measured rayStrength 0→1 at a 0.07/255
   // pixel difference: the dial did nothing. The fade now peaks IN the fish
   // band and closes at both ends so shafts still read as light, not walls.
-  const geo = new CylinderGeometry(7, 42, 150, 10, 1, true);
-  geo.userData.mqOwned = true;
+  const shape = new CylinderGeometry(7, 42, RAY_LENGTH, 10, 1, true);
   for (let i = 0; i < count; i++) {
+    // Each shaft its own copy (a few dozen vertices) carrying its phase: a hash
+    // of its index, not a draw from `rng`, so every shaft stands where it
+    // always has.
+    const geo = shape.clone();
+    const phase = fishHash(i, 0x5af7) * Math.PI * 2;
+    geo.setAttribute('aPhase', new BufferAttribute(new Float32Array(geo.attributes.position!.count).fill(phase), 1));
+    geo.userData.mqOwned = true;
     const m = new Mesh(geo, mat);
     m.userData.mqMirrorSkip = true; // light in the water, not a thing the surface reflects
     const a = rng.next() * Math.PI * 2;
@@ -594,6 +618,7 @@ function buildRays(count: number, color: string, y: number, strength: number, rn
     m.frustumCulled = false;
     group.add(m);
   }
+  shape.dispose();
   return { group, material: mat };
 }
 
@@ -890,6 +915,8 @@ class TankInstance implements SaverInstance {
   private vignette: Vignette | null = null;
   private vignetteKey = '';
   private warnedVignette = '';
+  /** Actors told to `ink` that have none, warned once per script. */
+  private readonly warnedInk = new Set<string>();
   /** Lit mode: the rig, and the glow parts competing for its point lights. */
   private lit = false;
   private readonly flatFill: HemisphereLight;
@@ -995,6 +1022,8 @@ class TankInstance implements SaverInstance {
    *  formula is kept bit-for-bit. */
   private speedTracked = false;
   private autoRotateTracked = false;
+  /** How far `autoRotate` has turned the orbit by the last frame (degrees): `camera.bearing`'s share. */
+  private turned = 0;
   private readonly thumbnail: boolean;
   private readonly catalog: FishEntry[];
   /** One shared route for formation styles, compiled at mount so switching
@@ -1385,7 +1414,7 @@ class TankInstance implements SaverInstance {
       material.visible = strength > 0;
       group.add(rg);
       // Where the light falls, for light-seeking fish. Read once per room —
-      // the shafts never move.
+      // a shaft only sways a few units about its source (X122), not enough to move its pool.
       this.rayPools = rg.children.map((m) => [m.position.x, m.position.z]);
       this.rayMat = material;
       this.presetRayStrength = preset.rays.strength;
@@ -1769,7 +1798,8 @@ class TankInstance implements SaverInstance {
     this.vignette = null;
     if (!script) return;
     const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
-    const k = indoors ? scale : 1;
+    // Indoors the marks scale with the room, which is built no smaller than ROOM_MIN_SCALE (interior.ts).
+    const k = indoors ? roomScale(scale) : 1;
     // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
     const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
     const parsed = parseVignette(script, marks);
@@ -2552,6 +2582,7 @@ class TankInstance implements SaverInstance {
       this.space, this.track, 'autoRotate', t, this.num('autoRotate'), this.autoRotateTracked,
     );
     this.placeShot(this.num('cameraAzimuth') + rotation);
+    this.turned = rotation;
 
     // Fog color
     const fogHex = String(
@@ -2787,7 +2818,9 @@ class TankInstance implements SaverInstance {
     for (const f of this.fish) {
       if (!f?.rig || f.index >= visible) continue;
       const d = danceSpots.get(f.index);
-      const s = d ? { x: d[0], z: d[1] } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
+      // A vignette's actor is where its script has it, not where its own walk would.
+      const a = !d && this.vignette && f.index < this.vignette.actors ? poseOf(this.vignette, f.index, tSec) : null;
+      const s = d ? { x: d[0], z: d[1] } : a ? { x: a.x, z: a.z } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
         : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index))
         : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index))
         : f.rig.snail ? snailSpot(f.index, tSec, f.plan, snailStart(f.plan, f.index))
@@ -2882,7 +2915,10 @@ class TankInstance implements SaverInstance {
           seatDelay = Math.hypot(base.x - sentinel.x, base.z - sentinel.z) / 90;
         }
       }
-      const mnv = maneuverAt(spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
+      // A vignette's actor is the script's (X441): no maneuver moves it, flurries
+      // its tail or counts it as maneuvering — its place and facing were already exempt.
+      const scripted = !!this.vignette && f.index < this.vignette.actors;
+      const mnv = maneuverAt(scripted ? null : spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
       // A dori holds still for a headstand, plays dead without being towed,
       // backs off when wary — then catches up (tang.ts). Before the pose, so a
       // follower behind it stops too.
@@ -3147,9 +3183,14 @@ class TankInstance implements SaverInstance {
         : f.rig?.dot ? (g: string): boolean => (DOT_GESTURES as readonly string[]).includes(g)
         : f.rig?.dolphin ? (g: string): boolean => (DOLPHIN_GESTURES as readonly string[]).includes(g) : undefined;
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec, ownMoves) : null;
+      // A floor creature cast as an actor (a crab, a starfish, an octopus, a
+      // snail) keeps its feet on the floor at the script's place: an open-stage
+      // mark is written at a swimmer's height (X490). Dot does the same (dot.ts).
+      const floorActor = !!act && !!(f.rig?.crab || f.rig?.starfish || f.rig?.octopus || f.rig?.snail);
       if (act) {
         px = act.x; y = act.y; pz = act.z;
         if (this.terrainAt) y = Math.max(y, Math.min(BOUNDS.yMax, this.terrainAt(px, pz) + FISH_LENGTH * 0.5));
+        if (floorActor) y = this.crabGround(px, pz);
       }
       // This fish's body for the dodge: where it is, where it is going. A
       // floor creature walks its own spot (crab.ts) and keeps it — it is in
@@ -3189,7 +3230,7 @@ class TankInstance implements SaverInstance {
       } else if (act) {
         // A script's actor holds its ground in the dodge but keeps walking: its
         // velocity is its next scripted pose, so swimmers see it coming.
-        const nx = poseOf(this.vignette!, f.index, tSec + 0.25, ownMoves);
+        const nx = poseAcross(this.vignette!, f.index, tSec, 0.25, ownMoves);
         if (nx) { body.vx = (nx.x - act.x) * 4; body.vy = (nx.y - act.y) * 4; body.vz = (nx.z - act.z) * 4; }
       } else {
         // Where its route takes it over the next half second, as a chord: a
@@ -3279,11 +3320,13 @@ class TankInstance implements SaverInstance {
       else if (octoRig) { octopusIdle(octoRig, tSec, f.index); f.rig!.lights['GLOW-Rings'] = 0.3; f.rig!.bloom = 0.35; }
       // A snail glides it, slowly, and stops to look, graze, stretch or hide in its shell (snail.ts).
       const snailRig = f.rig?.snail;
-      const snl = snailRig && !act && !style.formation
+      // As a vignette's actor it glides the script's way, on the floor (snail.ts, X490).
+      const snl = snailRig && !style.formation
         ? snailFrame(snailRig, {
             t: tSec, index: f.index, plan: f.plan, start: snailStart(f.plan, f.index), len: L,
             scale: snailRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
+            ...(act && this.vignette ? { act, next: poseAcross(this.vignette, f.index, tSec, 0.25, ownMoves), travel: actorTravel(this.vignette, f.index, tSec, ownMoves) } : {}),
           }, this.snailOut)
         : null;
       if (snl) { px = snl.x; y = snl.y; pz = snl.z; } else if (snailRig) snailIdle(snailRig, tSec, f.index);
@@ -3295,7 +3338,7 @@ class TankInstance implements SaverInstance {
             t: tSec, index: f.index, plan: f.plan, start: dotStart(f.plan, f.index), len: L,
             scale: dotRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
-            act, next: act && this.vignette ? poseOf(this.vignette, f.index, tSec + 0.25, ownMoves) : null,
+            act, next: act && this.vignette ? poseAcross(this.vignette, f.index, tSec, 0.25, ownMoves) : null,
             ...(act && this.vignette ? { travel: actorTravel(this.vignette, f.index, tSec, ownMoves) } : {}),
           }, this.dotOut)
         : null;
@@ -3368,7 +3411,7 @@ class TankInstance implements SaverInstance {
         let dPace = rigPace, dBeat = beat;
         if (act && this.vignette) {
           dBeat = actorTravel(this.vignette, f.index, tSec, ownMoves, true);
-          const nx = poseOf(this.vignette, f.index, tSec + 0.25, ownMoves);
+          const nx = poseAcross(this.vignette, f.index, tSec, 0.25, ownMoves);
           dPace = nx ? (Math.hypot(nx.x - act.x, nx.y - act.y, nx.z - act.z) * 4) / 17 : 0;
         }
         dolphin = dolphinFrame(f.rig.dolphin, tSec, f.index, dBeat, {
@@ -3418,7 +3461,7 @@ class TankInstance implements SaverInstance {
         this.followHead.normalize();
         if (act && this.vignette) {
           // An actor's trail is the script's own past, a beat behind.
-          const back = poseOf(this.vignette, f.index, tSec - (L * 2) / 17);
+          const back = poseAcross(this.vignette, f.index, tSec, -(L * 2) / 17);
           if (back) { this.followTrail.set(back.x, back.y, back.z); this.followHasTrail = true; }
         }
       }
@@ -3436,8 +3479,9 @@ class TankInstance implements SaverInstance {
       if (hold) {
         // Already faced (above).
       } else if (act) {
-        f.group.lookAt(px + act.fx, y + act.fy, pz + act.fz);
-        f.group.rotateZ(act.roll);
+        // A floor creature stands level: the script's pitch and roll are a swimmer's.
+        f.group.lookAt(px + act.fx, y + (floorActor ? 0 : act.fy), pz + act.fz);
+        if (!floorActor) f.group.rotateZ(act.roll);
       } else {
         f.group.lookAt(px + lfx, y + lfy, pz + lfz);
         f.group.rotateZ(pose.roll);
@@ -3455,6 +3499,15 @@ class TankInstance implements SaverInstance {
       let oLook: ReturnType<typeof octopusLook> | null = null;
       // Placed by a script or a formation it has no stops, but it still keeps its pupils level and changes colour.
       const oState = octo ?? (f.rig?.octopus ? octopusPlaced(f.index, tSec, this.octoOutput) : null);
+      // A vignette's `ink` cue (X440): the octopus squirts on its mark; any other breed has no ink.
+      const inkCue = act?.gesture?.name === 'ink' ? act.gesture : null;
+      if (inkCue && oState && f.rig?.octopus) {
+        const beatAt = Math.round((tSec - inkCue.bar) * 100);
+        octopusInkCue(f.rig.octopus, oState, tSec, f.index, inkCue.at, inkCue.weight, `${f.index}:cue:${beatAt}`);
+      } else if (inkCue && !this.warnedInk.has(`${f.index}|${this.vignetteKey}`)) {
+        this.warnedInk.add(`${f.index}|${this.vignetteKey}`);
+        console.warn(`[metaquarium] vignette: "${'abc'[f.index]} ink" ignored — only an octopus has ink (slot ${f.index} is a ${this.wantBreeds[f.index] ?? 'fish'})`);
+      }
       if (oState && f.rig?.octopus) {
         f.group.updateMatrixWorld(true);
         oLook = octopusLook(f.rig!.octopus, tSec, f.index, { viewer: followPov && f.index === followSlot ? null : this.viewer(followSlot), state: oState });
@@ -3662,6 +3715,8 @@ class TankInstance implements SaverInstance {
         heading: Math.round(((Math.atan2(floor ? floor.fx : act ? act.fx : lfx, floor ? floor.fz : act ? act.fz : lfz) * 180) / Math.PI + 360) % 360),
         maneuvering: Math.abs(mnv.side) > 0.02 || Math.abs(mnv.up) > 0.02 || mnv.flurry > 0.05 || Math.abs(mnv.pitch) > 0.02,
         size: Math.round(size * 100) / 100,
+        // The shell a snail wears as drawn (`snailShell`, dressSnail): checkable without pixels (X491).
+        ...(f.rig?.snail ? { shell: f.rig.snail.shell.style || null } : {}),
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
           : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
@@ -3742,7 +3797,10 @@ class TankInstance implements SaverInstance {
         // Following a fish: the orbit params are ignored while this is set.
         follow: this.followState,
         shot: this.str('shot'),
+        // The param, as set; `bearing` is where the shot's camera stands now —
+        // the param turned by autoRotate, plus the shot's own swing (X438).
         azimuth: this.num('cameraAzimuth'),
+        bearing: shotBearing((SHOT_NAMES as readonly string[]).includes(this.str('shot')) ? this.str('shot') as ShotName : 'orbit', this.num('cameraAzimuth'), this.turned),
         elevation: this.num('cameraElevation'),
         distance: this.num('cameraDistance'),
         autoRotate: this.num('autoRotate'),

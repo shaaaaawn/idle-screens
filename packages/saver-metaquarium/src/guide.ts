@@ -19,14 +19,14 @@
 import { parsePropMix } from './crystals';
 import { parseFloraMix, parseFloraPalette } from './flora-mix';
 import { parseGeodeMineral, parseGeodeMix } from './geode-mix';
-import { parseFishMix } from './ipfs';
+import { expandFishMixSlots, parseFishMix } from './ipfs';
 import { parsePyramidMix } from './pyramid-mix';
 import { parseTownProps } from './town-mix';
 import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
-import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
+import { BREED_GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
 type Value = string | number | boolean;
 
@@ -39,7 +39,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraFollow: 'Ride with one fish (cast slot, 0 = first); -1 is the orbit camera. Orbit params are ignored while following. Pair with `followSpot` on the same slot for a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
   followDistance: 'How far behind the followed fish the camera rides, along its own path (40–70 a chase). Under ~18 it is the fish\'s eye and the fish is hidden.',
-  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal.',
+  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. `frame.state.camera.bearing` is where the camera stands now (cameraAzimuth turned by autoRotate, plus a named shot\'s own swing, 0–360); `camera.azimuth` stays the param.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
@@ -53,7 +53,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   swimVariance: 'How differently individual fish swim from one another (speed, phase).',
   fishSize: 'Every fish bigger or smaller, over each breed\'s own size (a shark is 2.2× a minted fish, a babyfish 0.45×).',
   sizeVariance: 'How much fish of one breed differ in size: 0 all alike, 1 from about half to nearly double.',
-  maneuver: 'Which set-piece moves the cast may break into.',
+  maneuver: 'Which set-piece moves the cast may break into. Vignette actors (slots 0–2) keep their marks during maneuvers: the script owns their position and facing.',
   maneuverRate: 'How often maneuvers happen.',
   maneuverIntensity: 'How big they are.',
   bodyWiggle: 'Body yaw while swimming, for models without an animation clip. A fish the swim wave bends (`swimWave` > 0) ignores it.',
@@ -67,8 +67,8 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
-  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat.',
-  starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own.',
+  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat. A shell keeps its snail\'s own coat: under `glow` the shell is that coat darkened and the spiral lights in a hue of its own, so glowing snails differ in colour. `frame.state.fish[i].shell` reports the shell each snail wears.',
+  starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own. The class re-faces the live camera every frame, so under autoRotate it turns with the camera and stays put on screen while the room turns behind it; a follow camera uses cameraAzimuth instead.',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
   swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
@@ -102,9 +102,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   crystalTint: 'How much nearby light sources colour a passing fish. 0.5–0.7 ties the cast to the place.',
   rockDensity: 'Faceted boulders, an arch and a back ridge around the crystals.',
   rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
-  geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`….',
+  geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`…. geodeHomes is capped at 2 on basic and minimal tiers (3 on standard and high); a house that is dropped takes its homeN/homeNin marks with it, and indoors (interior: geode) there are no homeN marks.',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
-  floraDensity: 'Voxel plants around each crystal, swaying, lit and shedding spores. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
+  floraDensity: 'Voxel plants, swaying, lit and shedding spores. One tank-wide plant budget (density × 36 / 72 / 108 on the low / mid / high tier), shared round-robin among the crystals and geodes (or six bare spots when there are none): more crystals means sparser gardens, not more plants. What grows is `floraMix`; with it empty the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
   geodes: 'Wild geodes about the floor (0 = none): split geodes (one in three a thunder egg), amethyst cathedrals, crystal clusters, one mega cavern geode. They follow the world\'s rules — slate crust lit by the same key as the rocks, crystals that glow and pulse like the crystals (crystalGlow, crystalPulse), the mineral of the crystal nearest them, the crystals\' light on their stone — and flora grows round them as round a crystal. Agate banding is drawn per pixel; one in twenty is an iridescent aura morph; their crystals wake when a fish comes close.',
   geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the crystal nearest each geode (it belongs to its world, as flora and homes do); `world` = two from the seed; or a list.',
@@ -136,12 +136,12 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   landmark: 'One thing bigger than everything else. `castle`: voxel walls, crystal-spired towers, gate, road, plaza. `citadel`: two storeys. Marks: `gate`, `plaza`, `courtyard`.',
   // stage
   followSpot: 'A follow-spot on one fish slot (0 = first of the cast); -1 off. House lights drop with it.',
-  spotStrength: 'How hard the spots are on and how far the house lights fall.',
+  spotStrength: 'How hard the spots are on and how far the house lights fall. House lights dim only lit fish\'s key/fill (to 40% at full strength) and their fishAmbient water light; reflections, glow parts, flat-lit fish and the unlit floor/scenery keep their brightness, and a `-` blackout only puts out the spots themselves.',
   spotColor: 'Colour of the single `followSpot`.',
   spotShadow: 'The spotted fish\'s shadow in its pool. 0 none, 1 true size.',
   spotRig: 'Up to three spots: `slot[/color][*radius]`. `0/#ff8ad0*26, 1/#7fdcff`. They are a, b, c in order. Overrides followSpot.',
   spotCues: 'A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` (`-` = blackout). Spots cross-fade at each cue.',
-  vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio on the open stage) or a script of beats.',
+  vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio on the open stage) or a script of beats. `=mark` places an actor with no travel (in a later beat it snaps at the start of the beat); `>mark` swims there. `circle` sends each named actor from wherever it stands onto a ring round the mark and back to its own spot by the end of the beat; actors not named stay put. A floor creature (crab, starfish, octopus, snail, Dot) cast as an actor keeps its feet on the floor at its marks. `ink` is the octopus\'s own gesture: it squirts a cloud of ink on its mark (frame.state shows `doing: "ink"`); on any other breed it is ignored, with a warning.',
 };
 
 export const GRAMMAR = `
@@ -171,14 +171,19 @@ signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcom
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
 vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
-          [<sec>s:] actor =mark       start there           actor >mark       swim there
-          actor @mark | @actor        face it               a b circle mark   circle it together
+          [<sec>s:] actor =mark       be there (no travel; a later beat's = snaps at its start)   actor >mark   swim there
+          actor @mark | @actor        face it               a b circle mark   each named actor rings it, back to its spot by the beat's end
           actor follow actor                                gestures: talk nod shake hop spin wiggle rest peek bow
+          ink (an octopus actor only: it lets go a cloud of ink; any other breed ignores it, with a warning)
           dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
           home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).
           Marks indoors (interior: geode): ${Object.keys(INTERIOR_MARKS).join(' ')}
+          rug and centre are the middle of the room, the chandelier overhead; the furniture round it
+          (bearing 0° = +x, 90° = +z; distance r and height y at crystalScale 1 — the room and every mark scale by
+          max(crystalScale, 0.85), so below 0.85 the room stops shrinking):
+${Object.entries(INTERIOR_MARK_POLAR).map(([n, p]) => `            ${n.padEnd(9)}${String(p.deg).padStart(4)}°  r ${String(p.r).padStart(3)}  y ${p.y}${p.note ? `  (${p.note})` : ''}`).join('\n')}
 `.trim();
 
 export interface Recipe {
@@ -415,8 +420,18 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   else if (spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
   for (const s of rig) if (s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
   if (str('vignette')) {
-    const { actors } = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
+    const v = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
+    const { actors } = v;
     if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abc'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
+    // A breed's own gesture (an octopus's ink) on an actor of another breed does nothing.
+    const slotBreeds = expandFishMixSlots(mix, 3).map((sl) => sl.breed);
+    for (const [g, breeds] of Object.entries(BREED_GESTURES) as [string, readonly string[]][]) {
+      for (let a = 0; a < actors; a++) {
+        if (!v.beats.some((b) => b.actors[a]?.gesture === g)) continue;
+        const breed = slotBreeds[a] ?? 'fish';
+        if (!breeds.includes(breed)) out.push({ path: 'vignette', also: ['fishMix'], message: `"${'abc'[a]} ${g}" does nothing: ${g} is the ${breeds.join('/')}'s own, and actor ${'abc'[a]} (slot ${a}) is a ${breed}` });
+      }
+    }
   }
 
   // Off switches: a param that only shapes something that is not there.

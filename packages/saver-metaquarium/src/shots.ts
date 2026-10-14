@@ -72,6 +72,18 @@ function framing(name: ShotName, i: ShotInput): Framing {
   }
 }
 
+/**
+ * Where the shot's camera stands, in degrees round the tank (0..360, the
+ * convention `cameraAzimuth` uses: 0 looks from +z): `cameraAzimuth`, plus how
+ * far an `autoRotate` has turned it by now (`turned`), plus the shot's own
+ * swing. What `frame.state.camera.bearing` reports (X438) — `azimuth` there is
+ * the param, which an orbit never changes.
+ */
+export function shotBearing(name: ShotName, azimuth: number, turned: number): number {
+  const b = (((azimuth + turned + shotAzimuthOffset(name)) % 360) + 360) % 360;
+  return Math.round(b * 10) / 10 % 360;
+}
+
 /** How far a shot swings off `cameraAzimuth` (degrees): lanes laid across the view use it. */
 export function shotAzimuthOffset(name: ShotName): number {
   return name === 'hero' ? -28 : name === 'low' ? 12 : 0;

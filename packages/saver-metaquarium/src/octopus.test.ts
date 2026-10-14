@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { BUNDLED_BREEDS } from './breeds';
 import { INK_LIFE, InkLayer, inkPuffAt } from './ink';
 import {
-  newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusIdle,
+  newOctopusOutput, OCTOPUS_CLIPS, OCTOPUS_COATS, OCTOPUS_SHIFT, octopusCoat, octopusRepertoire, octopusCycle, octopusFrame, octopusGait, octopusHeading, octopusIdle, octopusInkCue,
   octopusLook, octopusMoment, octopusPlaced, octopusSkin, octopusSpot, octopusStart, octopusStopAt, rigOctopus, setOctopusSkin, type OctopusOutput, type OctopusRig, type OctopusStop,
 } from './octopus';
 import { createRng } from '@idle-screens/core';
@@ -329,5 +329,18 @@ describe('ink (ink.ts)', () => {
       return Array.from(layer.mesh.instanceMatrix.array.slice(0, 48));
     };
     expect(at('3:7')).not.toEqual(at('5:2'));
+  });
+});
+
+describe('octopus: a vignette `ink` cue (X440)', () => {
+  it('reports ink, pales, and lets go one cloud a moment into the gesture — keyed so a beat inks once', () => {
+    const at = (s: number) => octopusInkCue(null, octopusPlaced(0, 10 + s, newOctopusOutput()), 10 + s, 0, s, 1, '0:cue:1000');
+    expect(at(0.2).doing).toBe('ink');
+    expect(at(0.2).ink).toBeNull(); // the squirt comes a moment in
+    const mid = at(1);
+    expect(mid.ink).toEqual({ key: '0:cue:1000', t: 10.55 });
+    expect(mid.mood.pale).toBeGreaterThan(0.5);
+    expect(at(1.8).ink!.t).toBeCloseTo(10.55, 9); // the same cloud, emitted once (InkLayer keys it)
+    expect(at(3).ink).toBeNull();
   });
 });
