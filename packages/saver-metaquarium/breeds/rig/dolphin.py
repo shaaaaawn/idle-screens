@@ -3,13 +3,14 @@ Rig and animate the dolphin: breeds/source/dolphin.glb in, breeds/rig/dolphin.gl
 
     blender -b -P breeds/rig/dolphin.py        (from packages/saver-metaquarium)
 
-Dot's friend. The model is drawn by rig/dolphin-model.mjs in our designer's
-style, and this script treats it as it treats theirs: never edited, only cut
-into parts. It faces -Y, its left +X; voxel centres sit at (2i, 2j, 2k + 1),
-its spine runs along y at z 8.5. Drawn at the house scale (24 cubes long, the
-dori 17): big cubes, so every joint here is a few cubes, not a dozen.
+Dot's friend. The model is drawn by rig/dolphin-model.mjs in our designer's style, and this
+script treats it as it treats theirs: never edited, only cut into parts. It
+faces -Y, its left +X; voxel centres sit at (2i, 2j, 2k + 1). Its body arches
+(head lifted, tail dropping), so the spine's joints are not on one line: the
+drawing writes them, with the cubes of the jaw, flippers and blowhole, to
+rig/dolphin-anatomy.json, and this reads them from there.
 
-    head      the nose, the melon, the smile and the cheeks (rigid to y -9)
+    head      the beak, the melon, the smile and the cheeks (rigid to its knot)
     body      the chest and the back, the dorsal fin riding it
     tail1/2   the tail stock
     flukes    the flat tail fin
@@ -47,6 +48,7 @@ their times and weights, never update(dt)):
 
 The one-shots start and end on the rest pose.
 """
+import json
 import math
 import os
 import sys
@@ -63,13 +65,16 @@ from common import (  # noqa: E402
 )
 
 SOFT = '_soft'
-LINE = 'PAINT-#14243a'  # dolphin-model.mjs LINE
-SPINE_Z = 8.5
-# The soft skin's knots along y (model units): the head rigid to y -9, eased
-# into the body over the neck; the body rigid over the chest; then the tail
-# stock in two links, and the flukes.
-BODY_KNOTS = [(-9.0, 'head'), (-3.0, 'body'), (3.0, 'body'), (10.0, 'tail1'), (16.0, 'tail2'), (20.0, 'flukes')]
-HINGE = (0.0, -17.0, 6.0)   # the jaw's hinge, at the corner of the smile
+# rig/dolphin-model.mjs writes the anatomy beside the model: which cubes are the jaw, the flippers and the
+# blowhole, and where the spine's joints sit (model units, Blender axes). The drawing is the one source.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dolphin-anatomy.json')) as _f:
+    ANATOMY = json.load(_f)
+PARTS = ANATOMY['parts']
+# The soft skin's knots along y: the head rigid to its knot, eased into the body over the neck; the body
+# rigid over the chest; then the tail stock in two links, and the flukes.
+BODY_KNOTS = [(y, bone) for y, bone in ANATOMY['knots']]
+JOINTS = ANATOMY['joints']
+HINGE = (0.0, *ANATOMY['hinge'])   # the jaw's hinge, at the corner of the smile
 
 
 def bone_of(x, y, z, mat):
@@ -79,13 +84,15 @@ def bone_of(x, y, z, mat):
         return f'eye.{side}'
     if mat == 'EYES-Black':
         return f'pupil.{side}'
-    if mat == LINE and k >= 7:
-        return 'blowhole'
-    if abs(i) >= 4 and k <= 1 and -5 <= j <= -3:
-        return f'flipper.{side}'
-    if j <= -9 and k <= 2:
-        return 'jaw'
-    return SOFT
+    return PARTS.get(f'{i},{j},{k}', SOFT)
+
+
+def part_box(part):
+    """The model-unit box of a part's cubes."""
+    cells = [tuple(map(int, c.split(','))) for c, p in PARTS.items() if p == part]
+    lo = [min(2 * c[0] - 1 for c in cells), min(2 * c[1] - 1 for c in cells), min(2 * c[2] for c in cells)]
+    hi = [max(2 * c[0] + 1 for c in cells), max(2 * c[1] + 1 for c in cells), max(2 * c[2] + 2 for c in cells)]
+    return lo, hi
 
 
 def soften(meshes):
@@ -170,18 +177,25 @@ def catchlights(white, rects):
 
 
 def bone_table(eyes):
+    J = JOINTS
+    at = lambda name: (0.0, J[name][0], J[name][1])  # noqa: E731
+    blo, bhi = part_box('blowhole')
+    bx = ((blo[0] + bhi[0]) / 2, (blo[1] + bhi[1]) / 2, blo[2])
     t = {
         'root': ((0, 0, 0), (0, 0, 2), None),
-        'body': ((0, -4, SPINE_Z), (0, 4, SPINE_Z), 'root'),
-        'head': ((0, -6, SPINE_Z), (0, -22, SPINE_Z), 'body'),
-        'jaw': (HINGE, (0, -24, 4), 'head'),
-        'blowhole': ((0, -12, 15), (0, -12, 17), 'head'),
-        'tail1': ((0, 4, SPINE_Z), (0, 12, SPINE_Z), 'body'),
-        'tail2': ((0, 12, SPINE_Z), (0, 19, SPINE_Z), 'tail1'),
-        'flukes': ((0, 19, SPINE_Z), (0, 26, SPINE_Z), 'tail2'),
-        'flipper.L': ((7, -10, 3), (11, -6, 1), 'body'),
-        'flipper.R': ((-7, -10, 3), (-11, -6, 1), 'body'),
+        'body': (at('body'), (0.0, J['body'][0] + 8, J['body'][1]), 'root'),
+        'head': (at('head'), at('tip'), 'body'),
+        'jaw': (HINGE, (0.0, J['tip'][0], HINGE[2] - 2), 'head'),
+        'blowhole': (bx, (bx[0], bx[1], bx[2] + 2), 'head'),
+        'tail1': (at('tail1'), at('tail2'), 'body'),
+        'tail2': (at('tail2'), at('flukes'), 'tail1'),
+        'flukes': (at('flukes'), at('end'), 'tail2'),
     }
+    for side, sgn in (('L', 1), ('R', -1)):
+        lo, hi = part_box(f'flipper.{side}')
+        inner, outer_x = (lo[0], hi[0]) if sgn > 0 else (hi[0], lo[0])
+        # Hinged at the chest (its front, inner, top corner), reaching out, back and down to its tip.
+        t[f'flipper.{side}'] = ((inner, lo[1], hi[2]), (outer_x, hi[1], lo[2]), 'body')
     for s, ((lo, hi), (y0, y1, z0, z1)) in eyes.items():
         side = 'L' if s > 0 else 'R'
         cx, cy, cz = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2
@@ -202,7 +216,7 @@ def stroke(p, w, amp=1.0):
     for bone, lag, a in SPINE:
         p.turn(bone, 'x', a * amp * math.sin(w - lag))
     # The body heaves against the flukes, a little.
-    p.move('body', (0, 0, -0.3 * amp * math.sin(w - 2.6)))
+    p.move('body', (0, 0, -0.5 * amp * math.sin(w - 2.6)))
 
 
 def eyes(p, shut):
@@ -262,7 +276,7 @@ def hover(t, T=2.4):
     for side, m in SIDES:
         p.turn(f'flipper.{side}', 'z', -m * (0.25 + 0.2 * math.sin(w + (0 if m > 0 else math.pi))))
         p.turn(f'flipper.{side}', 'x', 0.15 * math.sin(w))
-    p.move('body', (0, 0, 0.35 * math.sin(w)))
+    p.move('body', (0, 0, 0.6 * math.sin(w)))
     return p
 
 
@@ -319,7 +333,7 @@ def flip(t, T=2.8):
     curl = env(t, 0.2, 0.6, 1.9, 2.4)
     for bone, a in (('head', -0.18), ('tail1', -0.12), ('tail2', -0.18), ('flukes', -0.3)):
         p.turn(bone, 'x', a * curl)
-    p.move('body', (0, 0, 3 * env(t, 0.3, 1.25, 1.25, 2.3)))
+    p.move('body', (0, 0, 5 * env(t, 0.3, 1.25, 1.25, 2.3)))
     flippers(p, out=0.4 * curl)
     eyes(p, 0.6 * env(t, 0.9, 1.1, 1.5, 1.8))
     return p
@@ -344,7 +358,7 @@ def bubble(t, T=2.6):
     p.turn('head', 'x', 0.08 * dip)
     puff = track(t, [(0, 0), (0.5, 0), (0.62, 1), (0.9, 1.0), (1.2, 0)])
     p.scale['blowhole'] = (1 + 0.8 * puff, 1 + 0.8 * puff, 1 + 0.5 * puff)
-    p.move('body', (0, 0, -0.35 * puff))
+    p.move('body', (0, 0, -0.6 * puff))
     # Then it looks up after the bubble (the tank lifts its gaze too).
     p.turn('head', 'x', -0.16 * env(t, 1.0, 1.4, 2.0, 2.5))
     eyes(p, blinking(t, 0.55))

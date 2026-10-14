@@ -642,6 +642,9 @@ describe('bundled breeds (breeds/README.md)', () => {
     const model = await import('../breeds/rig/dolphin-model.mjs') as { voxels: () => [number, number, number, string][] };
     const want = new Map<string, number>();
     for (const v of model.voxels()) want.set(v[3], (want.get(v[3]) ?? 0) + 12);
+    // And the anatomy it wrote for the rig (rig/dolphin-anatomy.json) is this drawing's.
+    const drawn = (model as unknown as { draw: () => { anatomy: unknown } }).draw().anatomy;
+    expect(JSON.parse(readFileSync(here('../breeds/rig/dolphin-anatomy.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(drawn)));
     const doc = await new NodeIO().read(here('../breeds/source/dolphin.glb').pathname);
     const got = new Map<string, number>();
     for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) got.set(p.getMaterial()!.getName(), p.getIndices()!.getCount() / 3);
