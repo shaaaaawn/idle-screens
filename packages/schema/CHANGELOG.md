@@ -1,5 +1,12 @@
 # @idle-screens/schema
 
+## 3.12.1
+
+### Patch Changes
+
+- 338a4cb: Field `quantize` / `octaves` glides step through whole levels (X477): a timeline key, steer or morph gliding `background.quantize` 0 → 6 no longer fails validation mid-glide — in-between values round, and a `quantize` under 1.5 resolves to 0 (smooth), as the painter already drew it. New `layout-text-overlap` advisory (X214) when cells of one `list`/`table` text layer overlap because the `gap` pitch is narrower than the labels; it names the gap that clears them. FORMAT.md: the 800-entity total in the `layers[]` table, the `wander.meander` cap (0.463), `pulse.amp` is added to alpha, `spin`'s start angle comes from the shared seeded stream, text layers have no `colors`, `gap` is a pitch, polygons fill nonzero (holes need reversed winding), keyed `points` stay in the unit box scaled by the seeded radius, ring width is centred on the radius, and `font` uses installed faces only.
+- 0442656: Renderer fixes for live-vs-intent divergences. `rect.feather` paints one smooth separable falloff instead of six stepped nested fills (X383); a still or drifting feathered rect is pre-rendered once per entity (rotation baked in) and copied 1:1, so it costs less than the old fills, and feathered rects with `alpha < 1` now draw at their authored alpha (the old fills over-composited the core). A `taper` stroke fills its outline once, so a wide translucent mark no longer beads at every segment joint (X386). `trail` echoes of shaped sprites (polygon, stroke, rect, ring, streak, bar) draw the sprite's own shape at the echo's time instead of discs (X387). A hard circle's trail is one continuous tapering ribbon instead of spaced dots (X469), falling back to its echo discs when a layer's ribbons would cover more than a tenth of the screen; soft-circle trails gap-fill within a small per-layer budget. Frame time on a 4×-throttled CPU stays within ~10 % of the previous renderer for trailed and feathered scenes, apart from a single fast ribbon (+1.5 ms) and colour-gliding feathered rects (+1.7 ms with 30 rects). Perception samples trails through the same sampler.
+
 ## 3.12.0
 
 ### Minor Changes

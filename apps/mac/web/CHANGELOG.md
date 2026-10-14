@@ -1,5 +1,18 @@
 # @idle-screens/mac-web
 
+## 0.0.31
+
+### Patch Changes
+
+- Updated dependencies [b0eeba1]
+- Updated dependencies [ba477b6]
+- Updated dependencies [01c9529]
+- Updated dependencies [338a4cb]
+- Updated dependencies [0442656]
+  - @idle-screens/saver-metaquarium@0.18.0
+  - @idle-screens/schema@3.12.1
+  - @idle-screens/savers-classic@3.2.4
+
 ## 0.0.30
 
 ### Patch Changes

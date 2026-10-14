@@ -1,5 +1,26 @@
 # @idle-screens/saver-metaquarium
 
+## 0.18.0
+
+### Minor Changes
+
+- 01c9529: Vignettes and the frame state, from agent feedback:
+  
+  - **Floor creatures stay on the floor as actors (X490).** A snail, crab, starfish or octopus cast as a vignette actor stands at its marks on the floor instead of hovering at the open stage's swim height, level while it travels; a snail glides between marks with its foot's wave keeping time with the walk. Crab, starfish and octopus actors keep their idle clip (they slide between marks, as before, now on the floor); gestures that lift a swimmer (hop, rest) no longer lift them.
+  - **`ink` gesture (X440).** An octopus actor squirts a cloud of ink on cue (`a ink`), reporting `doing: "ink"` in `frame.state.fish[i]`. Any other breed ignores it with a console warning and a `validateMetaquariumParams` problem.
+  - **A later `=mark` snaps at its beat's start (X444a)**, as `=` means "be there, no travel"; headings, paces, dodges, Dot's steps and the follow camera's trail no longer read velocity across the cut. The shipped presets are unchanged (pinned by a golden test).
+  - **Actors ignore maneuvers (X441):** no flurry, no kick, not counted as `maneuvering`.
+  - **Interior marks scale with the room (X447):** `max(crystalScale, 0.85)`, the room's own scale, so below 0.85 the marks stay on the furniture.
+  - **Light shafts move (X122):** each shaft breathes on its own phase and sways slowly (~0.03 rad) about its source. Shaft positions are unchanged.
+  - **`frame.state.camera.bearing` (X438):** where the camera stands now (cameraAzimuth turned by autoRotate, plus a shot's own swing; null while a follow camera rides with a fish). `azimuth` stays the param.
+  - **`frame.state.fish[i].shell` (X491):** the shell each snail wears as dressed.
+  - Guide and README: interior mark table (bearing, distance, height), `=`/`circle` semantics, house lights under `spotStrength`, starfishDance under autoRotate, geodeHomes tier cap, floraDensity's shared budget.
+
+### Patch Changes
+
+- b0eeba1: A dolphin: Dot's friend (experimental). Drawn in-house in the designer's voxel style (breeds/rig/dolphin-model.mjs) after the cartoon dolphins, at the shark's grain: its body a smooth spline — an arched centreline and a thickness that swells from a short rounded beak into a round melon and tapers in one curve to a slim tail — so the cubes follow clean curves; a rich blue back over a soft pale belly, a smile curving up to big round eyes with a blush behind, a blowhole, a tall curved dorsal fin, flippers swept back along the chest and FLAT crescent flukes, so it reads as a dolphin, never a shark. Rigged in Blender (breeds/rig/dolphin.py): one soft body that strokes up and down as a dolphin does, a jaw that chatters, flippers, a blowhole, eyes that blink and squint, pupils with catchlights on the outer face of each eye. src/dolphin.ts swims it: strokes phased by the distance swum, coasting glides, hovering, bursts, and a personality (playful, chatty, curious, show-off) that picks its moments — chatter, nod, shake, wave, bubble (it lets a bubble go from its blowhole), spin and flip — slowing for them and turning an eye to you for the friendly ones; its pupils look at you, ahead, up after its bubble, and at its friend in a vignette, where it plays talk, nod, hop, spin, wiggle and peek with its own body. Castable as `dolphin` / id 613.
+- ba477b6: Dot's arms and legs keep step at any hour. As a vignette actor its walk and run took their phase from `t × speed`, so whenever the script eased its pace the legs raced, faster the longer the screen had been running (hours into a channel they whirled). They now follow the distance the script has actually walked it (`actorTravel`, a per-script table over one loop, a closed form). A turn on the spot now always steps forward with the walk (it stepped forward then back, and used the run cycle after a run). The glitch shiver is ~5 Hz instead of ~15 Hz, a body shaking rather than a blur.
+
 ## 0.17.0
 
 ### Minor Changes
