@@ -39,7 +39,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraFollow: 'Ride with one fish (cast slot, 0 = first); -1 is the orbit camera. Orbit params are ignored while following. Pair with `followSpot` on the same slot for a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
   followDistance: 'How far behind the followed fish the camera rides, along its own path (40–70 a chase). Under ~18 it is the fish\'s eye and the fish is hidden.',
-  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing is where the camera stands now; camera.azimuth stays the param.',
+  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
@@ -53,7 +53,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   swimVariance: 'How differently individual fish swim from one another (speed, phase).',
   fishSize: 'Every fish bigger or smaller, over each breed\'s own size (a shark is 2.2× a minted fish, a babyfish 0.45×).',
   sizeVariance: 'How much fish of one breed differ in size: 0 all alike, 1 from about half to nearly double.',
-  maneuver: 'Which set-piece moves the cast may break into. Vignette actors (slots 0–2) keep their marks during maneuvers: the script owns their position and facing.',
+  maneuver: 'Which set-piece moves the cast may break into. Vignette actors (slots 0–2) keep their marks: the script owns them.',
   maneuverRate: 'How often maneuvers happen.',
   maneuverIntensity: 'How big they are.',
   bodyWiggle: 'Body yaw while swimming, for models without an animation clip. A fish the swim wave bends (`swimWave` > 0) ignores it.',
@@ -67,7 +67,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode: the sunlit water on their backs, the water around on their flanks, the floor under their bellies, mirrored in metal plates. Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
-  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat. Each keeps its own coat\'s hue (glow darkens it), so glowing snails differ in colour; frame.state.fish[i].shell reports each.',
+  snailShell: 'What the snails\' shells are made of: `banded` (the coat with a spiral, as drawn), `pearl` (iridescent nacre: a rainbow sheen that slides as it turns), `gold` (polished metal), `glow` (a dark shell whose spiral breathes light — best at night). `mix` (default): each snail its own. Lit fish only: flat lighting and the neon look keep the banded coat. Glow keeps each coat\'s hue; frame.state.fish[i].shell says which.',
   starfishDance: 'Starfish dance: `aerobics` stands every starfish up in a class facing the camera (an instructor in front) dancing a routine in unison — march, jacks, reaches, kicks, twists, arm circles, disco, a spin; `freestyle`, each its own move every eight counts; `duet`, the partner dance (Dirty Dancing): couples face to face — the basic, a sway, a twirl, the dip, and the lift — best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. Cast a few: `fishMix: starfish:7`. Best with `shot: front`, `autoRotate: 0`, a bright room. `off` (default): they crawl, walk upright and wave on their own. The class re-faces the live camera every frame: under autoRotate it stays put on screen while the room turns behind it (a follow camera uses cameraAzimuth).',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
@@ -179,8 +179,8 @@ vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
           home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).
           Marks indoors (interior: geode): ${Object.keys(INTERIOR_MARKS).join(' ')}
-          rug, centre: the middle; chandelier overhead; the rest bearing°/distance/height (0° = +x, 90° = +z), all ×max(crystalScale, 0.85):
-          ${Object.entries(INTERIOR_MARK_POLAR).map(([n, p]) => `${n} ${p.deg}°/${p.r}/${p.y}${p.note ? ` (${p.note})` : ''}`).join(' · ')}
+          rug centre: middle; chandelier: overhead; others bearing°/distance/height (0°=+x, 90°=+z), ×max(crystalScale, 0.85):
+          ${Object.entries(INTERIOR_MARK_POLAR).map(([n, p]) => `${n} ${p.deg}/${p.r}/${p.y}`).join(' · ')}
 `.trim();
 
 export interface Recipe {
