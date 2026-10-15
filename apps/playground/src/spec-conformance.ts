@@ -114,13 +114,13 @@ export function correlate(a: readonly number[], b: readonly number[]): number {
  * would otherwise have to absorb.
  */
 export function compareGrids(analytic: LuminanceGrid, pixel: LuminanceGrid): ConformanceAgreement {
-  const dev = (g: LuminanceGrid): number[] => {
+  const dev = (g: LuminanceGrid & { backgroundCells?: number[] }): number[] => {
     const out = new Array<number>(g.cells.length);
     for (let r = 0; r < g.rows; r++) {
       const bg = g.background?.[r] ?? 0;
       for (let c = 0; c < g.cols; c++) {
         const i = r * g.cols + c;
-        out[i] = Math.abs((g.cells[i] ?? 0) - bg);
+        out[i] = Math.abs((g.cells[i] ?? 0) - (g.backgroundCells?.[i] ?? bg));
       }
     }
     return out;
@@ -169,7 +169,15 @@ export async function specConformance(
   const seed = ((opts.seed ?? spec.seed ?? 42) >>> 0) || 1;
   const t = opts.t ?? 5000;
 
-  const frame = await perceiveSaverFrame(compileSaver(spec), { width, height, seed, t, includeGrid: true });
+  // The pixel side measures against the scene's REAL background: the same spec
+  // with its layers replaced by one invisible placeholder, rendered the same
+  // way. A per-row estimate reads full-width bands and washes as background
+  // (perception-lab BUG-02). Alpha 0 on the real layers is not enough — `pulse`
+  // adds its amplitude on top.
+  const { timeline: _tl, groups: _gr, ...ground } = spec as SaverSpec & { timeline?: unknown; groups?: unknown };
+  const bgSpec = { ...ground, layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.0005, 0.0005], color: '#000000' }, alpha: [0, 0], motion: { type: 'static' } }] } as unknown as SaverSpec;
+  const bgFrame = await perceiveSaverFrame(compileSaver(bgSpec), { width, height, seed, t, includeGrid: true }).catch(() => null);
+  const frame = await perceiveSaverFrame(compileSaver(spec), { width, height, seed, t, includeGrid: true, knownBackground: bgFrame?.grid?.cells });
   const analytic = luminanceGrid(spec, { viewport: { width, height }, seed, t });
 
   if (!frame.grid) {
