@@ -153,15 +153,32 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
  * shorthand containing a px size overrides the seeded per-entity size.
  * Returns the box CENTRE (accounting for align/baseline) and half-extents.
  */
+/**
+ * The renderer's font scale (compile.ts fontScale): a font's own px size is
+ * authored for the reference viewport and drawn at min(w, h) / reference of it.
+ */
+function fontScaleFor(spec: SaverSpec, w: number, h: number): number {
+  return spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
+}
+
+/** Px size a text sprite draws at: its font's px × the font scale, else the entity's size. */
+function textFontPx(s: Extract<LayerSpec['sprite'], { kind: 'text' }>, size: number, fontScale: number): number {
+  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+  return m ? Number(m[1]) * fontScale : size;
+}
+
 function textBox(
   s: Extract<LayerSpec['sprite'], { kind: 'text' }>,
   e: Entity,
   p: { x: number; y: number },
+  fontScale: number,
+  unitScale: number,
 ): { cx: number; cy: number; halfX: number; halfY: number } {
-  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
-  const fh = m ? Number(m[1]) : e.size;
+  const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
-  const fw = Math.max(fh, 0.62 * fh * Math.min(str.length, 48));
+  // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
+  const est = Math.max(fh, 0.62 * fh * Math.min(str.length, 48));
+  const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';
   return {
@@ -592,7 +609,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       let halfX = sz / 2;
       let halfY = s.kind === 'rect' ? ((e.size2 ?? sz) * (e.size > 0 ? sz / e.size : 1)) / 2 : sz / 2;
       if (s.kind === 'text') {
-        const box = textBox(s, e, p);
+        const box = textBox(s, e, p, fontScaleFor(spec, w, h), scale);
         centerX = box.cx;
         centerY = box.cy;
         halfX = box.halfX;
@@ -895,8 +912,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     }
     if (layer.sprite.kind !== 'text') return;
     const s = layer.sprite;
-    const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
-    const sizePx = m ? Number(m[1]) : entities[0] ? sizeAt(entities[0], t) : 0;
+    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h));
     out.push({ layerIndex, key: layer.key, strings: [...s.strings], count: entities.length, sizePx: Math.round(sizePx) });
   });
   return out;
@@ -1018,7 +1034,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
-        const box = textBox(s, e, { x: 0, y: 0 });
+        const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
