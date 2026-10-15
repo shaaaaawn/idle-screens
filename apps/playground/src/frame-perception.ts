@@ -80,17 +80,16 @@ function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
-/**
- * Downsample an ImageData into the same LuminanceGrid the analytic path emits,
- * so `renderBrailleMap` / `renderDensityMap` can be reused verbatim.
- *
- * Background is inferred per row (see BG_QUANTILE) because, unlike the analytic
- * path, there is no declared background to read.
- */
 /** A grid whose background is known per cell (the scene's own, rendered), not estimated per row. */
 export type KnownBackgroundGrid = LuminanceGrid & { backgroundCells?: number[] };
 
 /**
+ * Downsample an ImageData into the same LuminanceGrid the analytic path emits,
+ * so `renderBrailleMap` / `renderDensityMap` can be reused verbatim.
+ *
+ * Background is inferred per row (see BG_QUANTILE) unless `knownBackground` is
+ * given, because, unlike the analytic path, there is no declared background to read.
+ *
  * `knownBackground`: the scene's background as a `cols × rows` cell grid (e.g.
  * the same spec rendered with no visible layers). When given, coverage,
  * centroid and profiles measure against it cell by cell. Without it the
