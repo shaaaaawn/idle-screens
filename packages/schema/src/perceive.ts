@@ -693,7 +693,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // to the area the box covers. Without this a 2 px scan line darkened
       // its whole 22 px grid row at full alpha, and 270 of them read as a
       // black veil (mean 0.035 where the canvas paints 0.41).
-      const byArea = s.kind === 'rect' || s.kind === 'bar';
+      const byArea = s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock';
       for (let r = r0; r <= r1; r++) {
         const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
         if (fy <= 0) continue;
@@ -724,7 +724,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else if (byArea) {
             const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
-            if (fx > 0) compose(r * cols + c, lum, a * shapeWeight * fx * fy, layer.blend);
+            if (fx > 0) compose(r * cols + c, lum, a * inkWeight * shapeWeight * fx * fy, layer.blend);
           } else {
             compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
