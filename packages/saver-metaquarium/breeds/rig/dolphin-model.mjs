@@ -42,8 +42,9 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const CAPE = 'PAINT-#1f6fd1';
-export const BELLY = 'PAINT-#d9ecfa';
+// The body is SKIN- (lit as a coat: its faces shade by where they point); the accents are PAINT- (they glow a little, to pop).
+export const CAPE = 'SKIN-#1f6fd1';
+export const BELLY = 'SKIN-#d9ecfa';
 export const LINE = 'PAINT-#0f2238';
 export const TONGUE = 'PAINT-#ff6f8e';
 export const BLUSH = 'PAINT-#ff8fb0';

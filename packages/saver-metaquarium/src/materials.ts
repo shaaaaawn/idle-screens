@@ -420,6 +420,20 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         decal(kept, 1);
         return kept;
       }
+      // SKIN-#rrggbb: a character's own coat — that colour on every fish, lit
+      // exactly as a coat is (Lambert, no glow of its own), so its faces shade
+      // by where they point. PAINT- glows (below), which suits a stripe and
+      // flattens a whole body into a cut-out (the dolphin's, up close beside a tang).
+      const skin = /^SKIN-(#[0-9a-f]{6})$/i.exec(m.name);
+      if (skin) {
+        const sc = new Color(skin[1]);
+        // Under the neon look, near black with a breath of its hue, as a coat is.
+        const c = neonColor ? sc.clone().multiplyScalar(0.07).lerp(NEON_DARK, 0.4) : sc;
+        const coatLike = lit ? new MeshLambertMaterial({ color: c }) : new MeshBasicMaterial({ color: c });
+        coatLike.name = m.name;
+        coatLike.userData.mqOwned = true;
+        return coatLike;
+      }
       // PAINT-#rrggbb: a part in a colour of the intake's choosing, the same on
       // every fish (the babyfish's stripe, sunny yellow on its candy coat).
       const paint = /^PAINT-(#[0-9a-f]{6})$/i.exec(m.name);
