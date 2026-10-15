@@ -1,7 +1,7 @@
 import { AnimationClip, Bone, Group, Vector3, VectorKeyframeTrack } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  BUBBLE_AT, DOLPHIN_CATCH, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
+  BUBBLE_AT, DOLPHIN_CATCH, dolphinTurn, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
   dolphinGaze, dolphinHold, dolphinLook, dolphinMoment, dolphinPersonality, MOMENT_LENGTH, PUPIL_SLIDE, pupilSlide, rigDolphin,
   type DolphinRig,
 } from './dolphin';
@@ -141,6 +141,41 @@ describe('dolphin: its moments', () => {
     const b = dolphinFrame(rig, start + BUBBLE_AT + 0.6, index, 0, cruising).bubble!;
     expect(a.key).toBe(b.key);
     expect(a.t).toBeCloseTo(start + BUBBLE_AT, 6);
+  });
+});
+
+describe('dolphin: a flip and a roll turn the whole dolphin, smoothly', () => {
+  it('the turn runs from rest to a whole turn with no step, easing in and out', () => {
+    for (const [m, T, L] of [['flip', FLIP_TURN, MOMENT_LENGTH.flip], ['spin', SPIN_TURN, MOMENT_LENGTH.spin]] as const) {
+      const at = (t: number): number => { const r = dolphinTurn(m, t); return m === 'flip' ? r.pitch : r.roll; };
+      expect(Math.abs(at(0))).toBe(0);
+      expect(at(L)).toBeCloseTo(T.angle, 9);
+      let prev = at(0), top = 0;
+      for (let t = 0.01; t <= L; t += 0.01) {
+        const a = at(t), step = Math.abs(a - prev);
+        top = Math.max(top, step);
+        expect(Math.sign(a - prev) * Math.sign(T.angle)).toBeGreaterThanOrEqual(0); // always the one way: never unwinds
+        prev = a;
+      }
+      // The fastest 10 ms is a gentle step (≈ 1.9 × the average), never a jump.
+      expect(top).toBeLessThan((Math.abs(T.angle) / ((T.to - T.from) / 0.01)) * 2);
+      // At rest before and after: the clip's ends match the swim it blends with.
+      expect(Math.abs(at(T.from - 0.05))).toBe(0);
+      expect(at(T.to + 0.05)).toBeCloseTo(T.angle, 9);
+    }
+    expect(dolphinTurn('chatter', 1)).toEqual({ pitch: 0, roll: 0 });
+  });
+
+  it('plays the turn whatever the moment\'s weight, once, and reports it with the state', () => {
+    const rig = rigged();
+    // A vignette's hop at a quarter weight still turns the whole way (a partial turn would unwind).
+    const s = dolphinFrame(rig, 100, 0, 0, { pace: 0, flurry: 0, actor: true, gesture: { name: 'hop', at: 1.25, weight: 0.25 } });
+    expect(s.turn.pitch).toBeCloseTo(dolphinTurn('flip', 1.25).pitch, 9);
+    // Held past its clip it does not flip again: it rests at the whole turn.
+    const late = dolphinFrame(rig, 100, 0, 0, { pace: 0, flurry: 0, actor: true, gesture: { name: 'hop', at: MOMENT_LENGTH.flip + 1, weight: 1 } });
+    expect(late.turn.pitch).toBeCloseTo(FLIP_TURN.angle, 9);
+    expect(rig.actions.flip.time).toBeCloseTo(MOMENT_LENGTH.flip - 1e-4, 6);
+    expect(dolphinFrame(rig, 100, 0, 0, { pace: 1, flurry: 0, actor: true }).turn).toEqual({ pitch: 0, roll: 0 });
   });
 });
 
