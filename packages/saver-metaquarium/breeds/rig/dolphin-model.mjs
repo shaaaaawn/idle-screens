@@ -254,17 +254,36 @@ const FACES = [
   [2, -1, [[-1, -1, -1], [-1, 1, -1], [1, 1, -1], [1, -1, -1]]],
 ];
 
+/**
+ * Ambient occlusion, per corner of every face (the classic voxel rule): of the three cubes that sit just
+ * outside the face round that corner — the two along its edges and the one across its diagonal — how
+ * many are there. Both edges blocked is fully tucked in. Written as a grey (COLOR_0) the tank multiplies
+ * over a SKIN- part, so every crease, step and joint darkens a little and the stair-steps of a curved
+ * body read as sculpted, not pixelated.
+ */
+export const AO_LEVELS = [1, 0.8, 0.66, 0.55];
+export function aoAt(solid, cell, axis, sign, corner) {
+  const [u, v] = [0, 1, 2].filter((a) => a !== axis);
+  const out = [...cell]; out[axis] += sign;
+  const at = (du, dv) => { const q = [...out]; q[u] += du; q[v] += dv; return solid.has(q.join(',')) ? 1 : 0; };
+  const s1 = at(corner[u], 0), s2 = at(0, corner[v]), c = at(corner[u], corner[v]);
+  return AO_LEVELS[s1 && s2 ? 3 : s1 + s2 + c];
+}
+
 export function build() {
   const doc = new Document();
   const buffer = doc.createBuffer();
   const scene = doc.createScene('Scene');
   const byMat = new Map();
-  for (const v of voxels()) (byMat.get(v[3]) ?? byMat.set(v[3], []).get(v[3])).push(v);
+  const all = voxels();
+  const solid = new Set(all.map((v) => `${v[0]},${v[1]},${v[2]}`));
+  for (const v of all) (byMat.get(v[3]) ?? byMat.set(v[3], []).get(v[3])).push(v);
   for (const [name, spec] of Object.entries(MATERIALS)) {
     const cells = byMat.get(name) ?? [];
     if (!cells.length) continue;
     const mat = doc.createMaterial(name).setBaseColorFactor([...spec.color, 1]).setRoughnessFactor(spec.roughness ?? 0.5).setMetallicFactor(spec.metal ?? 0);
-    const pos = [], nrm = [], idx = [];
+    const pos = [], nrm = [], idx = [], col = [];
+    const shaded = name.startsWith('SKIN-');
     for (const [i, j, k] of cells) {
       const c = [2 * i, 2 * j, 2 * k + 1]; // Blender centre
       for (const [axis, sign, quad] of FACES) {
@@ -272,6 +291,7 @@ export function build() {
         for (const q of quad) {
           const b = [c[0] + q[0], c[1] + q[1], c[2] + q[2]];
           pos.push(b[0], b[2], -b[1]); // Blender → glTF
+          if (shaded) { const g = aoAt(solid, [i, j, k], axis, sign, q); col.push(g, g, g); }
         }
         const n = [0, 0, 0]; n[axis] = sign;
         for (let m = 0; m < 4; m++) nrm.push(n[0], n[2], -n[1]);
@@ -282,6 +302,7 @@ export function build() {
       .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pos)).setBuffer(buffer))
       .setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(nrm)).setBuffer(buffer))
       .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(idx)).setBuffer(buffer));
+    if (shaded) prim.setAttribute('COLOR_0', doc.createAccessor().setType('VEC3').setArray(new Float32Array(col)).setBuffer(buffer));
     const mesh = doc.createMesh(`Dolphin-${name}`).addPrimitive(prim);
     scene.addChild(doc.createNode(`Dolphin-${name}`).setMesh(mesh));
   }

@@ -430,6 +430,8 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         // Under the neon look, near black with a breath of its hue, as a coat is.
         const c = neonColor ? sc.clone().multiplyScalar(0.07).lerp(NEON_DARK, 0.4) : sc;
         const coatLike = lit ? new MeshLambertMaterial({ color: c }) : new MeshBasicMaterial({ color: c });
+        // Baked ambient occlusion (a per-corner grey, COLOR_0: breeds.json `ao`): creases and steps darken.
+        coatLike.vertexColors = !!mesh.geometry.getAttribute('color');
         coatLike.name = m.name;
         coatLike.userData.mqOwned = true;
         return coatLike;

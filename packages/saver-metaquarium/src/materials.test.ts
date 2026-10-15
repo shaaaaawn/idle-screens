@@ -536,6 +536,13 @@ describe('SKIN- (a character\'s own coat: the dolphin)', () => {
     expect(skin!.emissive.getHex()).toBe(0);
     expect(paint!.emissive.getHex()).not.toBe(0);
     expect(dress(3, false)[0]!.type).toBe('MeshBasicMaterial');
+    // Without baked occlusion it reads no vertex colours; with it (COLOR_0 → 'color'), it multiplies them in.
+    expect(skin!.vertexColors).toBe(false);
+    const shaded = part('SKIN-#1f6fd1');
+    shaded.geometry.setAttribute('color', new Float32BufferAttribute(new Array(shaded.geometry.getAttribute('position').count * 3).fill(0.8), 3));
+    const r2 = new Group(); r2.add(shaded);
+    applyNpcMaterials(r2, createRng(3), true, true);
+    expect((shaded.material as MeshLambertMaterial).vertexColors).toBe(true);
     // Neon: near black with a breath of its own hue.
     const [neon] = dress(3, true, true);
     const hsl = { h: 0, s: 0, l: 0 }; neon!.color.getHSL(hsl);

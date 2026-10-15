@@ -99,7 +99,7 @@ function bytes(w) {
   return b;
 }
 
-function greedy(doc, voxel, swim, spine = swim, mergeBends = true) {
+function greedy(doc, voxel, swim, spine = swim, mergeBends = true, ao = false) {
   // Parts are not all on one lattice (baked instances sit at offsets like
   // 5.91), so each plane's grid carries its own phase along both of its axes.
   // Decoded Draco positions carry float noise (2.9985 for 3), so the phase is
@@ -171,6 +171,9 @@ function greedy(doc, voxel, swim, spine = swim, mergeBends = true) {
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
     const name = p.getMaterial()?.getName() ?? '';
     if (isEye(name)) continue;
+    // Baked ambient occlusion (breeds.json `ao`): every corner its own shade, so faces stay as drawn —
+    // a merged rectangle would smear its corners' greys across the whole face.
+    if (ao && p.getAttribute('COLOR_0')) continue;
     const planes = new Map(); const loose = [];
     const jAttr = p.getAttribute('JOINTS_0'), wAttr = p.getAttribute('WEIGHTS_0');
     const skinAt = new Map();
@@ -301,10 +304,10 @@ function dropRestChannels(doc) {
 
 /** Flat normals from the (unindexed) triangles; every other vertex attribute but UVs on textured
  *  materials and a rig's joints/weights goes. */
-function flatNormals(doc, keepUv = false) {
+function flatNormals(doc, keepUv = false, keepColor = false) {
   for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitives()) {
     const textured = keepUv || !!p.getMaterial()?.getBaseColorTexture();
-    const keep = (sem) => sem === 'POSITION' || (textured && sem === 'TEXCOORD_0') || sem === 'JOINTS_0' || sem === 'WEIGHTS_0';
+    const keep = (sem) => sem === 'POSITION' || (textured && sem === 'TEXCOORD_0') || sem === 'JOINTS_0' || sem === 'WEIGHTS_0' || (keepColor && sem === 'COLOR_0');
     for (const sem of p.listSemantics()) if (!keep(sem)) p.setAttribute(sem, null);
     const pos = p.getAttribute('POSITION').getArray(); const nrm = new Float32Array(pos.length);
     for (let t = 0; t < pos.length; t += 9) {
@@ -401,7 +404,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
     if (buried) console.log(`${breed.padEnd(11)} culled ${buried} buried faces`);
     // The swim-axis rule protects the body wave, which never bends a skinned
     // mesh (swimwave.ts): a rig's parts are rigid, so they merge every way.
-    greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim, spec.mergeBends !== false);
+    greedy(doc, pitchOf(doc), rigged ? -1 : swim, swim, spec.mergeBends !== false, !!spec.ao);
   } else if (spec.kind === 'asis') {
     // Geometry exactly as the source has it (a texture atlas's UVs would not
     // survive a merge or a simplify): only the clean-up below.
@@ -409,7 +412,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
   } else {
     await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: Math.min(1, spec.triBudget / before.tris), error: spec.error ?? 0.002, lockBorder: false }), unweld());
   }
-  flatNormals(doc, spec.keepUv);
+  flatNormals(doc, spec.keepUv, !!spec.ao);
   if (rigged && spec.splitByBone) splitByBone(doc, spec.splitByBone);
   if (rigged) {
     dropRestChannels(doc);
@@ -418,7 +421,7 @@ for (const [breed, spec] of Object.entries(manifest.breeds)) {
       node.setExtras(Object.fromEntries(Object.entries(node.getExtras()).filter(([k]) => k.startsWith('mq'))));
     }
   }
-  await doc.transform(weld(), dedup(), ...(rigged ? [resample({ tolerance: 1e-4 })] : []), prune({ keepAttributes: !!spec.keepUv }));
+  await doc.transform(weld(), dedup(), ...(rigged ? [resample({ tolerance: 1e-4 })] : []), prune({ keepAttributes: !!spec.keepUv || !!spec.ao }));
   const after = stats(doc);
   const clips = doc.getRoot().listAnimations().map((a) => a.getName());
   const bytes = await io.writeBinary(doc);
