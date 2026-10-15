@@ -557,11 +557,14 @@ describe('perceiveScene across all shipped examples', () => {
   it('every example is perceivable: dots on the map, non-zero coverage, sane bundle', () => {
     for (const s of EXAMPLE_SPECS) {
       const p = perceiveScene(s);
-      // Non-zero, not "over 0.1%": sparse-night's stars are sub-cell points, and
-      // rendered pixels put NO 80×48 cell over the coverage step (max deviation
-      // 0.026 — perception-lab, 2026-10-15). The old floor held only because the
-      // grid lit every touched cell at full weight (claiming 1.2–2.3%).
-      expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0);
+      // sparse-night's stars are sub-cell points, and rendered pixels put NO
+      // 80×48 cell over the coverage step (max deviation 0.026). Its coverage
+      // is therefore 0 on canvas, and since discs lay their true ink
+      // (perception-lab S1-09) the readout agrees. The old floors (> 0.001,
+      // then > 0) held only because the grid over-lit sub-cell dots. Every
+      // other example must still show coverage, and every one shows dots.
+      if (s.id === 'sparse-night') expect(p.coverage, `${s.id} coverage`).toBeGreaterThanOrEqual(0);
+      else expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0);
       expect([...p.braille].some((ch) => ch !== BLANK_BRAILLE && ch !== '\n'), `${s.id} braille has dots`).toBe(true);
       expect(p.dominance.length).toBe(s.layers.length);
       expect(p.motion.length).toBe(s.layers.length);
