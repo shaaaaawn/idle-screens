@@ -366,6 +366,13 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * falloff, background drift is sampled at its rest position. Good enough to
  * perceive composition, focus, balance — and now smear.
  */
+/** The canvas's soft-sprite alpha at radius fraction u: stops 1 @ 0, 0.75 @ 0.35, 0 @ 1 (compile.ts). */
+function softProfile(u: number): number {
+  if (u <= 0) return 1;
+  if (u >= 1) return 0;
+  return u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65);
+}
+
 /**
  * Fraction (0..1) of the cell [x0, x0+cw) × [y0, y0+ch) covered by the annulus
  * rInner ≤ |p − (cx, cy)| ≤ rOuter (rInner 0 = a disc). Exact 0/1 when the cell
@@ -491,7 +498,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
           const dy = (r + 0.5) * cellH - pos.y;
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d > rad + Math.min(cellW, cellH) / 2) continue;
-          const wgt = soft ? Math.max(0.1, 1 - d / Math.max(rad, 1e-6)) : 1;
+          const wgt = soft ? softProfile(d / Math.max(rad, 1e-6)) : 1;
           compose(r * cols + c, lum, Math.min(1, a * wgt), layer.blend);
         }
       }
@@ -678,9 +685,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
       // falloff outside the solid core, so coverage tracks what the audience
       // actually sees. Non-additive / hard-edged sprites are unchanged.
-      const glow = soft && additive;
-      const reachX = glow ? halfX * GLOW_SPREAD : halfX;
-      const reachY = glow ? halfY * GLOW_SPREAD : halfY;
+      // The canvas draws a soft sprite as a radial gradient that ends AT its
+      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
+      const glow = false;
+      void additive;
+      const reachX = halfX;
+      const reachY = halfY;
       const c0 = Math.max(0, Math.floor((centerX - reachX) / cellW));
       const c1 = Math.min(cols - 1, Math.floor((centerX + reachX) / cellW));
       const r0 = Math.max(0, Math.floor((centerY - reachY) / cellH));
@@ -719,7 +729,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
               // contrast — light it by the covered area, as rect/bar already are.
               const frac = annulusCellFraction(centerX, centerY, halfX, inner, c * cellW, r * cellH, cellW, cellH);
               if (frac <= 0) continue;
-              wgt = (soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1) * frac;
+              wgt = (soft ? softProfile(d / Math.max(halfX, 1e-6)) : 1) * frac;
             }
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else if (byArea) {
