@@ -1,4 +1,4 @@
-# Gaps — run-2026-10-15T0435-baseline
+# Gaps — run-2026-10-15T0613-baseline
 
 Label: **baseline re-run**
 Suite median: **0.921**
@@ -34,9 +34,9 @@ Collapsed benchmarks: (none)
 - mondrian: 0.912
 - hokusai: 0.925
 - klimt: 0.972
-- rothko: 0.939
+- rothko: 0.930
 - kusama: 0.905
-- magritte: 0.984
+- magritte: 0.968
 - malevich: 0.937
 - okeeffe: 0.968
 - basquiat: 0.893

@@ -21,21 +21,23 @@ import { test, expect, type Page } from '@playwright/test';
  * | fixture | cell | row | col | centroid | coverage ratio |
  * | --- | --- | --- | --- | --- | --- |
  * | radial streaks | .83–.89 | .90–.97 | .94–.95 | <.010 | 0.99–1.02 |
- * | soft discs | .98–.99 | .99 | .99–1.0 | <.007 | 1.12–1.14 (was 0.71–0.74) |
- * | hard discs | .99 (was .85) | .99–1.0 | 1.0 | <.004 | 1.02–1.05 |
- * | rings on a gradient | .76–.79 (was .67–.73) | .94–.98 | .94–.96 | <.009 | 1.00–1.03 (was 1.38–1.45) |
+ * | soft discs | .99 | .99 | .99–1.0 | <.007 | 1.03–1.04 (was 0.71–0.74) |
+ * | hard discs | .99 (was .85) | .99–1.0 | 1.0 | <.004 | 1.01–1.03 |
+ * | rings on a gradient | .86–.88 (was .67–.73) | .94–.98 | .94–.96 | <.009 | 0.99–1.02 (was 1.38–1.45) |
  * | hard rects | .83–.88 | .92–.93 | .90–.95 | <.013 | 0.92–0.94 |
- * | additive glow | .65–.67 | .87–.90 | .83–.88 | <.016 | **0.26** |
+ * | additive glow | **.999** (was .65–.67) | .87–.90 | .83–.88 | <.016 | **0.99** (was 0.26) |
  *
- * Discs, rings and soft discs re-measured 2026-10-15 after round sprites
- * started lighting cells by the area they cover (mono loops/perception-lab
- * S1-01); the other rows are the original measurement.
+ * Discs, rings, soft discs and additive glow re-measured 2026-10-15 (cell
+ * and coverage ratio; row/col/centroid are the earlier reading) after mono
+ * loops/perception-lab S1-01, S1-03b, S1-07 and S1-09: round sprites light
+ * cells by the ink they lay, and soft sprites follow the canvas's own gradient
+ * with no halo. The other rows are the original measurement.
  *
- * Read that last column: structure agrees everywhere, but the model's idea of
- * how much is LIT is off by up to 4x on additive glow — `GLOW_SPREAD` in
- * `packages/schema/src/perceive.ts` is documented as "tuned by intuition rather
- * than measurement", and this is the measurement (`future-ideas.md` G1). The
- * thresholds below are floors under the measured values, not aspirations.
+ * Read that last column: the model's idea of how much is LIT was off by 4x on
+ * additive glow — the `GLOW_SPREAD` halo, "tuned by intuition rather than
+ * measurement" (`future-ideas.md` G1). This test was that measurement, and the
+ * halo has since been removed. The thresholds below are floors under the
+ * measured values, not aspirations.
  * Tighten them as the model is calibrated; never loosen one to make a red run
  * green without naming which spec feature moved.
  *
@@ -231,22 +233,24 @@ test('radial streaks keep their starburst in both renderings', async ({ page }) 
 /**
  * Calibration, pinned as bands rather than asserted as agreement.
  *
- * `coverageRatio` is pixel coverage over analytic coverage. The model is close
- * for hard-edged ink, generous for soft falloff, and 4x too generous for
- * additive glow — `GLOW_SPREAD` was set by intuition and has never been checked
- * against a canvas. These bands record the current calibration so a change to
- * those constants shows up as a deliberate edit here rather than a silent shift
- * in what every agent is told about its scene. Sampled at both seeds the
- * structural test uses (42 and 7) — a seed-dependent coverage drift would
- * otherwise slip through here.
+ * `coverageRatio` is pixel coverage over analytic coverage. It once was 0.26
+ * for additive glow (the model's GLOW_SPREAD halo, set by intuition) and
+ * ~0.7 for soft falloff. Since soft sprites follow the canvas's own gradient
+ * with no halo, and discs lay their true ink per cell (perception-lab S1-03b,
+ * S1-07, S1-09), every fixture reads within ~4% of the pixels (measured
+ * 0.99–1.04, glow cell correlation 0.999). One band now holds all four: a
+ * change that drifts any of them shows up as a deliberate edit here rather
+ * than a silent shift in what every agent is told about its scene. Sampled at
+ * both seeds the structural test uses (42 and 7) — a seed-dependent coverage
+ * drift would otherwise slip through here.
  */
 test('coverage calibration stays where it was measured', async ({ page }) => {
   await ready(page);
   const bands: Array<[string, unknown, number, number]> = [
     ['hard discs', HARD_DISCS, 0.85, 1.15],
-    ['rings on a gradient', RINGS_ON_GRADIENT, 0.85, 1.2],
-    ['soft discs', SOFT_DISCS, 0.95, 1.3],
-    ['additive glow', ADDITIVE_GLOW, 0.15, 0.45],
+    ['rings on a gradient', RINGS_ON_GRADIENT, 0.85, 1.15],
+    ['soft discs', SOFT_DISCS, 0.85, 1.15],
+    ['additive glow', ADDITIVE_GLOW, 0.85, 1.15],
   ];
   for (const [name, spec, lo, hi] of bands) {
     for (const seed of [42, 7]) {

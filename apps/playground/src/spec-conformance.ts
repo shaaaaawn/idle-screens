@@ -19,12 +19,12 @@
  *
  * ## What agreement means, and what it deliberately does not
  *
- * The analytic model is a MODEL. Two of its constants (`GLOW_SPREAD`,
- * `LINE_SALIENCE` in `packages/schema/src/perceive.ts`) are explicitly
- * "tuned by intuition rather than measurement", and three spec features are
- * known to diverge from the canvas: `ghosting`/`trail` persistence (the canvas
- * accumulates frames, the model samples one instant), additive saturation
- * clipping, and exotic blend modes. So this measures *correlation of structure*,
+ * The analytic model is a MODEL. One of its constants (`LINE_SALIENCE` in
+ * `packages/schema/src/perceive.ts`) is explicitly "tuned by intuition rather
+ * than measurement" (a second, `GLOW_SPREAD`, was measured and removed),
+ * and three spec features are known to diverge from the canvas:
+ * `ghosting`/`trail` persistence (the canvas accumulates frames, the model
+ * samples one instant), additive saturation clipping, and exotic blend modes. So this measures *correlation of structure*,
  * not equality of numbers:
  *
  * | Metric | What a bad value means |
