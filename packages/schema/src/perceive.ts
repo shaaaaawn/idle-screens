@@ -352,9 +352,9 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * re-uses drawTrail's sampling — past positions with decaying alpha and
  * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
  * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
- * Remaining approximations (documented, deliberate): soft circles use a linear
- * falloff, background drift is sampled at its rest position. Good enough to
- * perceive composition, focus, balance — and now smear.
+ * Remaining approximations (documented, deliberate): background drift is
+ * sampled at its rest position. Good enough to perceive composition, focus,
+ * balance — and now smear.
  */
 /** The canvas's soft-sprite alpha at radius fraction u: stops 1 @ 0, 0.75 @ 0.35, 0 @ 1 (compile.ts). */
 function softProfile(u: number): number {
@@ -363,12 +363,19 @@ function softProfile(u: number): number {
   return u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65);
 }
 
+/** Mean of softProfile over a disc's area, ∫₀¹ softProfile(u)·2u du. */
+const SOFT_DISC_MEAN = 0.3783;
+
 /**
- * Fraction (0..1) of the cell [x0, x0+cw) × [y0, y0+ch) covered by the annulus
- * rInner ≤ |p − (cx, cy)| ≤ rOuter (rInner 0 = a disc). Exact 0/1 when the cell
- * lies wholly outside or inside; a 4×4 sample on the boundary.
+ * The ink (0..1 of the cell's area) that a disc — or the annulus
+ * rInner ≤ |p − (cx, cy)| ≤ rOuter — lays in the cell [x0, x0+cw) × [y0, y0+ch):
+ * covered area, weighted by the soft gradient when `soft`. Exact when the cell
+ * is wholly outside or inside the shape, or the shape wholly inside the cell;
+ * otherwise sampled over the part of the cell the shape's box overlaps, at a
+ * spacing set by the radius, so a disc smaller than a cell is never stepped
+ * over (perception-lab S1-09: a field of 3 px soft dots read 6× too dark).
  */
-function annulusCellFraction(cx: number, cy: number, rOuter: number, rInner: number, x0: number, y0: number, cw: number, ch: number): number {
+function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, soft: boolean, x0: number, y0: number, cw: number, ch: number): number {
   const nx = Math.max(x0, Math.min(cx, x0 + cw)) - cx;
   const ny = Math.max(y0, Math.min(cy, y0 + ch)) - cy;
   const near = Math.hypot(nx, ny);
@@ -376,15 +383,26 @@ function annulusCellFraction(cx: number, cy: number, rOuter: number, rInner: num
   const fy = Math.max(Math.abs(y0 - cy), Math.abs(y0 + ch - cy));
   const far = Math.hypot(fx, fy);
   if (near >= rOuter || far <= rInner) return 0;
-  if (far <= rOuter && near >= rInner) return 1;
-  let hit = 0;
-  for (let j = 0; j < 4; j++) {
-    for (let i = 0; i < 4; i++) {
-      const d = Math.hypot(x0 + (i + 0.5) * cw / 4 - cx, y0 + (j + 0.5) * ch / 4 - cy);
-      if (d <= rOuter && d >= rInner) hit++;
+  if (far <= rOuter && near >= rInner) return soft ? softProfile(Math.hypot(x0 + cw / 2 - cx, y0 + ch / 2 - cy) / rOuter) : 1;
+  if (cx - rOuter >= x0 && cx + rOuter <= x0 + cw && cy - rOuter >= y0 && cy + rOuter <= y0 + ch) {
+    return (Math.PI * (soft ? rOuter * rOuter * SOFT_DISC_MEAN : rOuter * rOuter - rInner * rInner)) / (cw * ch);
+  }
+  const bx0 = Math.max(x0, cx - rOuter);
+  const by0 = Math.max(y0, cy - rOuter);
+  const sx = Math.min(x0 + cw, cx + rOuter) - bx0;
+  const sy = Math.min(y0 + ch, cy + rOuter) - by0;
+  if (sx <= 0 || sy <= 0) return 0;
+  const step = Math.max(rOuter / 4, 1e-6);
+  const ni = Math.max(4, Math.min(16, Math.ceil(sx / step)));
+  const nj = Math.max(4, Math.min(16, Math.ceil(sy / step)));
+  let ink = 0;
+  for (let j = 0; j < nj; j++) {
+    for (let i = 0; i < ni; i++) {
+      const d = Math.hypot(bx0 + ((i + 0.5) * sx) / ni - cx, by0 + ((j + 0.5) * sy) / nj - cy);
+      if (d <= rOuter && d >= rInner) ink += soft ? softProfile(d / rOuter) : 1;
     }
   }
-  return hit / 16;
+  return ((ink / (ni * nj)) * sx * sy) / (cw * ch);
 }
 
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
@@ -484,11 +502,14 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const r1 = Math.min(rows - 1, Math.floor((pos.y + rad) / cellH));
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
-          const dx = (c + 0.5) * cellW - pos.x;
-          const dy = (r + 0.5) * cellH - pos.y;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d > rad + Math.min(cellW, cellH) / 2) continue;
-          const wgt = soft ? softProfile(d / Math.max(rad, 1e-6)) : 1;
+          let wgt = 1;
+          if (soft) {
+            wgt = discCellInk(pos.x, pos.y, rad, 0, true, c * cellW, r * cellH, cellW, cellH);
+            if (wgt <= 0) continue;
+          } else {
+            const d = Math.hypot((c + 0.5) * cellW - pos.x, (r + 0.5) * cellH - pos.y);
+            if (d > rad + Math.min(cellW, cellH) / 2) continue;
+          }
           compose(r * cols + c, lum, Math.min(1, a * wgt), layer.blend);
         }
       }
@@ -664,18 +685,13 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
         if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
-          const dx = (c + 0.5) * cellW - centerX;
-          const dy = (r + 0.5) * cellH - centerY;
           if (circular) {
-            const d = Math.sqrt(dx * dx + dy * dy);
-            if (d > halfX + Math.min(cellW, cellH) / 2) continue;
             const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
             // The canvas averages each cell, so a disc (or ring) that covers a
             // quarter of a cell moves that cell's mean by a quarter of its
-            // contrast — light it by the covered area, as rect/bar already are.
-            const frac = annulusCellFraction(centerX, centerY, halfX, inner, c * cellW, r * cellH, cellW, cellH);
-            if (frac <= 0) continue;
-            const wgt = (soft ? softProfile(d / Math.max(halfX, 1e-6)) : 1) * frac;
+            // contrast — light it by the ink it lays there, as rect/bar are.
+            const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
+            if (wgt <= 0) continue;
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else if (byArea) {
             const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
