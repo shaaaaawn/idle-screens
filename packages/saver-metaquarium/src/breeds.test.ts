@@ -24,7 +24,7 @@ async function bundled(name: string): Promise<Uint8Array> {
   return Uint8Array.from(Buffer.from((await BUNDLED_BREEDS[name]!()).default, 'base64'));
 }
 const bundledDoc = async (name: string): Promise<Document> => new NodeIO().readBinary(await bundled(name));
-const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^PAINT-#[0-9a-f]{6}$|primary|secondary/i;
+const ROLE = /eye|glow|^KEEP-|^METAL-|^SCREEN-|^VIVID-\d{1,3}$|^(PAINT|SKIN)-#[0-9a-f]{6}$|primary|secondary/i;
 /** A minted breed's parts are paint regions: each token says what it wears there (src/minted.ts). */
 const MINT_REGION = /^MINT-(EYE-)?R\d{3}$/;
 
@@ -551,7 +551,7 @@ describe('bundled breeds (breeds/README.md)', () => {
       if (name === 'EYES-White') expect([...bones].sort()).toEqual(['eye.L', 'eye.R', 'pupil.L', 'pupil.R']);
       if (name === 'EYES-Black') expect([...bones].sort()).toEqual(['pupil.L', 'pupil.R']);
       // A character's colours are its own, never a coat the tank re-rolls.
-      expect(name).toMatch(/^(PAINT-#[0-9a-f]{6}|EYES-White|EYES-Black)$/);
+      expect(name).toMatch(/^((PAINT|SKIN)-#[0-9a-f]{6}|EYES-White|EYES-Black)$/);
     }
     // Side eyes (rig/dolphin.py side_eyes): each eye one white box and each pupil ONE quad on its OUTER face.
     const pupils = root.listMeshes().flatMap((m) => m.listPrimitives()).find((p) => p.getMaterial()!.getName() === 'EYES-Black')!;
@@ -622,6 +622,23 @@ describe('bundled breeds (breeds/README.md)', () => {
     }
     expect(pitch).toBeGreaterThan(0.05);
     expect(other).toBeLessThan(pitch * 0.05);
+  });
+
+  it('dolphin: no clip turns its body past a curl — the flip and the roll are the tank\'s (dolphin.ts dolphinTurn)', async () => {
+    const doc = await bundledDoc('dolphin');
+    for (const a of doc.getRoot().listAnimations()) {
+      for (const ch of a.listChannels()) {
+        if (ch.getTargetNode()!.getName() !== 'body' || ch.getTargetPath() !== 'rotation') continue;
+        const out = ch.getSampler()!.getOutput()!;
+        const rest = ch.getTargetNode()!.getRotation();
+        for (let i = 0; i < out.getCount(); i++) {
+          const q = out.getElement(i, []) as number[];
+          const dot = Math.abs(q[0]! * rest[0] + q[1]! * rest[1] + q[2]! * rest[2] + q[3]! * rest[3]);
+          // The angle from rest: a whole turn blended by weight interpolates the short way and unwinds.
+          expect(2 * Math.acos(Math.min(1, dot)), `${a.getName()} frame ${i}`).toBeLessThan(0.8);
+        }
+      }
+    }
   });
 
   it('dolphin: its loops close and its one-shots end where they began', async () => {

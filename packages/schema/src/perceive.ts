@@ -344,18 +344,6 @@ export interface LuminanceGridOptions extends PerceiveOptions {
   rows?: number;
 }
 
-/**
- * Sample the spec into a coarse luminance image — analytically, no renderer.
- * Persistence is modeled, not simulated: because positions are pure functions
- * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
- * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
- * re-uses drawTrail's sampling — past positions with decaying alpha and
- * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
- * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
- * Remaining approximations (documented, deliberate): background drift is
- * sampled at its rest position. Good enough to perceive composition, focus,
- * balance — and now smear.
- */
 /** The canvas's soft-sprite alpha at radius fraction u: stops 1 @ 0, 0.75 @ 0.35, 0 @ 1 (compile.ts). */
 function softProfile(u: number): number {
   if (u <= 0) return 1;
@@ -405,6 +393,18 @@ function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, sof
   return ((ink / (ni * nj)) * sx * sy) / (cw * ch);
 }
 
+/**
+ * Sample the spec into a coarse luminance image — analytically, no renderer.
+ * Persistence is modeled, not simulated: because positions are pure functions
+ * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
+ * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
+ * re-uses drawTrail's sampling — past positions with decaying alpha and
+ * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
+ * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Remaining approximations (documented, deliberate): background drift is
+ * sampled at its rest position. Good enough to perceive composition, focus,
+ * balance — and now smear.
+ */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
