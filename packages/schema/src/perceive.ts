@@ -355,18 +355,6 @@ export interface LuminanceGridOptions extends PerceiveOptions {
 }
 
 /**
- * Sample the spec into a coarse luminance image — analytically, no renderer.
- * Persistence is modeled, not simulated: because positions are pure functions
- * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
- * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
- * re-uses drawTrail's sampling — past positions with decaying alpha and
- * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
- * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
- * Remaining approximations (documented, deliberate): soft circles use a linear
- * falloff, background drift is sampled at its rest position. Good enough to
- * perceive composition, focus, balance — and now smear.
- */
-/**
  * Fraction (0..1) of the cell [x0, x0+cw) × [y0, y0+ch) covered by the annulus
  * rInner ≤ |p − (cx, cy)| ≤ rOuter (rInner 0 = a disc). Exact 0/1 when the cell
  * lies wholly outside or inside; a 4×4 sample on the boundary.
@@ -390,6 +378,18 @@ function annulusCellFraction(cx: number, cy: number, rOuter: number, rInner: num
   return hit / 16;
 }
 
+/**
+ * Sample the spec into a coarse luminance image — analytically, no renderer.
+ * Persistence is modeled, not simulated: because positions are pure functions
+ * of (seed, t), `ghosting` is a decayed sum of past-frame splats (weight g^m
+ * for ink m frames old, mirroring the renderer's warm-up replay) and `trail`
+ * re-uses drawTrail's sampling — past positions with decaying alpha and
+ * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
+ * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Remaining approximations (documented, deliberate): soft circles use a linear
+ * falloff, background drift is sampled at its rest position. Good enough to
+ * perceive composition, focus, balance — and now smear.
+ */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
