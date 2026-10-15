@@ -222,18 +222,16 @@ describe('polygon outline rasterization', () => {
     expect(at(6)).toBeGreaterThan(at(3));
   });
 
-  it('a soft additive polygon blooms past its outline by its thickness, not its circumradius', () => {
+  it('a soft additive polygon lights nothing past its outline (the canvas gradient is clipped to it)', () => {
+    // Pixel truth: a soft `lighter` polygon blooms nowhere past its outline on
+    // the canvas; the old GLOW_SPREAD halo read 0.72 F on large soft additive
+    // polygons, the gradient-only model 0.996 (perception-lab S1-07).
     const glow = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }, { blend: 'lighter' }, '#101010'), GRID);
     const hard = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }, {}, '#101010'), GRID);
-    expect(glow.coverage).toBeGreaterThan(hard.coverage); // the halo shows
-    expect(glow.coverage).toBeLessThan(0.4); // but a flat band is not a screen-filling dome
+    expect(glow.coverage).toBeGreaterThan(0);
+    expect(glow.coverage).toBeLessThanOrEqual(hard.coverage);
     expect(glow.rowProfile[0]).toBe(0);
     expect(glow.rowProfile[9]).toBe(0);
-    // A soft additive hexagon still blooms about as far as the disc model had it.
-    const hex = luminanceGrid(one({ kind: 'polygon', radius: [0.1, 0.1], sides: 6, color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
-    const disc = luminanceGrid(one({ kind: 'circle', radius: [0.1, 0.1], color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
-    expect(hex.coverage).toBeGreaterThan(disc.coverage * 0.6);
-    expect(hex.coverage).toBeLessThanOrEqual(disc.coverage);
   });
 
   it('fills with the canvas nonzero rule: a pentagram lights its centre', () => {
@@ -257,14 +255,17 @@ describe('polygon outline rasterization', () => {
 });
 
 describe('additive-glow calibration (G1)', () => {
-  it('a soft additive circle covers more than the same hard opaque circle', () => {
+  it('a soft additive circle lights no more than the same hard circle: the gradient ends at the radius', () => {
+    // The G1 halo (GLOW_SPREAD) was removed when pixel truth showed the canvas
+    // draws none (perception-lab S1-03b: E1 train F 0.772 → 0.836).
     const hard = luminanceGrid(spec([
       { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff' }, motion: { type: 'static' } },
     ]));
     const glow = luminanceGrid(spec([
       { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff', soft: true }, blend: 'lighter', motion: { type: 'static' } },
     ]));
-    expect(glow.coverage).toBeGreaterThan(hard.coverage);
+    expect(glow.coverage).toBeGreaterThan(0);
+    expect(glow.coverage).toBeLessThanOrEqual(hard.coverage);
   });
 
   it('leaves hard non-additive circles unchanged (no runaway coverage)', () => {
