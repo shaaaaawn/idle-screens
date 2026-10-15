@@ -354,9 +354,14 @@ describe('persistence-aware perception (ghosting + trail)', () => {
     const off = luminanceGrid(still);
     const on = luminanceGrid({ ...still, ghosting: 0.9 });
     // Same footprint: ghost taps land on the same cells for static entities.
-    expect(on.coverage).toBeCloseTo(off.coverage, 4);
-    expect(on.centroid!.x).toBeCloseTo(off.centroid!.x, 4);
-    expect(on.centroid!.y).toBeCloseTo(off.centroid!.y, 4);
+    // Cells are lit by covered area (perception-lab S1-01), so brightening
+    // saturates the discs' interiors while partly-covered rim cells keep
+    // brightening: coverage and the deviation-weighted centroid move by a few
+    // thousandths (the canvas saturates the same way). What must hold is that
+    // nothing SMEARS — the footprint stays where it was, to 2 decimals.
+    expect(on.coverage).toBeCloseTo(off.coverage, 2);
+    expect(on.centroid!.x).toBeCloseTo(off.centroid!.x, 2);
+    expect(on.centroid!.y).toBeCloseTo(off.centroid!.y, 2);
   });
 
   it('diffScenes can now measure a ghosting change (the §10 misdiagnosis trap)', () => {
@@ -551,7 +556,11 @@ describe('perceiveScene across all shipped examples', () => {
   it('every example is perceivable: dots on the map, non-zero coverage, sane bundle', () => {
     for (const s of EXAMPLE_SPECS) {
       const p = perceiveScene(s);
-      expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0.001);
+      // Non-zero, not "over 0.1%": sparse-night's stars are sub-cell points, and
+      // rendered pixels put NO 80×48 cell over the coverage step (max deviation
+      // 0.026 — perception-lab, 2026-10-15). The old floor held only because the
+      // grid lit every touched cell at full weight (claiming 1.2–2.3%).
+      expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0);
       expect([...p.braille].some((ch) => ch !== BLANK_BRAILLE && ch !== '\n'), `${s.id} braille has dots`).toBe(true);
       expect(p.dominance.length).toBe(s.layers.length);
       expect(p.motion.length).toBe(s.layers.length);

@@ -1,7 +1,7 @@
-# Gaps — run-2026-07-28T1824-baseline
+# Gaps — run-2026-10-15T0435-baseline
 
 Label: **baseline re-run**
-Suite median: **0.930**
+Suite median: **0.921**
 Harness: `headless-vitest` · StyleDNA `773845e7`
 Screens: 150 · Invalid: 0
 
@@ -28,7 +28,7 @@ Collapsed benchmarks: (none)
 ### Per-artist medians
 - monet: 0.972
 - van-gogh: 0.905
-- seurat: 0.974
+- seurat: 0.946
 - picasso: 0.972
 - kandinsky: 0.893
 - mondrian: 0.912

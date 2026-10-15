@@ -1,6 +1,6 @@
 {
-  "runId": "run-2026-07-28T1824-baseline",
-  "createdAt": "2026-07-28T18:24:57.216Z",
+  "runId": "run-2026-10-15T0435-baseline",
+  "createdAt": "2026-10-15T04:35:55.627Z",
   "config": {
     "viewport": {
       "width": 1920,
@@ -12,14 +12,14 @@
   "provenance": {
     "harness": "headless-vitest",
     "label": "baseline re-run",
-    "note": "Headless re-score vs run-2026-07-28T1742-baseline",
+    "note": "Headless re-score vs run-2026-07-28T1824-baseline",
     "operator": "eval:styles",
-    "parentRunId": "run-2026-07-28T1742-baseline",
+    "parentRunId": "run-2026-07-28T1824-baseline",
     "versions": {
       "styleDnaHash": "773845e7",
       "styleDnaLabel": "artists@15",
       "saverSpecFormat": 1,
-      "schemaPackage": "unknown",
+      "schemaPackage": "3.12.1",
       "scorer": "style-eval-score@1",
       "skill": "artistic-style-schema-eval@1"
     },
@@ -37,7 +37,7 @@
       }
     }
   },
-  "suiteMedian": 0.9299999999999999,
+  "suiteMedian": 0.9212499999999999,
   "perArtist": [
     {
       "artistId": "monet",
@@ -53,8 +53,8 @@
     },
     {
       "artistId": "seurat",
-      "median": 0.9737499999999999,
-      "mean": 0.9649416666666666,
+      "median": 0.9457499999999999,
+      "mean": 0.9509416666666667,
       "n": 10
     },
     {
@@ -102,7 +102,7 @@
     {
       "artistId": "magritte",
       "median": 0.98425,
-      "mean": 0.9742166666666666,
+      "mean": 0.9602166666666665,
       "n": 10
     },
     {
@@ -138,18 +138,18 @@
     },
     {
       "benchmarkId": "dense-field",
-      "median": 0.937,
-      "variance": 0.003075355072222222
+      "median": 0.9212499999999999,
+      "variance": 0.003007595072222223
     },
     {
       "benchmarkId": "single-focal",
       "median": 0.9591666666666667,
-      "variance": 0.00369069090617284
+      "variance": 0.0034476716469135802
     },
     {
       "benchmarkId": "layered-depth",
-      "median": 0.8903333333333332,
-      "variance": 0.002661237267283951
+      "median": 0.8868333333333334,
+      "variance": 0.0026216587487654323
     },
     {
       "benchmarkId": "pulse-atmosphere",
@@ -501,8 +501,8 @@
     ]
   },
   "delta": {
-    "vsRunId": "run-2026-07-28T1742-baseline",
-    "suiteMedianDelta": -0.0014583333333333393,
+    "vsRunId": "run-2026-07-28T1824-baseline",
+    "suiteMedianDelta": -0.008750000000000036,
     "newlyFailing": [],
     "newlyPassing": [],
     "gapDelta": [
