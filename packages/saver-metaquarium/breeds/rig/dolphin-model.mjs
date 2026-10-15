@@ -45,6 +45,10 @@ import { fileURLToPath } from 'node:url';
 // The body is SKIN- (lit as a coat: its faces shade by where they point); the accents are PAINT- (they glow a little, to pop).
 export const CAPE = 'SKIN-#1f6fd1';
 export const BELLY = 'SKIN-#d9ecfa';
+/** The blues by which way the skin faces, as a real bottlenose (and a cel-shaded cartoon) wears them:
+ *  a darker cape along the spine, CAPE on the upper sides, a lighter flank above the pale belly. */
+export const BACK = 'SKIN-#1858b4';
+export const FLANK = 'SKIN-#3f8fe6';
 export const LINE = 'PAINT-#0f2238';
 export const TONGUE = 'PAINT-#ff6f8e';
 export const BLUSH = 'PAINT-#ff8fb0';
@@ -59,7 +63,7 @@ const paint = (name) => ({ color: linear(name.slice(name.indexOf('#'))) });
 
 /** Blender material colours (linear); the tank reads the names. */
 const MATERIALS = {
-  [CAPE]: paint(CAPE), [BELLY]: paint(BELLY), [LINE]: paint(LINE), [TONGUE]: paint(TONGUE), [BLUSH]: paint(BLUSH),
+  [CAPE]: paint(CAPE), [BELLY]: paint(BELLY), [BACK]: paint(BACK), [FLANK]: paint(FLANK), [LINE]: paint(LINE), [TONGUE]: paint(TONGUE), [BLUSH]: paint(BLUSH),
   [WHITE]: { color: [0.85, 0.85, 0.85], roughness: 0.4 },
   [BLACK]: { color: [0, 0, 0], roughness: 0.1, metal: 1 },
 };
@@ -179,7 +183,10 @@ export function draw() {
     // The jaw and the cheek under the smile are pale; then the belly, below its line.
     const smileK = SMILE.find(([sn]) => sn === n)?.[1];
     const pale = n < BEAK_N ? k < MOUTH_K || (n === 0 && k === MOUTH_K) : smileK !== undefined ? k < smileK : z < zc + bellyO(s) * h;
-    put(i, n, k, pale ? BELLY : CAPE, jaw ? 'jaw' : null);
+    // The blues by the way the skin faces: the section's outward normal, its upward share (ellipse gradient).
+    const gx = i / (section(s).w + 0.35) ** 2, gz = (z - zc) / (h + 0.35) ** 2, up = gz / (Math.hypot(gx, gz) || 1);
+    const blue = n < BEAK_N ? CAPE : up > 0.8 ? BACK : up > 0.2 ? CAPE : FLANK;
+    put(i, n, k, pale ? BELLY : blue, jaw ? 'jaw' : null);
   }
   for (const side of [-1, 1]) {
     // The smile: on the skin, a line along the beak curving up toward the eye.
