@@ -366,6 +366,30 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * falloff, background drift is sampled at its rest position. Good enough to
  * perceive composition, focus, balance — and now smear.
  */
+/**
+ * Fraction (0..1) of the cell [x0, x0+cw) × [y0, y0+ch) covered by the annulus
+ * rInner ≤ |p − (cx, cy)| ≤ rOuter (rInner 0 = a disc). Exact 0/1 when the cell
+ * lies wholly outside or inside; a 4×4 sample on the boundary.
+ */
+function annulusCellFraction(cx: number, cy: number, rOuter: number, rInner: number, x0: number, y0: number, cw: number, ch: number): number {
+  const nx = Math.max(x0, Math.min(cx, x0 + cw)) - cx;
+  const ny = Math.max(y0, Math.min(cy, y0 + ch)) - cy;
+  const near = Math.hypot(nx, ny);
+  const fx = Math.max(Math.abs(x0 - cx), Math.abs(x0 + cw - cx));
+  const fy = Math.max(Math.abs(y0 - cy), Math.abs(y0 + ch - cy));
+  const far = Math.hypot(fx, fy);
+  if (near >= rOuter || far <= rInner) return 0;
+  if (far <= rOuter && near >= rInner) return 1;
+  let hit = 0;
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      const d = Math.hypot(x0 + (i + 0.5) * cw / 4 - cx, y0 + (j + 0.5) * ch / 4 - cy);
+      if (d <= rOuter && d >= rInner) hit++;
+    }
+  }
+  return hit / 16;
+}
+
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
@@ -680,10 +704,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
             const d = Math.sqrt(dx * dx + dy * dy);
             const reach = glow ? reachX : halfX;
             if (d > reach + Math.min(cellW, cellH) / 2) continue;
-            if (s.kind === 'ring') {
-              const strokeW = (s.width ?? (scale === 1 ? 2 : 0.002)) * scale;
-              if (d < halfX - strokeW) continue;
-            }
+            const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
             let wgt: number;
             if (glow) {
               const core = halfX;
@@ -693,7 +714,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
                 wgt = f * f;
               }
             } else {
-              wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
+              // The canvas averages each cell, so a disc (or ring) that covers a
+              // quarter of a cell moves that cell's mean by a quarter of its
+              // contrast — light it by the covered area, as rect/bar already are.
+              const frac = annulusCellFraction(centerX, centerY, halfX, inner, c * cellW, r * cellH, cellW, cellH);
+              if (frac <= 0) continue;
+              wgt = (soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1) * frac;
             }
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else if (byArea) {
