@@ -164,6 +164,8 @@ const MAX_FISH = METAQUARIUM_PARAMS.fishCount.max ?? 24;
 /** The longest line of babies a moment can travel down (babyLeader). */
 const BABY_LINE = 8;
 const Y_AXIS = new Vector3(0, 1, 0);
+/** A dolphin's flip and roll (dolphin.ts dolphinTurn): its pivot, the axis, the body's turn. */
+const _dPivot = new Vector3(), _dAxis = new Vector3(), _dQ = new Quaternion();
 const GLB_CONCURRENCY = 3;
 
 // ---------------------------------------------------------------------------
@@ -3567,6 +3569,22 @@ class TankInstance implements SaverInstance {
           // Not nose-on: the viewer ends up 0.9 rad off its nose, on the side they already are.
           const want = turn - Math.sign(turn) * 0.9;
           f.group.rotateOnWorldAxis(Y_AXIS, Math.max(-0.9, Math.min(0.9, Math.abs(turn) > 0.9 ? want : 0)) * dolphin.face);
+        }
+        // A flip or a roll turns the WHOLE dolphin about its body bone (dolphin.ts dolphinTurn): one
+        // smooth angle, never blended (a whole turn baked into a clip unwinds when the mixer blends it).
+        const { pitch, roll } = dolphin.turn;
+        if (pitch || roll) {
+          const dr = f.rig!.dolphin;
+          f.group.updateMatrixWorld(true);
+          if (dr.pivot) dr.pivot.getWorldPosition(_dPivot); else _dPivot.copy(f.group.position);
+          dr.body.getWorldQuaternion(_dQ);
+          // Pitch about the model's own left-right axis (x), roll about its length (z).
+          for (const [x, z, a] of [[1, 0, pitch], [0, 1, roll]] as const) {
+            if (!a) continue;
+            _dAxis.set(x, 0, z).applyQuaternion(_dQ).normalize();
+            f.group.position.sub(_dPivot).applyAxisAngle(_dAxis, a).add(_dPivot);
+            f.group.rotateOnWorldAxis(_dAxis, a);
+          }
         }
         f.group.updateMatrixWorld(true);
         const friend = act?.lookAt ? this.burpTmp.set(act.lookAt.x, act.lookAt.y, act.lookAt.z) : null;
