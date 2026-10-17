@@ -327,11 +327,13 @@ export interface LayerSpec {
    * - 'random': a fixed golden-ratio-stride wiring (k partners per entity,
    *   deterministic, no RNG draws) — breaks the crystalline k-nearest look.
    * `falloff` fades link alpha with distance/maxDist, killing pop-in at the cutoff.
+   * `k` and `maxDist` are required for 'nearest' and 'random'; 'chain' needs
+   * neither, except `maxDist` when `falloff` is set (it is the fade distance).
    * Capped at LIMITS.maxLinksK. Layer count must be <= LIMITS.maxLinkLayerCount when set.
    */
   links?: {
-    k: number;
-    maxDist: number;
+    k?: number;
+    maxDist?: number;
     color?: string;
     alpha?: number;
     width?: number;

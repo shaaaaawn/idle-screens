@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, buildEntities, entityScales, linkEdges, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
@@ -287,8 +287,7 @@ export function adviseSpec(
     // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
     if (layer.links) {
       const positions = entities.map((e) => positionAt(e, 0, w, h));
-      const maxDistPx = layer.links.maxDist * scale;
-      const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false, w, h);
+      const edges = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false, w, h);
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
       const lwPx = (layer.links.width ?? defaultWidth) * scale;
       const la = layer.links.alpha ?? 1;
@@ -358,9 +357,9 @@ export function adviseSpec(
     if (!layer.links || layer.links.mode === 'chain') continue;
     const entities = allEntities[li]!;
     const positions = entities.map((e) => positionAt(e, 0, w, h));
-    const maxDist = layer.links.maxDist * scale;
-    const pairs = linkPairs(positions, layer.links.k, maxDist, layer.wrap !== false, w, h);
-    const maxPossible = Math.min(entities.length * layer.links.k, entities.length * (entities.length - 1) / 2);
+    const k = layer.links.k ?? 1;
+    const pairs = linkPairs(positions, k, linkMaxDistPx(layer.links, scale), layer.wrap !== false, w, h);
+    const maxPossible = Math.min(entities.length * k, entities.length * (entities.length - 1) / 2);
     if (maxPossible > 0 && pairs.length / maxPossible < 0.1) {
       warnings.push({
         path: `layers[${li}].links`,

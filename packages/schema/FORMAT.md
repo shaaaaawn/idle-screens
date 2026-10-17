@@ -302,7 +302,9 @@ own `finish` is not steerable; steer a segment's, or republish.
 `maxDist`; `"chain"` wires entities in order (Mystify polygons — ignores
 `k`/`maxDist`, `closed: true` closes the loop); `"random"` uses a fixed
 deterministic wiring filtered by `maxDist`. `falloff: true` fades link alpha
-with distance, removing pop-in at the cutoff.
+with distance, removing pop-in at the cutoff. `k` and `maxDist` are required
+for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
+`falloff: true` needs `maxDist` (the distance at which a link has faded out).
 
 ### `sprite` (one of)
 
