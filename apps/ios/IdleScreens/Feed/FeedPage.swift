@@ -359,7 +359,7 @@ struct FeedPage: View {
                         }
                     },
                     onAssets: { liveTank.report($0) },
-                    onFish: { liveTank.reportFish($0) },
+                    onFish: { liveTank.reportFish($0, want: $1) },
                     onReused: { liveWebPainted = true },
                     poolable: !isTank,
                     onFailure: { session.hostFailed() }
@@ -1055,7 +1055,7 @@ private struct HistoryMomentPage: View {
                             }
                         },
                         onAssets: { tank.report($0) },
-                        onFish: { tank.reportFish($0) },
+                        onFish: { tank.reportFish($0, want: $1) },
                         onPinned: {
                             if !webReady { webReady = true; SwipeTiming.mark("webReady (pinned painted)") }
                         },

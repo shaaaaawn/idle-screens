@@ -2258,6 +2258,10 @@ class TankInstance implements SaverInstance {
     }
     this.fish.length = Math.min(this.fish.length, want.length);
     if (missing.length) void this.spawnMissing(missing);
+    // The cast this population is filling toward, beside the count spawned so
+    // far (`mqFish`): a host can tell "all fish are in" the moment they are,
+    // instead of guessing from a quiet spell.
+    this.ctxSaver.host.dataset.mqWant = String(want.length);
     this.ctxSaver.host.dataset.mqFish = String(this.loadedCount());
   }
 
@@ -4247,6 +4251,7 @@ class TankInstance implements SaverInstance {
     this.renderer.forceContextLoss();
     if (this.ownsCanvas) this.canvas.remove();
     delete this.ctxSaver.host.dataset.mqFish;
+    delete this.ctxSaver.host.dataset.mqWant;
     delete this.ctxSaver.host.dataset.mqMix;
     delete this.ctxSaver.host.dataset.mqMotes;
     delete this.ctxSaver.host.dataset.mqEnv;
