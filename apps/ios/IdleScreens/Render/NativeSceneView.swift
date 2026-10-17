@@ -35,6 +35,9 @@ struct NativeSceneView: View {
     /// poster; tests render later instants to reach life envelopes, emitters
     /// and trails without an animation loop.
     var staticTime: TimeInterval = 0
+    /// Paint no ground: the view composites over whatever is beneath it —
+    /// a sequence segment over its bed.
+    var transparentGround: Bool = false
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -92,7 +95,7 @@ struct NativeSceneView: View {
             ctx.scaleBy(x: scale, y: scale)
         }
 
-        drawBackground(ctx: ctx, size: space, t: t)
+        if !transparentGround { drawBackground(ctx: ctx, size: space, t: t) }
         let minDim = min(space.width, space.height)
         // t2 load shedding: thin every layer by the same stride so the
         // composition survives (dropping whole trailing layers would cut the

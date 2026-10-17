@@ -635,6 +635,14 @@ final class TVAppState {
     private(set) var sequenceSegmentKey: String?
     /// Crossfade duration entering the current segment (0 = hard cut).
     private(set) var sequenceCrossfade: TimeInterval = 0
+    /// The sequence's bed, compiled once: drawn under every segment on its
+    /// own clock, which never resets at a segment boundary. Empty = no bed.
+    private(set) var bedScene: [CompiledLayer] = []
+    private(set) var bedBackground: SpecSubset.Background?
+    private(set) var bedGhosting: Double = 0
+    /// True while the active sequence has a bed (even one with no layers —
+    /// its ground alone still replaces every segment's background).
+    private(set) var hasBed = false
 
     private func startSequence(_ seq: SequenceSubset, fallbackSeed: Int?) {
         // WS snapshots repeat the document — restart only on real change.
@@ -642,6 +650,14 @@ final class TVAppState {
         sequenceTask?.cancel()
         activeSequence = seq
         sequenceEpoch = Date()
+        if let bed = seq.bed {
+            bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
+            bedBackground = bed.background
+            bedGhosting = bed.ghosting ?? 0
+            hasBed = true
+        } else {
+            clearBed()
+        }
         applySegment(seq, at: 0, fallbackSeed: fallbackSeed)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
     }
@@ -653,6 +669,14 @@ final class TVAppState {
         sequenceEpoch = nil
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
+        clearBed()
+    }
+
+    private func clearBed() {
+        bedScene = []
+        bedBackground = nil
+        bedGhosting = 0
+        hasBed = false
     }
 
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
@@ -663,9 +687,11 @@ final class TVAppState {
         let scene = segment.scene
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)
-        specBackground = scene.background
-        specGhosting = scene.ghosting ?? 0
-        complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+        // Over a bed, a segment paints transparently: the bed owns the
+        // ground, and a smear needs an opaque ground to decay into.
+        specBackground = hasBed ? nil : scene.background
+        specGhosting = hasBed ? 0 : (scene.ghosting ?? 0)
+        complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {

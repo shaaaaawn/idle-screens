@@ -165,8 +165,8 @@ struct RecordedScene: Decodable, Equatable, Sendable {
         var scene: SpecSubset?
         if let seq = try? c.decodeIfPresent(SequenceSubset.self, forKey: .spec),
            SequenceSubset.isSequenceDocument(format: seq.format),
-           let first = seq.posterSegment {
-            scene = first.scene
+           let poster = seq.posterScene {
+            scene = poster
         } else if let plain = try? c.decodeIfPresent(SpecSubset.self, forKey: .spec),
                   !plain.layers.isEmpty {
             scene = plain

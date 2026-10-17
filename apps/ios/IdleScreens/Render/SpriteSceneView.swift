@@ -14,11 +14,18 @@ private let skLog = Logger(subsystem: "com.hermosalabs.idlescreens", category: "
 struct SpriteSceneView: UIViewRepresentable {
     let layers: [CompiledLayer]
     let background: SpecSubset.Background?
+    /// Paint no ground (a sequence segment over its bed).
+    var transparentGround: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> SKView {
         let view = SKView()
+        if transparentGround {
+            view.allowsTransparency = true
+            view.isOpaque = false
+            view.backgroundColor = .clear
+        }
         view.ignoresSiblingOrder = true
         view.preferredFramesPerSecond = 30
         context.coordinator.watch(view)
@@ -61,7 +68,8 @@ struct SpriteSceneView: UIViewRepresentable {
         if let scene = view.scene as? CompiledSpriteScene, scene.matches(layers) {
             return  // same scene data — keep animating, no rebuild
         }
-        let scene = CompiledSpriteScene(layers: layers, background: background)
+        let scene = CompiledSpriteScene(layers: layers, background: background,
+                                        transparentGround: transparentGround)
         scene.scaleMode = .resizeFill
         view.presentScene(scene)
     }
@@ -81,9 +89,12 @@ final class CompiledSpriteScene: SKScene {
     private var startTime: TimeInterval?
     private var builtForSize: CGSize = .zero
 
-    init(layers: [CompiledLayer], background: SpecSubset.Background?) {
+    private let transparentGround: Bool
+
+    init(layers: [CompiledLayer], background: SpecSubset.Background?, transparentGround: Bool = false) {
         self.layersData = layers
         self.bg = background
+        self.transparentGround = transparentGround
         super.init(size: .zero)
     }
 
@@ -93,7 +104,7 @@ final class CompiledSpriteScene: SKScene {
     func matches(_ layers: [CompiledLayer]) -> Bool { layersData == layers }
 
     override func didMove(to view: SKView) {
-        backgroundColor = .black
+        backgroundColor = transparentGround ? .clear : .black
         isPaused = false
         view.isPaused = false
         rebuildIfNeeded()
@@ -109,7 +120,7 @@ final class CompiledSpriteScene: SKScene {
         builtForSize = size
         removeAllChildren()
         driven.removeAll()
-        buildBackground()
+        if !transparentGround { buildBackground() }
         buildNodes()
         skLog.notice("built \(self.driven.count) nodes at \(self.size.width)x\(self.size.height) scene=\(ObjectIdentifier(self).debugDescription)")
     }
