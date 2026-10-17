@@ -272,6 +272,8 @@ export interface FlattenedPath {
   /** One closed ring: subpaths joined by zero-width bridges, inner ones wound as holes. */
   points: Array<[number, number]>;
   subpaths: number;
+  /** Every subpath as drawn (simplified, no bridges), for strokes: open unless it ended in Z. */
+  lines: Array<{ points: Array<[number, number]>; closed: boolean }>;
   /** Parse error, if the string is not a usable path. */
   error?: string;
 }
@@ -293,10 +295,12 @@ export function flattenPath(d: string, rule: PathFillRule = 'auto'): FlattenedPa
   if (hit) return hit;
   let out: FlattenedPath;
   try {
-    const rings = parseAndFlatten(d).map(simplifyRing).filter((r) => r.length >= 3);
-    out = { points: rule === 'auto' ? joinRings(rings) : bridge(rings), subpaths: rings.length };
+    const parsed = parseAndFlatten(d);
+    const rings = parsed.rings.map(simplifyRing).filter((r) => r.length >= 3);
+    const lines = parsed.lines.map((l) => ({ points: l.closed ? simplifyRing(l.points) : simplifyLine(l.points), closed: l.closed }));
+    out = { points: rule === 'auto' ? joinRings(rings) : bridge(rings), subpaths: rings.length, lines };
   } catch (e) {
-    out = { points: [], subpaths: 0, error: e instanceof Error ? e.message : String(e) };
+    out = { points: [], subpaths: 0, lines: [], error: e instanceof Error ? e.message : String(e) };
   }
   if (pathCache.size > 256) pathCache.clear();
   pathCache.set(key, out);
@@ -332,7 +336,7 @@ function segmentsFor(chord: number, curvature: number): number {
   return Math.max(2, Math.min(64, n));
 }
 
-function parseAndFlatten(d: string): Pt[][] {
+function parseAndFlatten(d: string): { rings: Pt[][]; lines: Array<{ points: Pt[]; closed: boolean }> } {
   const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
   let i = 0;
   const num = (): number => {
@@ -355,7 +359,9 @@ function parseAndFlatten(d: string): Pt[][] {
   let lastCtrl: Pt | null = null; // reflected by S/T
   let lastCmd = '';
   const push = (x: number, y: number): void => { ring.push([x, y]); cx = x; cy = y; };
-  const close = (): void => {
+  const lines: Array<{ points: Pt[]; closed: boolean }> = [];
+  const close = (closed = false): void => {
+    if (ring.length >= 2) lines.push({ points: ring.slice(), closed });
     if (ring.length >= 3) rings.push(ring);
     ring = [];
   };
@@ -443,7 +449,7 @@ function parseAndFlatten(d: string): Pt[][] {
         break;
       }
       case 'A': { const rx = num(), ry = num(), ph = num(), la = flag(), sw = flag(); arc(rx, ry, ph, la, sw, num() + ox, num() + oy); break; }
-      case 'Z': cx = sx; cy = sy; close(); break;
+      case 'Z': cx = sx; cy = sy; close(true); break;
       default: throw new Error(`unsupported path command '${cmd}'`);
     }
     lastCmd = cmd;
@@ -454,7 +460,32 @@ function parseAndFlatten(d: string): Pt[][] {
     const a = r[0]!, b = r[r.length - 1]!;
     if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9) r.pop();
   }
-  return rings;
+  for (const l of lines) {
+    const a = l.points[0]!, b = l.points[l.points.length - 1]!;
+    if (l.closed && l.points.length > 2 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9) l.points.pop();
+  }
+  return { rings, lines };
+}
+
+/** Douglas–Peucker on an open polyline at the flattening tolerance. */
+function simplifyLine(r: Pt[]): Pt[] {
+  if (r.length <= 2) return r;
+  const keep = new Uint8Array(r.length);
+  keep[0] = 1; keep[r.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, r.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const A = r[a]!, B = r[b]!;
+    const dx = B[0] - A[0], dy = B[1] - A[1], len = Math.hypot(dx, dy);
+    let best = -1, bd = 0;
+    for (let k = a + 1; k < b; k++) {
+      const P = r[k]!;
+      const d = len > 1e-12 ? Math.abs(dx * (A[1] - P[1]) - dy * (A[0] - P[0])) / len : Math.hypot(P[0] - A[0], P[1] - A[1]);
+      if (d > bd) { bd = d; best = k; }
+    }
+    if (best >= 0 && bd > PATH_TOLERANCE) { keep[best] = 1; stack.push([a, best], [best, b]); }
+  }
+  return r.filter((_, k) => keep[k] === 1);
 }
 
 /**
@@ -644,4 +675,35 @@ function bridge(rings: Pt[][]): Pt[] {
     ring = ring.slice(0, bi + 1).concat(rot, [rot[0]!, ring[bi]!], ring.slice(bi + 1));
   }
   return ring;
+}
+
+/** Points a path draws per frame: the fill ring (when filled) plus every stroked line. */
+export function pathPointCount(s: PolygonSprite): number {
+  const f = flattenSprite(s);
+  let n = s.fill === false ? 0 : f.points.length;
+  if (s.stroke) for (const l of f.lines) n += l.points.length;
+  return n;
+}
+
+/**
+ * A path's stroke as thin quads (one per segment, `width` unit-box units
+ * wide), scaled by `radius` px and centred on (0,0): what perception
+ * rasterises for a stroke. Joints overlap a little; perception clamps.
+ */
+export function pathStrokeQuads(s: PolygonSprite, radius: number): Array<Array<{ x: number; y: number }>> {
+  if (!s.stroke) return [];
+  const hw = (s.stroke.width * radius) / 2;
+  const out: Array<Array<{ x: number; y: number }>> = [];
+  for (const l of flattenSprite(s).lines) {
+    const pts = l.points;
+    const n = l.closed ? pts.length : pts.length - 1;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i]!, b = pts[(i + 1) % pts.length]!;
+      const ax = a[0] * radius, ay = a[1] * radius, bx = b[0] * radius, by = b[1] * radius;
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+      const nx = (-dy / len) * hw, ny = (dx / len) * hw;
+      out.push([{ x: ax + nx, y: ay + ny }, { x: bx + nx, y: by + ny }, { x: bx - nx, y: by - ny }, { x: ax - nx, y: ay - ny }]);
+    }
+  }
+  return out;
 }

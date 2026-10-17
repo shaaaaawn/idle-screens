@@ -30,7 +30,7 @@ const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'color
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
-const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'soft', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
@@ -259,7 +259,7 @@ function validateSpecCore(spec: unknown): ValidationResult {
         const sp = isObj(l) ? (l.sprite as Record<string, unknown> | undefined) : undefined;
         if (!sp || sp.kind !== 'polygon' || typeof sp.path !== 'string') continue;
         const n = typeof l.count === 'number' && l.count > 0 ? l.count : 1;
-        pathPoints += flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').points.length * n;
+        pathPoints += (flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').points.length + (isObj(sp.stroke) ? flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').lines.reduce((m, l) => m + l.points.length, 0) : 0)) * n;
       }
       if (pathPoints > MAX_SCENE_PATH_POINTS) {
         err('layers', `path outlines total ${pathPoints} points (flattened points × count); the scene budget is ${MAX_SCENE_PATH_POINTS}`);
@@ -943,11 +943,21 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
       } else {
         const flat = flattenPath(sprite.path, (sprite.fillRule as PathFillRule | undefined) ?? 'auto');
+        const filled = sprite.fill !== false;
         if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);
-        else if (flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points)');
+        else if (filled && flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art');
+        else if (!filled && flat.lines.length === 0) err(`${path}.path`, 'must draw at least one line (2+ points)');
         else if (flat.points.length > MAX_PATH_POINTS) err(`${path}.path`, `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`);
         else if (flat.points.some(([x, y]) => Math.abs(x) > 1.0001 || Math.abs(y) > 1.0001)) err(`${path}.path`, 'must stay inside the -1..1 unit box (curves included)');
       }
+    }
+    if (sprite.path === undefined) {
+      for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path`);
+    } else {
+      if (sprite.fill !== undefined && typeof sprite.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
+      if (sprite.fill === false && sprite.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
+      if (sprite.gradient !== undefined) validatePathGradient(sprite.gradient, `${path}.gradient`, err);
+      if (sprite.stroke !== undefined) validatePathStroke(sprite.stroke, `${path}.stroke`, err);
     }
     if (sprite.fillRule !== undefined) {
       if (!['auto', 'nonzero', 'evenodd'].includes(sprite.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
@@ -1219,6 +1229,42 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   for (const k of unknownKeys(motion, knownSet)) {
     warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
   }
+}
+
+const isPair = (v: unknown, lim = 2): boolean => Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && Math.abs(v[0]) <= lim && Math.abs(v[1]) <= lim;
+
+/** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
+function validatePathGradient(g: unknown, path: string, err: (p: string, m: string) => void): void {
+  if (!isObj(g)) return err(path, "must be { type: 'linear', from, to, stops } or { type: 'radial', center, radius, stops }");
+  if (g.type === 'linear') {
+    if (!isPair(g.from)) err(`${path}.from`, 'must be [x, y] in unit-box coordinates (-2..2)');
+    if (!isPair(g.to)) err(`${path}.to`, 'must be [x, y] in unit-box coordinates (-2..2)');
+  } else if (g.type === 'radial') {
+    if (!isPair(g.center)) err(`${path}.center`, 'must be [x, y] in unit-box coordinates (-2..2)');
+    if (!isNum(g.radius) || g.radius <= 0 || g.radius > 4) err(`${path}.radius`, 'must be > 0 and <= 4 (unit-box units)');
+    if (g.focus !== undefined && !isPair(g.focus)) err(`${path}.focus`, 'must be [x, y] in unit-box coordinates (-2..2)');
+  } else {
+    return err(`${path}.type`, "must be 'linear' | 'radial'");
+  }
+  if (!Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 8) return err(`${path}.stops`, 'must be 2..8 stops');
+  let last = -Infinity;
+  g.stops.forEach((st: unknown, i: number) => {
+    if (!isObj(st)) return err(`${path}.stops[${i}]`, 'must be { at, color, opacity? }');
+    if (!isNum(st.at) || st.at < 0 || st.at > 1 || st.at < last) err(`${path}.stops[${i}].at`, 'must be 0..1, not decreasing');
+    else last = st.at;
+    color(st.color, `${path}.stops[${i}].color`, err);
+    if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.stops[${i}].opacity`, 'must be 0..1');
+  });
+}
+
+/** A path stroke: colour, width in unit-box units, optional opacity / join / cap. */
+function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void): void {
+  if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap? }");
+  color(st.color, `${path}.color`, err);
+  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
+  if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
+  if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
+  if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */

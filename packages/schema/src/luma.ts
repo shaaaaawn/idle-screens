@@ -42,6 +42,17 @@ export function hexLuma(hex: string): number {
 
 export function spriteLuma(layer: LayerSpec, e: Entity): number {
   const s = layer.sprite;
+  if (s.kind === 'polygon' && typeof s.path === 'string') {
+    // A path's fill reads as its gradient's mean stop (opacity-weighted
+    // toward the plain colour); a stroke-only path reads as its stroke.
+    if (s.fill === false && s.stroke) return hexLuma(s.stroke.color);
+    if (s.gradient) {
+      const base = hexLuma(s.colors?.[e.colorIndex] ?? s.color);
+      let sum = 0;
+      for (const st of s.gradient.stops) { const o = st.opacity ?? 1; sum += hexLuma(st.color) * o + base * (1 - o); }
+      return sum / s.gradient.stops.length;
+    }
+  }
   if (isShapedSprite(s)) {
     return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
   }

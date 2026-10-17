@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, polygonArea, polygonPoints } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
+import { spriteLuma } from './luma';
 import { validateSpec } from './validate';
 
 const spec = (path: string) => ({
@@ -121,5 +122,45 @@ describe('polygon.path', () => {
     expect(res.errors.some((e) => /scene budget/.test(e.message))).toBe(true);
     many.layers[0]!.count = 10;
     expect(validateSpec(many).valid).toBe(true);
+  });
+
+  it('keeps every subpath as a line for strokes: open unless closed with Z', () => {
+    const f = flattenPath('M -0.5 0 L 0.5 0 M -0.5 0.5 L 0 0.8 L 0.5 0.5 Z');
+    expect(f.lines.map((l) => [l.points.length, l.closed])).toEqual([[2, false], [3, true]]);
+  });
+  it('validates gradient, stroke and fill: false', () => {
+    const sp = (extra: Record<string, unknown>, d = 'M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 L -0.5 0.5 Z') => {
+      const x = spec(d);
+      Object.assign(x.layers[0]!.sprite, extra);
+      return validateSpec(x);
+    };
+    const stops = [{ at: 0, color: '#ff0000' }, { at: 1, color: '#0000ff', opacity: 0.5 }];
+    expect(sp({ gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops } }).valid).toBe(true);
+    expect(sp({ gradient: { type: 'radial', center: [0, 0], radius: 1, focus: [0.2, -0.2], stops } }).valid).toBe(true);
+    expect(sp({ gradient: { type: 'conic', stops } }).valid).toBe(false);
+    expect(sp({ gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops: [stops[1], stops[0]] } }).valid).toBe(false); // decreasing at
+    expect(sp({ stroke: { color: '#ffffff', width: 0.02, join: 'round' } }).valid).toBe(true);
+    expect(sp({ stroke: { color: '#ffffff', width: 0 } }).valid).toBe(false);
+    expect(sp({ fill: false }).valid).toBe(false); // nothing to draw
+    // Line art: an OPEN two-point path is fine without a fill.
+    expect(sp({ fill: false, stroke: { color: '#ffffff', width: 0.01 } }, 'M -0.8 0 L 0.8 0').valid).toBe(true);
+    expect(sp({}, 'M -0.8 0 L 0.8 0').valid).toBe(false); // filled needs an area
+    const noPath = spec('M0 -1 L1 1 L-1 1 Z');
+    const s0 = noPath.layers[0]!.sprite as Record<string, unknown>;
+    delete s0.path; s0.sides = 5; s0.stroke = { color: '#fff', width: 0.02 };
+    expect(validateSpec(noPath).valid).toBe(false);
+  });
+  it('strokes: one quad per segment, counted in the point budget', () => {
+    const s = { kind: 'polygon' as const, radius: [1, 1] as [number, number], color: '#fff', path: 'M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 Z', stroke: { color: '#000', width: 0.1 } };
+    expect(pathStrokeQuads(s, 10)).toHaveLength(3);
+    expect(pathPointCount(s)).toBe(6);
+    expect(pathPointCount({ ...s, fill: false })).toBe(3);
+  });
+  it('perception reads a gradient as its mean stop, a stroke-only path as its stroke', () => {
+    const layer = (sprite: Record<string, unknown>) => ({ count: 1, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#000000', path: 'M0 -1 L1 1 L-1 1 Z', ...sprite }, motion: { type: 'static' } });
+    const e = { colorIndex: 0 } as never;
+    const black2white = layer({ gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] } });
+    expect(spriteLuma(black2white as never, e)).toBeCloseTo(0.5, 2);
+    expect(spriteLuma(layer({ fill: false, stroke: { color: '#ffffff', width: 0.05 } }) as never, e)).toBeCloseTo(1, 2);
   });
 });
