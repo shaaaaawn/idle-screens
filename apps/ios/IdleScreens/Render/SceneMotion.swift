@@ -25,8 +25,8 @@ enum SceneMotion {
 
     private static func basePosition(of entity: CompiledEntity, at t: TimeInterval,
                                      in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
-        let x0 = entity.x * size.width
-        let y0 = entity.y * size.height
+        let x0 = entity.x * size.width + entity.offDX * dim
+        let y0 = entity.y * size.height + entity.offDY * dim
         let m = entity.size * dim
         let tms = t * 1000
 

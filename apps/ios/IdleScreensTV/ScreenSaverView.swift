@@ -43,7 +43,7 @@ struct ScreenSaverView: View {
                 } else {
                     ThumbStreamView(channelId: app.selectedChannelId ?? "")
                 }
-            } else if app.compiledScene.isEmpty {
+            } else if app.compiledScene.isEmpty, !app.hasBed {
                 ProgressView()
                     .scaleEffect(2)
             } else if app.activeSequence == nil,
@@ -57,6 +57,15 @@ struct ScreenSaverView: View {
                 NotBroadcastingView(channelId: app.selectedChannelId ?? "",
                                     label: channelLabel)
             } else {
+                // A sequence's bed sits under every segment on its own clock:
+                // keyed by channel and timeline only, so a segment change
+                // never remounts (rewinds) it — the continuous ground the
+                // format promises.
+                if app.hasBed, app.effectiveTier == .t3 || app.effectiveTier == .t2 {
+                    bedRenderer
+                        .id("\(app.selectedChannelId ?? "")|bed|\(timelineKey)")
+                        .transition(.opacity)
+                }
                 Group {
                     switch app.effectiveTier {
                     case .t3:
@@ -67,14 +76,16 @@ struct ScreenSaverView: View {
                             renderClass: app.renderClass,
                             tier: .t3,
                             watchdog: app.watchdog,
-                            onDowngrade: { app.watchdogDidTrigger() }
+                            onDowngrade: { app.watchdogDidTrigger() },
+                            transparentGround: app.hasBed
                         )
                     case .t2:
                         // GPU sprite renderer — no watchdog; SpriteKit maintains
                         // its own frame pacing and this tier IS the fallback.
                         SpriteSceneView(
                             layers: app.compiledScene,
-                            background: app.specBackground
+                            background: app.specBackground,
+                            transparentGround: app.hasBed
                         )
                     case .t1:
                         ThumbStreamView(channelId: app.selectedChannelId ?? "")
@@ -142,6 +153,17 @@ struct ScreenSaverView: View {
         .onTapGesture { revealChrome() }
         .onAppear { revealChrome() }
         .onDisappear { chromeTask?.cancel() }
+    }
+
+    /// The bed's renderer: the same tier ladder as a scene, opaque ground,
+    /// its own ghosting, and no watchdog — the segment over it reports.
+    @ViewBuilder private var bedRenderer: some View {
+        if app.effectiveTier == .t3 {
+            NativeSceneView(layers: app.bedScene, background: app.bedBackground,
+                            ghosting: app.bedGhosting, renderClass: app.renderClass, tier: .t3)
+        } else {
+            SpriteSceneView(layers: app.bedScene, background: app.bedBackground)
+        }
     }
 
     /// Bottom scrim with the channel name and the way back — visible for a

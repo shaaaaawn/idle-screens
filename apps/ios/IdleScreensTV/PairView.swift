@@ -194,11 +194,13 @@ private struct ExpiryCountdown: View {
 /// this TV over the socket — pairing proven end-to-end.
 private struct PairedCard: View {
     @State private var appeared = false
+    /// tvOS 27 makes Dynamic Type system-wide: the symbol scales with the text.
+    @ScaledMetric(relativeTo: .largeTitle) private var checkSize: CGFloat = 96
 
     var body: some View {
         VStack(spacing: 26) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 96))
+                .font(.system(size: checkSize))
                 .foregroundStyle(Color.appAccent)
                 .symbolRenderingMode(.hierarchical)
                 .scaleEffect(appeared ? 1 : 0.6)
@@ -211,7 +213,7 @@ private struct PairedCard: View {
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
-        .frame(width: 496, height: 400)
+        .frame(minWidth: 496, minHeight: 400)
         .glassBadge(tint: Color.appAccent, shape: RoundedRectangle(cornerRadius: TV.panelRadius))
         .onAppear { appeared = true }
         .transition(.opacity)
@@ -223,6 +225,7 @@ private struct StatusCard: View {
     let title: String
     let detail: String?
     let spinning: Bool
+    @ScaledMetric(relativeTo: .title) private var iconSize: CGFloat = 52
 
     var body: some View {
         VStack(spacing: 20) {
@@ -231,7 +234,7 @@ private struct StatusCard: View {
                     .scaleEffect(1.6)
             } else {
                 Image(systemName: icon)
-                    .font(.system(size: 52))
+                    .font(.system(size: iconSize))
                     .foregroundStyle(.white.opacity(0.6))
             }
             Text(title)
@@ -245,7 +248,7 @@ private struct StatusCard: View {
                     .lineLimit(3)
             }
         }
-        .frame(width: 496, height: 400)
+        .frame(minWidth: 496, minHeight: 400)
         .glassPanel(shape: RoundedRectangle(cornerRadius: TV.panelRadius))
     }
 }

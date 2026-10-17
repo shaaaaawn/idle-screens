@@ -11,6 +11,8 @@ import type { CapabilityTier } from '@idle-screens/capabilities';
 import { breedOf, fishAsset } from './farm';
 import { resolveIpfsUrls } from './ipfs';
 import { buildLofiField, css, lofiFishPose, lofiRich, type LofiField } from './lofi';
+import { CRITTERS, critterPose, lanternPos, lofiParamsFrom, lofiParamsKey, motePos, shoalCentre, shoalColors, type Critter } from './lofi-extras';
+import { NPC_ICONS } from './lofi-npc-icons';
 import { withDefaults } from './manifest';
 import { LogicalClock } from './runtime';
 
@@ -78,6 +80,24 @@ function loadIcon(id: number): Promise<ImageBitmap | null> {
  * fetch for it and drop the cache entry — closing the bitmap so it isn't
  * pinned for the rest of the page's life.
  */
+/** The unminted breeds' icons ship in the package: decoded once, never released. */
+const NPC_BITMAPS = new Map<number, Promise<ImageBitmap | null>>();
+function loadNpcIcon(id: number): Promise<ImageBitmap | null> {
+  let p = NPC_BITMAPS.get(id);
+  if (p) return p;
+  p = (async () => {
+    const src = NPC_ICONS[id];
+    if (!src || typeof fetch === 'undefined' || typeof createImageBitmap === 'undefined') return null;
+    try {
+      return await createImageBitmap(await (await fetch(src)).blob());
+    } catch {
+      return null;
+    }
+  })();
+  NPC_BITMAPS.set(id, p);
+  return p;
+}
+
 function releaseIcon(id: number): void {
   const n = ICON_REFCOUNTS.get(id);
   if (n === undefined) return;
@@ -105,6 +125,7 @@ class LofiTank implements SaverInstance {
   private readonly g: Ctx2D;
   private readonly clock = new LogicalClock();
   private readonly icons = new Map<number, ImageBitmap>();
+  private readonly npcIcons = new Map<number, ImageBitmap>();
   /** Ids this instance currently holds a {@link loadIcon} ref on — the set
    *  {@link releaseIcon} must be called with, once each, on the next field
    *  change or on dispose. */
@@ -151,6 +172,30 @@ class LofiTank implements SaverInstance {
     else this.start();
   }
 
+  /** The keys the scene set itself — its own params and its track's
+   *  paths. Room overrides apply only to those, as on the TV, which sees
+   *  nothing but authored params. */
+  private authored(): Set<string> {
+    const keys = new Set<string>(Object.keys(this.ctx.params ?? {}));
+    for (const d of this.track?.deltas ?? []) keys.add(d.path);
+    return keys;
+  }
+
+  private drawCritter(c: Critter, t: number): void {
+    const b = CRITTERS[c.breed]!;
+    const icon = this.npcIcons.get(b.id);
+    if (!icon) return;
+    const p = critterPose(c, t, this.w, this.h);
+    const g = this.g;
+    g.save();
+    g.globalAlpha = p.alpha;
+    g.translate(p.x, p.y);
+    if (c.dir < 0 && !b.facing) g.scale(-1, 1);
+    if (!b.floor) g.rotate(Math.sin(t * 0.0011 + c.bobPhase) * 0.05);
+    g.drawImage(icon, -p.side / 2, -p.side / 2, p.side, p.side);
+    g.restore();
+  }
+
   private str(key: string): string | undefined {
     const v = this.params[key];
     return typeof v === 'string' ? v : undefined;
@@ -160,10 +205,20 @@ class LofiTank implements SaverInstance {
   private refreshField(): LofiField {
     const env = this.str('environment');
     const mix = this.str('fishMix');
-    const key = `${env ?? ''}\u0000${mix ?? ''}`;
+    const params = lofiParamsFrom(this.params, this.authored());
+    const key = `${env ?? ''}\u0000${mix ?? ''}\u0000${lofiParamsKey(params)}`;
     if (key === this.fieldKey && this.field) return this.field;
     this.fieldKey = key;
-    this.field = buildLofiField(this.ctx.seed, this.rich, env, mix);
+    this.field = buildLofiField(this.ctx.seed, this.rich, env, mix, params);
+    for (const c of this.field.extras.critters) {
+      const id = CRITTERS[c.breed]!.id;
+      if (this.npcIcons.has(id)) continue;
+      void loadNpcIcon(id).then((bmp) => {
+        if (this.disposed || !bmp) return;
+        this.npcIcons.set(id, bmp);
+        if (this.paused) this.renderStill();
+      });
+    }
     const nextIds = new Set(this.field.fish.map((f) => f.id));
     for (const id of this.heldIds) {
       if (nextIds.has(id)) continue;
@@ -244,8 +299,8 @@ class LofiTank implements SaverInstance {
     g.fillStyle = water;
     g.fillRect(0, 0, w, h);
 
-    // Light shafts: two slow, faint wedges.
-    for (let i = 0; i < 2; i++) {
+    // Light shafts: two slow, faint wedges. A cave (geode interior) has none.
+    for (let i = 0; i < (pal.shaftAlpha > 0 ? 2 : 0); i++) {
       const phase = t * 0.000021 + i * 2.4;
       const cx = w * (0.3 + 0.4 * i) + Math.sin(phase) * w * 0.05;
       const grad = g.createLinearGradient(cx, 0, cx, h);
@@ -258,6 +313,24 @@ class LofiTank implements SaverInstance {
       g.lineTo(cx + w * 0.16, h);
       g.lineTo(cx - w * 0.16, h);
       g.closePath();
+      g.fill();
+    }
+
+    // Sky lanterns: warm glows high in the water, drifting.
+    const px = h / 1080;
+    for (const l of field.extras.lanterns) {
+      const p = lanternPos(l, t, w, h);
+      const r = l.r * px;
+      const grad = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grad.addColorStop(0, `rgba(255,184,89,${0.55 * p.glow})`);
+      grad.addColorStop(1, 'rgba(255,184,89,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(p.x, p.y, r, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = `rgba(255,184,89,${0.9 * p.glow})`;
+      g.beginPath();
+      g.arc(p.x, p.y, r * 0.22, 0, Math.PI * 2);
       g.fill();
     }
 
@@ -280,7 +353,9 @@ class LofiTank implements SaverInstance {
     g.lineCap = 'round';
     g.lineJoin = 'round';
     g.strokeStyle = css(pal.kelp, 0.85);
-    for (const strand of field.kelp) {
+    // The first `floraDensity` share of the strands (all still laid out).
+    const kelpShown = field.flora === undefined ? field.kelp.length : Math.floor(field.kelp.length * field.flora + 0.5);
+    for (const strand of field.kelp.slice(0, kelpShown)) {
       const rootX = strand.x * w;
       const rootY = h * 0.94;
       const top = rootY - strand.height * h;
@@ -293,6 +368,27 @@ class LofiTank implements SaverInstance {
         g.lineTo(rootX + sway, rootY - f * (rootY - top));
       }
       g.stroke();
+    }
+
+    // Floor critters crawl the front dune.
+    for (const c of field.extras.critters) if (CRITTERS[c.breed]!.floor) this.drawCritter(c, t);
+
+    // The shoal: a small school crossing mid-water.
+    if (field.extras.shoal.length > 0) {
+      const centre = shoalCentre(field.extras.shoalLane, field.shoalSpeed, t, w, h);
+      const col = shoalColors(field.shoalKind);
+      for (const f of field.extras.shoal) {
+        const x = centre.x + f.dx * w;
+        const y = centre.y + f.dy * h + Math.sin(t * 0.004 + f.wiggle) * 3 * px;
+        g.fillStyle = css(col.body, 0.85);
+        g.beginPath();
+        g.ellipse(x, y, 7 * px, 1.3 * px, 0, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = css(col.mark, 0.9);
+        g.beginPath();
+        g.ellipse(x + 4.6 * px, y, 1.6 * px, 0.8 * px, 0, 0, Math.PI * 2);
+        g.fill();
+      }
     }
 
     // Fish: far to near.
@@ -308,6 +404,9 @@ class LofiTank implements SaverInstance {
       g.drawImage(icon, -p.side / 2, -p.side / 2, p.side, p.side);
       g.restore();
     }
+
+    // Swimming critters, over the cast.
+    for (const c of field.extras.critters) if (!CRITTERS[c.breed]!.floor) this.drawCritter(c, t);
 
     // Bubbles: columns of rising rings, each addressed by emission index.
     const unit = h / 1080;
@@ -329,6 +428,15 @@ class LofiTank implements SaverInstance {
         g.arc(x, y, r, 0, Math.PI * 2);
         g.stroke();
       }
+    }
+
+    // Marine snow: motes sinking through everything, in front.
+    g.fillStyle = 'rgba(255,255,255,0.45)';
+    for (const m of field.extras.snow) {
+      const p = motePos(m, t, w, h);
+      g.beginPath();
+      g.arc(p.x, p.y, m.r * px, 0, Math.PI * 2);
+      g.fill();
     }
     this.rendered = true;
   }

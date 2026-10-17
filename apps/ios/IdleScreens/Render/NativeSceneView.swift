@@ -35,6 +35,9 @@ struct NativeSceneView: View {
     /// poster; tests render later instants to reach life envelopes, emitters
     /// and trails without an animation loop.
     var staticTime: TimeInterval = 0
+    /// Paint no ground: the view composites over whatever is beneath it —
+    /// a sequence segment over its bed.
+    var transparentGround: Bool = false
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -92,7 +95,7 @@ struct NativeSceneView: View {
             ctx.scaleBy(x: scale, y: scale)
         }
 
-        drawBackground(ctx: ctx, size: space, t: t)
+        if !transparentGround { drawBackground(ctx: ctx, size: space, t: t) }
         let minDim = min(space.width, space.height)
         // t2 load shedding: thin every layer by the same stride so the
         // composition survives (dropping whole trailing layers would cut the
@@ -108,18 +111,26 @@ struct NativeSceneView: View {
             // Layer lifecycle: the whole layer fades in and out on its own
             // envelope, and is skipped outright before it enters / after it
             // leaves (web parity: compile.ts `lifeAlphaAt` gate).
-            let lifeAlpha = layer.life?.alpha(at: t * 1000) ?? 1
+            // Paint opacity (the layer's own × its group's) multiplies the
+            // envelope, and 0 skips the layer, as on the web.
+            let lifeAlpha = (layer.life?.alpha(at: t * 1000) ?? 1) * layer.opacity
             if lifeAlpha <= 0 { continue }
+            // A paint transform draws the whole layer through G·L on a copy
+            // of the context, so nothing below needs to know about it.
+            var layerCtx = ctx
+            if let paint = layer.paint {
+                layerCtx.concatenate(paint.affine(in: space, unit: dim))
+            }
             // A parented orbit rides another layer's first entity (web
             // parity: compile.ts `parentEntityFor`), which is how a compound
             // creature keeps its parts attached.
             let parentEntity = layer.orbitParentKey.flatMap { key in
                 layers.first { $0.key == key }?.entities.first
             }
-            if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
+            if tier == .t3 { applyBlend(ctx: &layerCtx, blend: layer.blend) }
             if let links = layer.links {
                 drawLinks(links, layer: layer, at: t, in: space, dim: dim,
-                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &ctx)
+                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &layerCtx)
             }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
@@ -148,21 +159,20 @@ struct NativeSceneView: View {
                         let decay = pow(ghosting, Double(k))
                         draw(entity: entity,
                              size: entity.size * SceneMotion.growScale(of: entity, at: back),
-                             sprite: layer.sprite, textStyle: layer.textStyle, units: layer.units, at: ghostPoint,
-                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
+                             sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units, at: ghostPoint,
+                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &layerCtx)
                     }
                 }
                 if let trail = layer.trail {
                     drawTrail(trail, entity: entity, layer: layer, at: t, head: point,
                               in: space, dim: dim, alpha: alpha * lifeAlpha,
-                              parent: parentEntity, ctx: &ctx)
+                              parent: parentEntity, ctx: &layerCtx)
                 }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
-                draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
+                draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather,
                      units: layer.units, at: point,
-                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &ctx)
+                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &layerCtx)
             }
-            ctx.blendMode = .normal
         }
     }
 
@@ -188,33 +198,190 @@ struct NativeSceneView: View {
                            layer: CompiledLayer, at t: TimeInterval, head: CGPoint,
                            in space: CGSize, dim: CGFloat, alpha: Double,
                            parent: CompiledEntity?, ctx: inout GraphicsContext) {
-        let fade = trail.fade ?? 1
-        let samples = min(Int((trail.length / 50).rounded(.up)), 24)
-        guard samples > 0, alpha > 0 else { return }
+        guard alpha > 0 else { return }
         let headSize = entity.size * SceneMotion.growScale(of: entity, at: t)
-        let color = Color(.sRGB, red: entity.red, green: entity.green, blue: entity.blue,
-                          opacity: 1)
-        var prev = head
-        for step in 1...samples {
-            let k = Double(step) / Double(samples)
-            let past = t - k * trail.length / 1000
-            guard past >= 0 else { break }
-            let p = SceneMotion.position(of: entity, at: past, in: space, dim: dim,
-                                         wrap: layer.wrap, parent: parent)
-            // A wrapped entity that jumped the seam would smear a line across
-            // the frame; stop the trail at the jump instead.
-            if layer.wrap,
-               abs(p.x - prev.x) > space.width / 2 || abs(p.y - prev.y) > space.height / 2 {
-                break
-            }
-            prev = p
-            let a = alpha * (1 - k * fade)
-            if a <= 0 { break }
-            let r = headSize * dim * (1 - k * 0.7)
-            if r < 0.2 { break }
-            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
-                     with: .color(color.opacity(a)))
+        let shaped: Bool, hardCircle: Bool, soft: Bool
+        switch layer.sprite {
+        case .circle(_, _, _, let isSoft): shaped = false; hardCircle = !isSoft; soft = isSoft
+        case .ring, .rect, .streak, .polygon, .stroke, .bar: shaped = true; hardCircle = false; soft = false
+        default: shaped = false; hardCircle = false; soft = false
         }
+        // Only soft discs and glyph trails are gap-filled (web X469): a hard
+        // circle's echoes join into a ribbon, a shape's stay at its samples.
+        let fill = shaped || hardCircle ? 0 : Self.trailFillBudget(layer.entities.count)
+        let echoes = Self.trailEchoes(trail, at: t, headAlpha: alpha, headRadius: headSize * dim,
+                                      posAt: { SceneMotion.position(of: entity, at: $0, in: space, dim: dim,
+                                                                     wrap: layer.wrap, parent: parent) },
+                                      in: space, wrap: layer.wrap, fillBudget: fill,
+                                      additive: layer.blend == "lighter")
+        guard !echoes.isEmpty else { return }
+        // A shaped sprite trails echoes of its own shape, at the echo's own
+        // time — a spinning or heading-turned mark echoes the way it was then.
+        if shaped {
+            for ec in echoes {
+                draw(entity: entity, size: headSize * ec.r / max(0.0001, headSize * dim),
+                     sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units,
+                     at: ec.point, dim: dim, alpha: ec.alpha, t: ec.t, ctx: &ctx)
+            }
+            return
+        }
+        let color = Color(.sRGB, red: entity.red, green: entity.green, blue: entity.blue, opacity: 1)
+        if hardCircle {
+            fillRibbon(head: head, headRadius: headSize * dim, headAlpha: alpha, echoes: echoes,
+                       posAt: { SceneMotion.position(of: entity, at: $0, in: space, dim: dim,
+                                                      wrap: layer.wrap, parent: parent) },
+                       t: t, color: color, ctx: &ctx)
+            return
+        }
+        for ec in echoes {
+            let rect = CGRect(x: ec.point.x - ec.r, y: ec.point.y - ec.r, width: ec.r * 2, height: ec.r * 2)
+            if soft {
+                ctx.fill(Path(ellipseIn: rect), with: .radialGradient(
+                    Gradient(stops: [.init(color: color.opacity(ec.alpha), location: 0),
+                                     .init(color: color.opacity(ec.alpha * 0.75), location: 0.35),
+                                     .init(color: color.opacity(0), location: 1)]),
+                    center: ec.point, startRadius: 0, endRadius: ec.r))
+            } else {
+                ctx.fill(Path(ellipseIn: rect), with: .color(color.opacity(ec.alpha)))
+            }
+        }
+    }
+
+    /// A hard circle's trail as ONE ribbon tapering through its echoes (web
+    /// X469): quads between shared cross-sections, so nothing overlaps (no
+    /// beads under a blend) and a fast mover draws a line rather than dots.
+    /// Spans whose alphas sit within 4 % of the head's merge into one fill;
+    /// each span is subdivided (≤ ~12 px chords, ≤ 8 per span) so a curve
+    /// stays a curve.
+    private func fillRibbon(head: CGPoint, headRadius: Double, headAlpha: Double,
+                            echoes: [TrailEcho], posAt: (TimeInterval) -> CGPoint,
+                            t: TimeInterval, color: Color, ctx: inout GraphicsContext) {
+        var pts = [head], radii = [headRadius], alphas = [headAlpha]
+        var prevT = t
+        for ec in echoes {
+            let p0 = pts[pts.count - 1], r0 = radii[radii.count - 1], a0 = alphas[alphas.count - 1]
+            let sub = max(1, min(8, Int((hypot(ec.point.x - p0.x, ec.point.y - p0.y) / 12).rounded(.up))))
+            if sub > 1 {
+                for j in 1..<sub {
+                    let f = Double(j) / Double(sub)
+                    pts.append(posAt(prevT + (ec.t - prevT) * f))
+                    radii.append(r0 + (ec.r - r0) * f)
+                    alphas.append(a0 + (ec.alpha - a0) * f)
+                }
+            }
+            pts.append(ec.point); radii.append(ec.r); alphas.append(ec.alpha)
+            prevT = ec.t
+        }
+        let sides = Self.ribbonSides(pts, half: radii)
+        guard sides.left.count == pts.count else { return }
+        let tol = max(0.004, headAlpha * 0.04)
+        var from = 0
+        while from < pts.count - 1 {
+            let a0 = alphas[from + 1]
+            var to = from + 1
+            var sum = a0
+            while to < pts.count - 1, abs(alphas[to + 1] - a0) <= tol { sum += alphas[to + 1]; to += 1 }
+            var path = Path()
+            path.move(to: sides.left[from])
+            for i in (from + 1)...to { path.addLine(to: sides.left[i]) }
+            for i in stride(from: to, through: from, by: -1) { path.addLine(to: sides.right[i]) }
+            path.closeSubpath()
+            ctx.fill(path, with: .color(color.opacity(sum / Double(to - from))))
+            from = to
+        }
+    }
+
+    struct TrailEcho {
+        var t: TimeInterval
+        var point: CGPoint
+        /// 0 (head) … 1 (tail).
+        var k: Double
+        var alpha: Double
+        /// Radius in view points.
+        var r: Double
+    }
+
+    /// Most gap-filling echoes one entity may add (web trail.ts `trailFillBudget`).
+    static func trailFillBudget(_ layerCount: Int) -> Int {
+        max(4, min(48, 240 / max(1, layerCount)))
+    }
+
+    /// The echoes behind an entity at `t` (seconds), head first — a port of
+    /// trail.ts `trailEchoes`: `length/50` samples (≤ 24), each fainter
+    /// (`fade`) and smaller (to 30 % at the tail), stopping at a wrap seam,
+    /// the clock's start or invisibility; spans wider than an echo's radius
+    /// gap-filled within `fillBudget`, each fill echo carrying its share of
+    /// the ink of the echo it replaces.
+    static func trailEchoes(_ trail: SpecSubset.Trail, at t: TimeInterval, headAlpha: Double,
+                            headRadius: Double, posAt: (TimeInterval) -> CGPoint, in space: CGSize,
+                            wrap: Bool, fillBudget: Int, additive: Bool) -> [TrailEcho] {
+        let fade = trail.fade ?? 1
+        let n = min(Int((trail.length / 50).rounded(.up)), 24)
+        guard n > 0 else { return [] }
+        func alphaAt(_ k: Double) -> Double { headAlpha * (1 - k * fade) }
+        func radiusAt(_ k: Double) -> Double { headRadius * (1 - k * 0.7) }
+        func jumps(_ a: CGPoint, _ b: CGPoint) -> Bool {
+            wrap && (abs(b.x - a.x) > space.width / 2 || abs(b.y - a.y) > space.height / 2)
+        }
+        let head = posAt(t)
+        var base: [TrailEcho] = []
+        var prev = head
+        for s in 1...n {
+            let k = Double(s) / Double(n)
+            let past = t - k * trail.length / 1000
+            if past < 0 { break }
+            let p = posAt(past)
+            if jumps(prev, p) { break }
+            prev = p
+            let a = alphaAt(k)
+            if a <= 0 { break }
+            let r = radiusAt(k)
+            if r < 0.2 { break }
+            base.append(TrailEcho(t: past, point: p, k: k, alpha: a, r: r))
+        }
+        guard !base.isEmpty, fillBudget > 0 else { return base }
+        var need: [Int] = []
+        var total = 0
+        for i in base.indices {
+            let a = i == 0 ? head : base[i - 1].point
+            let d = hypot(base[i].point.x - a.x, base[i].point.y - a.y)
+            // ε: a span that is a whole number of radii must not gain an echo
+            // from float noise (this clock is seconds, the web's is ms).
+            let m = d > base[i].r ? Int((d / base[i].r - 1e-9).rounded(.up)) - 1 : 0
+            need.append(m); total += m
+        }
+        guard total > 0 else { return base }
+        let scale = total > fillBudget ? Double(fillBudget) / Double(total) : 1
+        var out: [TrailEcho] = []
+        var last = head
+        for i in base.indices {
+            let b = base[i]
+            let m = Int((Double(need[i]) * scale).rounded(.down))
+            if m == 0 { out.append(b); last = b.point; continue }
+            let a = i == 0 ? head : base[i - 1].point
+            let spacing = hypot(b.point.x - a.x, b.point.y - a.y) / Double(m + 1)
+            func share(_ alpha: Double, _ r: Double) -> Double {
+                let k = min(1, spacing / (2 * r))
+                return additive ? alpha * k : 1 - pow(1 - min(1, alpha), k)
+            }
+            let t0 = i == 0 ? t : base[i - 1].t
+            let k0 = i == 0 ? 0 : base[i - 1].k
+            for j in 1...m {
+                let f = Double(j) / Double(m + 1)
+                let tt = t0 + (b.t - t0) * f
+                let k = k0 + (b.k - k0) * f
+                let p = posAt(tt)
+                if jumps(last, p) { continue }
+                last = p
+                let r = radiusAt(k)
+                out.append(TrailEcho(t: tt, point: p, k: k, alpha: share(alphaAt(k), r), r: r))
+            }
+            var bb = b
+            bb.alpha = share(b.alpha, b.r)
+            out.append(bb)
+            last = b.point
+        }
+        return out
     }
 
     /// Lines between nearby entities — constellations and webs. Only motions
@@ -353,7 +520,7 @@ struct NativeSceneView: View {
     // MARK: - Sprites
 
     private func draw(entity: CompiledEntity, size: Double, sprite: SpecSubset.Sprite,
-                      textStyle: SpecSubset.TextStyle? = nil,
+                      textStyle: SpecSubset.TextStyle? = nil, feather: Double = 0,
                       units: SpecSubset.Units,
                       at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
                       ctx: inout GraphicsContext) {
@@ -402,7 +569,22 @@ struct NativeSceneView: View {
             var layer = ctx
             layer.translateBy(x: point.x, y: point.y)
             layer.rotate(by: .degrees(spin))
-            layer.fill(Path(rect), with: .color(color))
+            if feather > 0 {
+                // Soft edges (web X383): a separable linear ramp,
+                // ramp(u) × ramp(v) — one gradient across, masked by one down.
+                let stops = Self.featherStops(feather)
+                layer.drawLayer { l in
+                    l.fill(Path(rect), with: .linearGradient(
+                        Gradient(stops: stops.map { .init(color: color.opacity($0.alpha), location: $0.at) }),
+                        startPoint: CGPoint(x: -w / 2, y: 0), endPoint: CGPoint(x: w / 2, y: 0)))
+                    l.blendMode = .destinationIn
+                    l.fill(Path(rect), with: .linearGradient(
+                        Gradient(stops: stops.map { .init(color: .white.opacity($0.alpha), location: $0.at) }),
+                        startPoint: CGPoint(x: 0, y: -h / 2), endPoint: CGPoint(x: 0, y: h / 2)))
+                }
+            } else {
+                layer.fill(Path(rect), with: .color(color))
+            }
 
         case .streak(_, _, _, let width):
             let length = size * dim
@@ -472,16 +654,10 @@ struct NativeSceneView: View {
             }
             layer.rotate(by: .degrees(angle))
             if taper {
-                // A brush mark: every sampled segment at its own width.
-                for i in 1..<samples.count {
-                    var seg = Path()
-                    seg.move(to: samples[i - 1])
-                    seg.addLine(to: samples[i])
-                    let u = (Double(i) - 0.5) / Double(samples.count - 1)
-                    layer.stroke(seg, with: .color(color),
-                                 style: StrokeStyle(lineWidth: max(0.5, lw * Self.strokeTaper(u)),
-                                                    lineCap: .round, lineJoin: .round))
-                }
+                // A brush mark: its tapered outline, filled ONCE (web X386).
+                // Stroking each segment at its own width overlapped at every
+                // joint, and a translucent mark showed each overlap as a bead.
+                layer.fill(Self.polygonPath(Self.strokeOutline(samples, lineWidth: lw)), with: .color(color))
             } else {
                 var path = Path()
                 path.move(to: samples[0])
@@ -555,6 +731,78 @@ struct NativeSceneView: View {
     /// vanishes mid-stroke on a coarse display.
     static func strokeTaper(_ u: Double) -> Double {
         max(0.15, sin(.pi * min(1, max(0, u))))
+    }
+
+    /// Gradient stops of shapes.ts `featherRamp` across one axis: 0 at each
+    /// edge, 1 from `feather/2` of the width in; a wide feather peaks below 1.
+    static func featherStops(_ feather: Double) -> [(at: Double, alpha: Double)] {
+        let band = min(1, max(0, feather)) / 2
+        guard band > 0 else { return [(0, 1), (1, 1)] }
+        if band >= 0.5 { return [(0, 0), (0.5, min(1, 0.5 / band)), (1, 0)] }
+        return [(0, 0), (band, 1), (1 - band, 1), (1, 0)]
+    }
+
+    /// A closed path through `pts`.
+    static func polygonPath(_ pts: [CGPoint]) -> Path {
+        var path = Path()
+        guard let first = pts.first else { return path }
+        path.move(to: first)
+        for p in pts.dropFirst() { path.addLine(to: p) }
+        path.closeSubpath()
+        return path
+    }
+
+    /// The two sides of a ribbon through `pts`, `half[i]` either side of
+    /// point i along its joint's bisector normal — mitred, the miter capped
+    /// at 2×. `left` is the +normal side (−ty, tx). Port of shapes.ts
+    /// `ribbonSides`.
+    static func ribbonSides(_ pts: [CGPoint], half: [Double]) -> (left: [CGPoint], right: [CGPoint]) {
+        let n = pts.count
+        guard n >= 2 else { return ([], []) }
+        func dir(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let l = hypot(dx, dy)
+            return l > 1e-9 ? CGPoint(x: dx / l, y: dy / l) : CGPoint(x: 1, y: 0)
+        }
+        var left: [CGPoint] = [], right: [CGPoint] = []
+        left.reserveCapacity(n); right.reserveCapacity(n)
+        for i in 0..<n {
+            let tIn = i > 0 ? dir(pts[i - 1], pts[i]) : dir(pts[0], pts[1])
+            let tOut = i < n - 1 ? dir(pts[i], pts[i + 1]) : tIn
+            var tx = tIn.x + tOut.x, ty = tIn.y + tOut.y
+            let tl = hypot(tx, ty)
+            if tl < 1e-9 { tx = tOut.x; ty = tOut.y } else { tx /= tl; ty /= tl }
+            let hw = half[i] / max(0.5, tx * tOut.x + ty * tOut.y)
+            left.append(CGPoint(x: pts[i].x - ty * hw, y: pts[i].y + tx * hw))
+            right.append(CGPoint(x: pts[i].x + ty * hw, y: pts[i].y - tx * hw))
+        }
+        return (left, right)
+    }
+
+    /// A tapered stroke's filled outline: the samples offset ±half their
+    /// tapered width (`lw × strokeTaper(i/(n−1))`, floored at 0.5 px), with
+    /// round end caps, as one closed polygon. Port of shapes.ts `strokeOutline`.
+    static func strokeOutline(_ pts: [CGPoint], lineWidth lw: Double, taper: Bool = true) -> [CGPoint] {
+        let n = pts.count
+        guard n >= 2 else { return [] }
+        func half(_ i: Int) -> Double { max(0.5, taper ? lw * strokeTaper(Double(i) / Double(n - 1)) : lw) / 2 }
+        func dir(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let l = hypot(dx, dy)
+            return l > 1e-9 ? CGPoint(x: dx / l, y: dy / l) : CGPoint(x: 1, y: 0)
+        }
+        let sides = ribbonSides(pts, half: (0..<n).map(half))
+        func cap(_ c: CGPoint, _ r: Double, from: Double) -> [CGPoint] {
+            (1..<6).map { k in
+                let a = from - .pi * Double(k) / 6
+                return CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r)
+            }
+        }
+        let endT = dir(pts[n - 2], pts[n - 1]), startT = dir(pts[0], pts[1])
+        let endA = atan2(endT.y, endT.x) + .pi / 2
+        let startA = atan2(startT.y, startT.x) - .pi / 2
+        return sides.left + cap(pts[n - 1], half(n - 1), from: endA)
+            + sides.right.reversed() + cap(pts[0], half(0), from: startA)
     }
 
     /// 0…1 fill of bar `index`: `values[i] / max`, max defaulting to the

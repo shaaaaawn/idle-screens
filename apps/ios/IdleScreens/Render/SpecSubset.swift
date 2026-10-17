@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // MARK: - mulberry32 PRNG (same algorithm as the web engine)
@@ -32,6 +33,8 @@ struct SpecSubset: Decodable, Equatable {
     /// 0…1 frame persistence: each frame paints over a partly-transparent
     /// clear instead of a fresh one, smearing motion into trails.
     var ghosting: Double?
+    /// Named paint groups: a multi-layer subject moved/faded as one (3.11).
+    var groups: Groups?
 
     /// Dimensional unit system. 'viewport' (default) = sizes/speeds are fractions
     /// of min(w,h); 'px' = raw pixels. The server migrates legacy specs to "px".
@@ -131,14 +134,25 @@ struct SpecSubset: Decodable, Equatable {
         /// Phase-locks the layer: every entity pulses/grows in step, from
         /// `phase` (0…1 of a cycle), at `rate`× time.
         var clock: Clock?
+        /// Paint-level layer opacity (3.10): multiplies every entity and the
+        /// life envelope; 0 skips the layer.
+        var opacity: Double?
+        /// Paint-level transform of the whole layer (3.10).
+        var transform: LayerTransform?
+        /// The `groups` entry this layer paints through (3.11).
+        var group: String?
+        /// `rect.feather`: the fraction of the half-size that fades out on
+        /// every side (lifted out of `sprite` like textStyle).
+        var rectFeather: Double?
 
         private enum CodingKeys: String, CodingKey {
             case key, count, sprite, size, motion, wrap, alpha, blend, pulse
             case spin, region, position, grow, life, layout, trail, emit, links
-            case rotate, clock
+            case rotate, clock, opacity, transform, group
         }
         private struct SpriteExtras: Decodable {
             var colorWeights: [Double]?
+            var feather: Double?
             var anchor: String?
             var font: String?
             var opacity: Double?
@@ -166,12 +180,72 @@ struct SpecSubset: Decodable, Equatable {
             links = try? c.decodeIfPresent(Links.self, forKey: .links)
             let extras = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite)) ?? nil
             colorWeights = extras?.colorWeights
+            rectFeather = extras?.feather.map { Swift.min(1, Swift.max(0, $0)) }
             if extras?.anchor != nil || extras?.font != nil || extras?.opacity != nil {
                 textStyle = TextStyle(anchor: extras?.anchor, font: extras?.font,
                                       opacity: extras?.opacity)
             }
             rotate = try? c.decodeIfPresent(Spin.self, forKey: .rotate)
             clock = try? c.decodeIfPresent(Clock.self, forKey: .clock)
+            opacity = try? c.decodeIfPresent(Double.self, forKey: .opacity)
+            transform = try? c.decodeIfPresent(LayerTransform.self, forKey: .transform)
+            group = try? c.decodeIfPresent(String.self, forKey: .group)
+        }
+    }
+
+    /// `{x?, y?, scale?, scaleX?, rotate?, origin?}` — translate in spec
+    /// units (min(w,h), or px), rotate in degrees, about the viewport centre
+    /// or (`origin: "anchor"`) the layer's own anchor. Lenient per field: a
+    /// bad value is identity for that field, never a dropped scene.
+    struct LayerTransform: Decodable, Equatable, Sendable {
+        var x: Double?
+        var y: Double?
+        var scale: Double?
+        var scaleX: Double?
+        var rotate: Double?
+        var origin: String?
+
+        init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, scaleX: Double? = nil,
+             rotate: Double? = nil, origin: String? = nil) {
+            self.x = x; self.y = y; self.scale = scale; self.scaleX = scaleX
+            self.rotate = rotate; self.origin = origin
+        }
+
+        private enum CodingKeys: String, CodingKey { case x, y, scale, scaleX, rotate, origin }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            x = try? c.decodeIfPresent(Double.self, forKey: .x)
+            y = try? c.decodeIfPresent(Double.self, forKey: .y)
+            scale = try? c.decodeIfPresent(Double.self, forKey: .scale)
+            scaleX = try? c.decodeIfPresent(Double.self, forKey: .scaleX)
+            rotate = try? c.decodeIfPresent(Double.self, forKey: .rotate)
+            origin = try? c.decodeIfPresent(String.self, forKey: .origin)
+        }
+    }
+
+    struct LayerGroup: Decodable, Equatable, Sendable {
+        var transform: LayerTransform?
+        var opacity: Double?
+
+        private enum CodingKeys: String, CodingKey { case transform, opacity }
+        init(transform: LayerTransform? = nil, opacity: Double? = nil) {
+            self.transform = transform; self.opacity = opacity
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            transform = try? c.decodeIfPresent(LayerTransform.self, forKey: .transform)
+            opacity = try? c.decodeIfPresent(Double.self, forKey: .opacity)
+        }
+    }
+
+    /// The `groups` map. Never throws: a malformed map paints as no groups,
+    /// which is the format's own native fallback, rather than dropping the
+    /// whole scene the way a throwing top-level field would.
+    struct Groups: Decodable, Equatable, Sendable {
+        var byName: [String: LayerGroup]
+        init(_ byName: [String: LayerGroup]) { self.byName = byName }
+        init(from decoder: Decoder) throws {
+            byName = (try? decoder.singleValueContainer().decode([String: LayerGroup].self)) ?? [:]
         }
     }
 
@@ -296,6 +370,10 @@ struct SpecSubset: Decodable, Equatable {
     struct Position: Decodable, Equatable {
         var x: Double
         var y: Double
+        /// Offset in spec units (min(w,h) fractions, or px) — the aspect-safe
+        /// way to place a compound form's parts around one shared point.
+        var dx: Double?
+        var dy: Double?
     }
 
     /// `motion.center` is a union: `{x, y}` pins the orbit to a point,
@@ -614,6 +692,9 @@ struct CompiledEntity: Equatable, Sendable {
     /// Second dimension: rect height (already folded into `aspect`) or a
     /// bar's thickness, in spec units.
     var thickness: Double = 0
+    /// `position.dx`/`dy`: an offset from (x, y) in spec units (×dim at draw).
+    var offDX: Double = 0
+    var offDY: Double = 0
 }
 
 /// One entity's emit window. Timing is composition, not scatter: it is
@@ -716,6 +797,66 @@ struct CompiledLayer: Equatable, Sendable {
     var trail: SpecSubset.Trail?
     var links: SpecSubset.Links?
     var textStyle: SpecSubset.TextStyle?
+    /// Paint opacity: the layer's own × its group's, 0…1.
+    var opacity: Double = 1
+    /// `rect.feather` 0…1 (0 = hard edges).
+    var feather: Double = 0
+    /// Paint transform (the layer's own and/or its group's); nil = identity.
+    var paint: PaintTransform?
+}
+
+/// A layer's paint-level transform, resolved at draw time for a view size.
+/// Mirrors the web's draw-time canvas transform (compile.ts
+/// `applyLayerTransform`): a member of a group is drawn through G·L — its own
+/// transform L about its origin, wrapped by the group's G about the viewport
+/// centre — so a point p lands at G(L(p)).
+struct PaintTransform: Equatable, Sendable {
+    var layer: SpecSubset.LayerTransform?
+    var group: SpecSubset.LayerTransform?
+    /// The layer's anchor: fractions of w/h plus an offset in spec units.
+    var anchorX: Double = 0.5
+    var anchorY: Double = 0.5
+    var anchorDX: Double = 0
+    var anchorDY: Double = 0
+
+    /// The affine that takes layer space to view space, applied first-to-last
+    /// (`p.applying(m)`), in a y-down space of `size` with `unit` = min(w,h)
+    /// for viewport specs or 1 for px specs.
+    func affine(in size: CGSize, unit: CGFloat) -> CGAffineTransform {
+        let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+        var m = CGAffineTransform.identity
+        if let layer {
+            let o = layer.origin == "anchor"
+                ? CGPoint(x: anchorX * size.width + anchorDX * unit, y: anchorY * size.height + anchorDY * unit)
+                : centre
+            m = m.concatenating(Self.step(layer, about: o, unit: unit))
+        }
+        if let group { m = m.concatenating(Self.step(group, about: centre, unit: unit)) }
+        return m
+    }
+
+    /// Total rotation in degrees and axis scales — what a sprite node that
+    /// can't take a full affine (SpriteKit) applies to itself.
+    var rotationDegrees: Double { (layer?.rotate ?? 0) + (group?.rotate ?? 0) }
+    var scaleXY: (x: Double, y: Double) {
+        func s(_ tf: SpecSubset.LayerTransform?) -> (Double, Double) {
+            let k = tf?.scale ?? 1
+            return (k * (tf?.scaleX ?? 1), k)
+        }
+        let a = s(layer), b = s(group)
+        return (a.0 * b.0, a.1 * b.1)
+    }
+
+    /// translate(-o) → scale(s·sx, s) → rotate → translate(o + offset), the
+    /// web's canvas call sequence read as one point map.
+    private static func step(_ tf: SpecSubset.LayerTransform, about o: CGPoint, unit: CGFloat) -> CGAffineTransform {
+        let s = tf.scale ?? 1
+        return CGAffineTransform(translationX: -o.x, y: -o.y)
+            .concatenating(CGAffineTransform(scaleX: s * (tf.scaleX ?? 1), y: s))
+            .concatenating(CGAffineTransform(rotationAngle: (tf.rotate ?? 0) * .pi / 180))
+            .concatenating(CGAffineTransform(translationX: o.x + (tf.x ?? 0) * unit,
+                                             y: o.y + (tf.y ?? 0) * unit))
+    }
 }
 
 extension SpecSubset {
@@ -746,7 +887,21 @@ extension SpecSubset {
         let stride = requested > budget.entities
             ? max(1, Int((Double(requested) / Double(budget.entities)).rounded(.up)))
             : 1
-        return kept.map { $0.compile(rng: &rng, units: resolvedUnits, stride: stride) }
+        return kept.map { layer in
+            var compiled = layer.compile(rng: &rng, units: resolvedUnits, stride: stride)
+            // A member paints through its group: opacity multiplies, and the
+            // group's transform (always about the viewport centre) wraps the
+            // layer's own. A group name that matches nothing is no group.
+            if let name = layer.group, let g = groups?.byName[name] {
+                if let o = g.opacity { compiled.opacity *= Swift.min(1, Swift.max(0, o)) }
+                if let gtf = g.transform {
+                    var paint = compiled.paint ?? PaintTransform()
+                    paint.group = gtf
+                    compiled.paint = paint
+                }
+            }
+            return compiled
+        }
     }
 }
 
@@ -800,6 +955,7 @@ extension SpecSubset.Layer {
         let xr = Self.pair(region?.x, default: (0, 1))
         let yr = Self.pair(region?.y, default: (0, 1))
         var gapX = 0.0, gapY = 0.0, listX0 = 0.0, listY0 = 0.0, listCols = 1
+        var listDX = 0.0, listDY = 0.0
         if ordered, let layout {
             // Default gap: raw px for px specs, viewport fraction otherwise.
             let dflt = units == .px ? 28.0 : 0.06
@@ -810,6 +966,8 @@ extension SpecSubset.Layer {
             if let position {
                 listX0 = position.x
                 listY0 = position.y
+                listDX = position.dx ?? 0
+                listDY = position.dy ?? 0
             } else {
                 listX0 = (xr.0 + xr.1) / 2 - Double(listCols - 1) * gapX / 2
                 listY0 = (yr.0 + yr.1) / 2 - Double(rows - 1) * gapY / 2
@@ -835,13 +993,18 @@ extension SpecSubset.Layer {
             // and leaves its alpha/pulse/spin stream untouched (web parity).
             let x: Double
             let y: Double
+            var offDX = 0.0, offDY = 0.0
             if let position, count == 1 {
                 x = position.x
                 y = position.y
+                offDX = position.dx ?? 0
+                offDY = position.dy ?? 0
             } else if ordered {
                 _ = rng.next(); _ = rng.next()   // burned for stream parity
                 x = listX0 + Double(i % listCols) * gapX
                 y = listY0 + Double(i / listCols) * gapY
+                offDX = listDX
+                offDY = listDY
             } else if layout?.type == "grid" {
                 let col = i % gridCols, row = i / gridCols
                 let jx = layout?.jitterX ?? 0, jy = layout?.jitterY ?? 0
@@ -1063,7 +1226,9 @@ extension SpecSubset.Layer {
                 rotate: rotate.map { $0.min == $0.max ? $0.min : $0.min + rng.next() * ($0.max - $0.min) } ?? 0,
                 orbitParented: orbitParentKey != nil,
                 barIndex: i,
-                thickness: barThickness
+                thickness: barThickness,
+                offDX: offDX,
+                offDY: offDY
             ))
         }
         if let clock {
@@ -1092,7 +1257,20 @@ extension SpecSubset.Layer {
             orbitParentKey: orbitParentKey,
             trail: trail,
             links: links,
-            textStyle: textStyle
+            textStyle: textStyle,
+            opacity: opacity.map { Swift.min(1, Swift.max(0, $0)) } ?? 1,
+            feather: rectFeather ?? 0,
+            paint: transform.map { tf in
+                // The layer's anchor: its position (+dx/dy), else its region's centre.
+                let rx = Self.pair(region?.x, default: (0, 1))
+                let ry = Self.pair(region?.y, default: (0, 1))
+                return PaintTransform(
+                    layer: tf,
+                    anchorX: position?.x ?? (rx.0 + rx.1) / 2,
+                    anchorY: position?.y ?? (ry.0 + ry.1) / 2,
+                    anchorDX: position?.dx ?? 0,
+                    anchorDY: position?.dy ?? 0)
+            }
         )
     }
 

@@ -236,6 +236,7 @@ final class TVAppState {
         watchdogDowngraded = false
         complexityCap = nil
         stopSequence()
+        stopKeyframes()
         resetTimeline()
         scheduleRotation()
         UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
@@ -330,10 +331,16 @@ final class TVAppState {
         historyTask?.cancel()
         historyTask = Task { [weak self] in
             guard let self else { return }
-            if self.historyStops.isEmpty, older {
-                let events = (try? await self.gallery.fetchHistory(channelId: channelId)) ?? []
-                guard !Task.isCancelled, self.selectedChannelId == channelId else { return }
-                self.historyStops = ChannelFeed.stops(from: events)
+            if older, self.historyEvents.isEmpty || self.atOldestLoadedStop, self.historyHasMore {
+                // First Left fetches a page; reaching its oldest stop fetches
+                // the next, so the past keeps going instead of hitting a wall
+                // at one page (the phone pages the same way).
+                guard let page = try? await self.gallery.fetchHistoryPage(
+                    channelId: channelId, limit: 40, before: self.historyEvents.map(\.id).min()),
+                      !Task.isCancelled, self.selectedChannelId == channelId else { return }
+                self.historyEvents += page.events
+                self.historyHasMore = (page.hasMore ?? false) && !page.events.isEmpty
+                self.historyStops = ChannelFeed.stops(from: self.historyEvents, limit: nil)
             }
             let target = Self.timelineStep(from: self.timeline, older: older,
                                            stops: self.historyStops.count)
@@ -361,10 +368,22 @@ final class TVAppState {
         if let live = liveScene { render(live.json, fallbackSeed: live.seed) }
     }
 
+    /// Every event fetched so far, newest pages first, and whether the server
+    /// has older ones.
+    private var historyEvents: [ChannelEvent] = []
+    private var historyHasMore = true
+
+    private var atOldestLoadedStop: Bool {
+        if case .past(let i) = timeline { return i >= historyStops.count - 1 }
+        return historyStops.isEmpty
+    }
+
     private func resetTimeline() {
         historyTask?.cancel()
         timeline = .live
         historyStops = []
+        historyEvents = []
+        historyHasMore = true
         pastScene = nil
         liveScene = nil
         liveClassicParams = [:]
@@ -372,13 +391,17 @@ final class TVAppState {
 
     private func show(_ scene: RecordedScene) {
         stopSequence()
+        stopKeyframes()
         if let spec = scene.spec {
             isClassicSpec = false
             classicSaverId = nil
-            compiledScene = spec.compile(seed: scene.seed ?? spec.seed ?? 0, budget: sceneBudget)
+            let seed = scene.seed ?? spec.seed ?? 0
+            compiledScene = spec.compile(seed: seed, budget: sceneBudget)
             specBackground = spec.background
             specGhosting = spec.ghosting ?? 0
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+            // A timed piece in the past plays its keyframes too, not its base.
+            if let raw = scene.rawSpec { startKeyframes(raw, seed: seed) }
         } else {
             isClassicSpec = true
             classicSaverId = scene.classicSaverId
@@ -448,6 +471,7 @@ final class TVAppState {
     func exitChannel() {
         selectedChannelId = nil
         overlayText = nil
+        stopKeyframes()
         resetTimeline()
         rotationTask?.cancel()
         // Stay reachable: keep a socket on the last channel so a paired phone
@@ -601,6 +625,7 @@ final class TVAppState {
         }
         stopSequence()
         guard let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
+            stopKeyframes()
             // Not a schema spec (e.g. classic saver {"id":"warp"}). Savers
             // with a native port render locally; the rest stay on thumbs.
             isClassicSpec = true
@@ -617,10 +642,15 @@ final class TVAppState {
         isClassicSpec = false
         classicSaverId = nil
         let seed = spec.seed ?? fallbackSeed ?? 0
+        // Snapshots repeat the document. A timed scene already being driven
+        // keeps its clock and its current frame: recompiling the base here
+        // would flash the un-keyed scene, and restarting would rewind it.
+        if isDrivingKeyframes(json, seed: seed) { return }
         compiledScene = spec.compile(seed: seed, budget: sceneBudget)
         specBackground = spec.background
         specGhosting = spec.ghosting ?? 0
         complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+        startKeyframes(json, seed: seed)
     }
 
     // MARK: Sequence playback
@@ -635,6 +665,14 @@ final class TVAppState {
     private(set) var sequenceSegmentKey: String?
     /// Crossfade duration entering the current segment (0 = hard cut).
     private(set) var sequenceCrossfade: TimeInterval = 0
+    /// The sequence's bed, compiled once: drawn under every segment on its
+    /// own clock, which never resets at a segment boundary. Empty = no bed.
+    private(set) var bedScene: [CompiledLayer] = []
+    private(set) var bedBackground: SpecSubset.Background?
+    private(set) var bedGhosting: Double = 0
+    /// True while the active sequence has a bed (even one with no layers —
+    /// its ground alone still replaces every segment's background).
+    private(set) var hasBed = false
 
     private func startSequence(_ seq: SequenceSubset, fallbackSeed: Int?) {
         // WS snapshots repeat the document — restart only on real change.
@@ -642,6 +680,14 @@ final class TVAppState {
         sequenceTask?.cancel()
         activeSequence = seq
         sequenceEpoch = Date()
+        if let bed = seq.bed {
+            bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
+            bedBackground = bed.background
+            bedGhosting = bed.ghosting ?? 0
+            hasBed = true
+        } else {
+            clearBed()
+        }
         applySegment(seq, at: 0, fallbackSeed: fallbackSeed)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
     }
@@ -653,9 +699,18 @@ final class TVAppState {
         sequenceEpoch = nil
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
+        clearBed()
+    }
+
+    private func clearBed() {
+        bedScene = []
+        bedBackground = nil
+        bedGhosting = 0
+        hasBed = false
     }
 
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
+        stopKeyframes()
         let resolved = seq.resolve(at: T)
         let segment = seq.segments[resolved.index]
         sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
@@ -663,9 +718,17 @@ final class TVAppState {
         let scene = segment.scene
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)
-        specBackground = scene.background
-        specGhosting = scene.ghosting ?? 0
-        complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+        // Over a bed, a segment paints transparently: the bed owns the
+        // ground, and a smear needs an opaque ground to decay into.
+        specBackground = hasBed ? nil : scene.background
+        specGhosting = hasBed ? 0 : (scene.ghosting ?? 0)
+        complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
+        // A segment's own keyframes run on its local clock (from 0 at entry).
+        if case .object(let root)? = currentSpecJSON,
+           case .array(let segs)? = root["segments"], segs.indices.contains(resolved.index),
+           case .object(let seg) = segs[resolved.index], let raw = seg["scene"] {
+            startKeyframes(raw, seed: seed)
+        }
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {
@@ -682,6 +745,75 @@ final class TVAppState {
                                   fallbackSeed: fallbackSeed)
             }
         }
+    }
+
+    // MARK: Keyframes (`timeline`)
+
+    /// Drives a scene's `timeline`: re-resolves the authored JSON on the
+    /// scene's own clock and recompiles when the resolved scene changes.
+    /// Compiling is deterministic per seed, so every entity keeps its place
+    /// across recompiles — the web's rebuild-on-structural-change, in effect.
+    /// Ticks at the tier's rate only while a glide is in flight, and sleeps
+    /// through holds until the next key.
+    private var keyframeTask: Task<Void, Never>?
+    /// What the driver is playing: the authored JSON and its seed.
+    private var keyframeSource: (json: JSONValue, seed: Int)?
+
+    private func isDrivingKeyframes(_ json: JSONValue, seed: Int) -> Bool {
+        guard keyframeTask != nil, let src = keyframeSource else { return false }
+        return src.seed == seed && src.json == json
+    }
+
+    /// How often a glide is re-resolved: smooth on Canvas; on the sprite tier
+    /// every recompile rebuilds textures, so a glide steps a few times a second.
+    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 30 : 0.25 }
+
+    private func stopKeyframes() {
+        keyframeTask?.cancel()
+        keyframeTask = nil
+        keyframeSource = nil
+    }
+
+    private func startKeyframes(_ source: JSONValue, seed: Int) {
+        if isDrivingKeyframes(source, seed: seed) { return }
+        stopKeyframes()
+        guard SpecTimeline.hasTimeline(source) else { return }
+        keyframeSource = (source, seed)
+        let epoch = Date()
+        keyframeTask = Task { [weak self] in
+            var last: JSONValue?
+            var slow = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                let interval = self.keyframeInterval
+                let t = Date().timeIntervalSince(epoch) * 1000
+                let resolved = SpecTimeline.resolve(source, at: t)
+                if resolved != last {
+                    let began = Date()
+                    guard self.applyKeyframe(resolved, seed: seed) else { return }
+                    last = resolved
+                    // A box that can't recompile inside one tick holds the
+                    // scene where it is rather than falling behind its clock.
+                    slow = Date().timeIntervalSince(began) > interval ? slow + 1 : 0
+                    if slow >= 3 { return }
+                }
+                guard let next = SpecTimeline.nextChange(source, after: t) else { return }
+                let wait = next <= t ? interval : Swift.max(interval, (next - t) / 1000)
+                try? await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    /// One resolved keyframe state on screen. False when it no longer decodes.
+    private func applyKeyframe(_ json: JSONValue, seed: Int) -> Bool {
+        guard let data = try? JSONEncoder().encode(json),
+              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return false }
+        compiledScene = spec.compile(seed: seed, budget: sceneBudget)
+        if !hasBed {
+            specBackground = spec.background
+            specGhosting = spec.ghosting ?? 0
+        }
+        return true
     }
 
     // MARK: Tier reporting
