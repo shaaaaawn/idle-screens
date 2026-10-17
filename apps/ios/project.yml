@@ -179,6 +179,19 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/IdleScreensTV.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IdleScreensTV"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  IdleScreensTVUITests:
+    type: bundle.ui-testing
+    platform: tvOS
+    sources:
+      - IdleScreensTVUITests
+    dependencies:
+      - target: IdleScreensTV
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: IdleScreensTV
+
 schemes:
   IdleScreens:
     build:
@@ -215,3 +228,15 @@ schemes:
       config: Release
     analyze:
       config: Debug
+
+  # Measuring tool, not a gate: drives the real remote across the grid while
+  # the debug RenderProbe logs what each move costs. Kept out of the
+  # IdleScreensTV scheme so CI and the ship gate never run it.
+  IdleScreensTVUITests:
+    build:
+      targets:
+        IdleScreensTVUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - IdleScreensTVUITests

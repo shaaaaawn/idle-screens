@@ -72,6 +72,7 @@ struct ClassicSaverView: View {
     }
 
     private func draw(_ ctx: inout GraphicsContext, _ size: CGSize, _ t: Double) {
+        RenderProbe.hit(live ? "classic.live" : "classic.static")
         let seed32 = UInt32(truncatingIfNeeded: seed)
         switch kind {
         case .warp:

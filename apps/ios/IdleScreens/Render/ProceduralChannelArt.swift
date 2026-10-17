@@ -21,6 +21,7 @@ struct ProceduralChannelArt: View {
 
     var body: some View {
         Canvas { ctx, size in
+            RenderProbe.hit("procedural")
             var rng = Mulberry32(seed: Self.seed(for: channelId))
             let rect = CGRect(origin: .zero, size: size)
             let minDim = min(size.width, size.height)

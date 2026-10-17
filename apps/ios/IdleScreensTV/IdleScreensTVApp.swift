@@ -127,7 +127,6 @@ enum DeepLink {
 private struct PosterDebugView: View {
     let channelId: String
     @Environment(TVAppState.self) private var app
-    @FocusState private var focused: String?
 
     var body: some View {
         ZStack {
@@ -137,7 +136,7 @@ private struct PosterDebugView: View {
             } else {
                 HStack(alignment: .top, spacing: TV.columnGap) {
                     ForEach(cards) { channel in
-                        ChannelCard(channel: channel, focusBinding: $focused)
+                        ChannelCard(channel: channel)
                             .frame(width: 500)
                     }
                 }
@@ -145,10 +144,9 @@ private struct PosterDebugView: View {
             }
         }
         .task {
+            // The first card takes focus by default, so focused and
+            // unfocused captions are both on screen in one capture.
             if app.channels.isEmpty { await app.loadGallery() }
-            // Park focus on the first card so focused and unfocused
-            // captions are both on screen in one capture.
-            focused = cards.first?.id
         }
     }
 
