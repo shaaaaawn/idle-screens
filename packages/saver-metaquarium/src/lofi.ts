@@ -1,6 +1,7 @@
 import type { CapabilityTier } from '@idle-screens/capabilities';
 import { isMintedId } from './farm';
 import { parseFishMix } from './ipfs';
+import { applyRoom, buildLofiExtras, DEFAULT_LOFI_PARAMS, type LofiExtras, type LofiParams } from './lofi-extras';
 
 /**
  * The lofi tank: a browser port of the Apple TV's native 2D aquarium
@@ -110,6 +111,12 @@ export interface LofiField {
   palette: LofiPalette;
   /** t3 on the TV: more fish, kelp, bubble columns and bubbles per column. */
   rich: boolean;
+  /** Room, atmosphere and critters (lofi-extras.ts). */
+  extras: LofiExtras;
+  /** `floraDensity`: the share of kelp drawn (undefined = all of it). */
+  flora?: number;
+  shoalKind: string;
+  shoalSpeed: number;
 }
 
 /** The TV's t3 is the browser's top tier; everything else renders like t2. */
@@ -140,10 +147,14 @@ export function buildLofiField(
   rich: boolean,
   environment?: string,
   fishMix?: string,
+  params: LofiParams = DEFAULT_LOFI_PARAMS,
 ): LofiField {
   const next = mulberry32(seed);
-  const n = rich ? 13 : 8;
-  const cast = lofiCast(fishMix, n);
+  const cast = lofiCast(fishMix, rich ? 13 : 8);
+  // A mix of only unminted breeds casts no minted fish — those breeds swim
+  // as critters — rather than a random minted cast it never named.
+  const onlyUnminted = cast === null && parseFishMix((fishMix ?? '').trim()).entries.length > 0;
+  const n = onlyUnminted ? 0 : rich ? 13 : 8;
   const fish: LofiFish[] = [];
   for (let i = 0; i < n; i++) {
     // Depth stratified, not random: every third of the tank gets its share
@@ -200,7 +211,12 @@ export function buildLofiField(
     bubbles.push({ x, period, phase, drift });
   }
 
-  return { fish, kelp, bubbles, palette: lofiPaletteOf(environment), rich };
+  return {
+    fish, kelp, bubbles, palette: applyRoom(lofiPaletteOf(environment), params), rich,
+    extras: buildLofiExtras(seed, rich, fishMix, params),
+    ...(params.floraDensity !== undefined ? { flora: params.floraDensity } : {}),
+    shoalKind: params.shoalKind, shoalSpeed: params.shoalSpeed,
+  };
 }
 
 export interface LofiFishPose { id: number; x: number; y: number; side: number; alpha: number; rotation: number; mirror: boolean }

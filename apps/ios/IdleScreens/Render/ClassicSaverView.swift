@@ -88,7 +88,8 @@ struct ClassicSaverView: View {
             // the cast follows the mix.
             AquariumField.shared(seed: seed32, tier: tier,
                                  environment: params["environment"],
-                                 fishMix: params["fishMix"])
+                                 fishMix: params["fishMix"],
+                                 params: AquariumParams(params))
                 .draw(in: &ctx, size: size, t: t, tier: tier)
         }
     }
