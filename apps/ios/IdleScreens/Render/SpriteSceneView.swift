@@ -343,14 +343,13 @@ final class CompiledSpriteScene: SKScene {
                     CGPoint(x: samples[i].x + d / 2, y: samples[i].y + d / 2)
                 }
                 if taper {
-                    for i in 1..<samples.count {
-                        let u = (Double(i) - 0.5) / Double(samples.count - 1)
-                        cg.setLineWidth(max(0.5, lw * NativeSceneView.strokeTaper(u)))
-                        cg.beginPath()
-                        cg.move(to: p(i - 1))
-                        cg.addLine(to: p(i))
-                        cg.strokePath()
-                    }
+                    // One filled outline, as on the Canvas tier and the web.
+                    let outline = NativeSceneView.strokeOutline((0..<samples.count).map(p), lineWidth: lw)
+                    cg.setFillColor(UIColor(hexString: color).cgColor)
+                    cg.beginPath()
+                    cg.addLines(between: outline)
+                    cg.closePath()
+                    cg.fillPath()
                 } else {
                     cg.setLineWidth(lw)
                     cg.beginPath()

@@ -141,6 +141,9 @@ struct SpecSubset: Decodable, Equatable {
         var transform: LayerTransform?
         /// The `groups` entry this layer paints through (3.11).
         var group: String?
+        /// `rect.feather`: the fraction of the half-size that fades out on
+        /// every side (lifted out of `sprite` like textStyle).
+        var rectFeather: Double?
 
         private enum CodingKeys: String, CodingKey {
             case key, count, sprite, size, motion, wrap, alpha, blend, pulse
@@ -149,6 +152,7 @@ struct SpecSubset: Decodable, Equatable {
         }
         private struct SpriteExtras: Decodable {
             var colorWeights: [Double]?
+            var feather: Double?
             var anchor: String?
             var font: String?
             var opacity: Double?
@@ -176,6 +180,7 @@ struct SpecSubset: Decodable, Equatable {
             links = try? c.decodeIfPresent(Links.self, forKey: .links)
             let extras = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite)) ?? nil
             colorWeights = extras?.colorWeights
+            rectFeather = extras?.feather.map { Swift.min(1, Swift.max(0, $0)) }
             if extras?.anchor != nil || extras?.font != nil || extras?.opacity != nil {
                 textStyle = TextStyle(anchor: extras?.anchor, font: extras?.font,
                                       opacity: extras?.opacity)
@@ -794,6 +799,8 @@ struct CompiledLayer: Equatable, Sendable {
     var textStyle: SpecSubset.TextStyle?
     /// Paint opacity: the layer's own × its group's, 0…1.
     var opacity: Double = 1
+    /// `rect.feather` 0…1 (0 = hard edges).
+    var feather: Double = 0
     /// Paint transform (the layer's own and/or its group's); nil = identity.
     var paint: PaintTransform?
 }
@@ -1252,6 +1259,7 @@ extension SpecSubset.Layer {
             links: links,
             textStyle: textStyle,
             opacity: opacity.map { Swift.min(1, Swift.max(0, $0)) } ?? 1,
+            feather: rectFeather ?? 0,
             paint: transform.map { tf in
                 // The layer's anchor: its position (+dx/dy), else its region's centre.
                 let rx = Self.pair(region?.x, default: (0, 1))
