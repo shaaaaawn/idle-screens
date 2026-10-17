@@ -63,8 +63,6 @@ enum RenderClass: String, Sendable, CaseIterable {
     /// A17 and newer. Same renderers, higher ceilings.
     case high
 
-    /// Entities a scene may compile to before the Canvas tier gives way to
-    /// the GPU sprite tier.
     /// Entity ceiling for a gallery poster. A pre-4K box rasterises each poster
     /// on its CPU as the row scrolls into view, so it gets a thinner frame —
     /// the same scene, fewer motes — instead of a hitch on every swipe.
@@ -75,6 +73,8 @@ enum RenderClass: String, Sendable, CaseIterable {
         }
     }
 
+    /// Entities a scene may compile to before the Canvas tier gives way to
+    /// the GPU sprite tier.
     var maxCanvasEntities: Int {
         switch self {
         case .legacy: return 600
