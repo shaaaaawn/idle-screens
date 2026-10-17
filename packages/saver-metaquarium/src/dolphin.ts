@@ -63,6 +63,8 @@ export interface DolphinRig {
   eyes: DolphinEye[];
   /** Where the bubble leaves from. */
   blowhole: Object3D | null;
+  /** The body bone: the centre a flip or a roll turns the whole dolphin about (dolphinTurn). */
+  pivot: Object3D | null;
   mixer: AnimationMixer;
   actions: Record<DolphinClip, AnimationAction>;
   durations: Record<DolphinClip, number>;
@@ -97,7 +99,7 @@ export function rigDolphin(body: Object3D, clips: readonly AnimationClip[]): Dol
     actions[n] = a;
     durations[n] = clip.duration;
   }
-  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, mixer, actions, durations };
+  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, pivot: named(body, 'body') ?? null, mixer, actions, durations };
 }
 
 /** Swim-clip seconds per unit swum: a stroke (1 s of clip) every 25 units, about a body length. */
@@ -233,6 +235,26 @@ export interface DolphinState {
   bubble: { key: string; t: number } | null;
   /** Seconds into the moment playing, if one is. */
   into: number;
+  /** The whole-body turn a flip (pitch, + head down) or a roll (+ about its nose) puts on it now, radians. */
+  turn: { pitch: number; roll: number };
+}
+
+/**
+ * The flip's loop and the spin's roll: when each turns, in its clip's seconds (breeds/rig/dolphin.py
+ * keeps the curl, the tuck and the strokes; the TURN is here). A whole turn baked into a bone comes
+ * apart when the mixer blends it — past half a turn a partial weight interpolates the short way and
+ * the body unwinds mid-flip — so the tank turns the whole dolphin about its body bone instead: one
+ * smooth angle, never blended, a whole turn from rest back to rest.
+ */
+export const FLIP_TURN = { from: 0.3, to: 2.2, angle: -2 * Math.PI } as const;
+export const SPIN_TURN = { from: 0.25, to: 1.85, angle: 2 * Math.PI } as const;
+
+/** The whole-body turn at `clipT` seconds into `moment`: a smooth start and stop (smootherstep), whole turns at the ends. */
+export function dolphinTurn(moment: DolphinMoment | null, clipT: number): { pitch: number; roll: number } {
+  const ease = (x: number): number => { const c = clamp(x, 0, 1); return c * c * c * (c * (c * 6 - 15) + 10); };
+  if (moment === 'flip') return { pitch: FLIP_TURN.angle * ease((clipT - FLIP_TURN.from) / (FLIP_TURN.to - FLIP_TURN.from)), roll: 0 };
+  if (moment === 'spin') return { pitch: 0, roll: SPIN_TURN.angle * ease((clipT - SPIN_TURN.from) / (SPIN_TURN.to - SPIN_TURN.from)) };
+  return { pitch: 0, roll: 0 };
 }
 
 /** Sets the clips for `t`. `beat` is the distance it has swum (the tank's, or an actor's travel). */
@@ -245,8 +267,10 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   const moment: DolphinMoment | null = g ? DOLPHIN_GESTURE_CLIP[g.name]! : own.moment;
   const mw = g ? clamp(g.weight, 0, 1) : own.weight;
   const into = g ? g.at : own.into;
-  // A one-shot held longer than its clip plays again (a beat may be long); spin and flip end where they began.
-  const mt = moment ? posMod(into, D[moment]) : 0;
+  // A one-shot held longer than its clip plays again (a beat may be long), but a flip or a roll plays once.
+  // A flip or a roll once, never looped: a second turn could be cut off mid-air when the beat ends.
+  const once = moment === 'flip' || moment === 'spin';
+  const mt = moment ? (once ? clamp(into, 0, D[moment]) : posMod(into, D[moment])) : 0;
 
   const cruise = smooth((inp.pace - 0.1) / 0.5);
   // Eased: the tank's flurry starts and stops with a corner, and a weight that follows it straight jerks.
@@ -292,7 +316,9 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   }
   const face = moment && FRIENDLY.has(moment) && !g ? mw : 0;
   const doing: DolphinDoing = moment && mw > 0.3 ? moment : dart > 0.3 ? 'burst' : cruise > 0.5 ? (gl > 0.5 ? 'glide' : 'swim') : 'hover';
-  return { doing, temper: p.temper, weights, face, bubble, into: moment ? mt : 0 };
+  // The turn plays whenever the moment does, whatever its weight: it is the whole body, not a pose to blend.
+  const turn = moment && mw > 0 ? dolphinTurn(moment, mt) : { pitch: 0, roll: 0 };
+  return { doing, temper: p.temper, weights, face, bubble, into: moment ? mt : 0, turn };
 }
 
 // ---------------------------------------------------------------------------

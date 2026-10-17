@@ -39,8 +39,9 @@ their times and weights, never update(dt)):
              laugh — the eyes squeezed happy, a little shimmy.
     nod      1.6 s. Yes: the head dips twice.
     shake    1.6 s. No: the head swings side to side.
-    spin     2.2 s. A barrel roll, flippers tucked.
-    flip     2.8 s. A backflip: a whole loop, head up and over.
+    spin     2.2 s. A barrel roll, flippers tucked (the roll turned by the tank).
+    flip     2.8 s. A backflip: head up and over, the spine curled into it (the
+             loop turned by the tank).
     wave     2.4 s. Rolls onto its side and waves a flipper, squinting happy.
     bubble   2.6 s. Settles, the blowhole opens and puffs (the tank lets the
              bubble go), and it watches it rise.
@@ -316,9 +317,11 @@ def shake(t, T=1.6):
 
 
 def spin(t, T=2.2):
+    # The roll itself is NOT in the clip: a whole turn baked into a bone comes apart when the mixer
+    # blends it (past half a turn a partial weight interpolates the SHORT way, so the body unwinds
+    # mid-roll). src/dolphin.ts turns the whole dolphin instead (dolphinTurn, the same timing:
+    # SPIN_TURN); the clip keeps the tuck and the strokes through it.
     p = Pose()
-    r = track(t, [(0.0, 0.0), (0.25, 0.0), (1.85, 2 * math.pi), (T, 2 * math.pi)])
-    p.turn('body', 'y', r)
     tuck = env(t, 0.1, 0.4, 1.7, 2.1)
     flippers(p, out=-0.15 * tuck)
     stroke(p, 2 * math.pi * t / 0.6, 0.8 * tuck)
@@ -326,10 +329,9 @@ def spin(t, T=2.2):
 
 
 def flip(t, T=2.8):
+    # Head up and over — the loop itself turned by src/dolphin.ts (dolphinTurn, FLIP_TURN), not baked
+    # into a bone (see spin): the clip curls the spine into it, lifts, flares the flippers, squints.
     p = Pose()
-    # Head up and over: a whole loop about x, the spine curled into it.
-    r = track(t, [(0.0, 0.0), (0.3, 0.0), (2.2, -2 * math.pi), (T, -2 * math.pi)])
-    p.turn('body', 'x', r)
     curl = env(t, 0.2, 0.6, 1.9, 2.4)
     for bone, a in (('head', -0.18), ('tail1', -0.12), ('tail2', -0.18), ('flukes', -0.3)):
         p.turn(bone, 'x', a * curl)

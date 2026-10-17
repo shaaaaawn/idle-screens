@@ -44,22 +44,12 @@ import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './typ
 // ---------------------------------------------------------------------------
 // Calibration constants
 //
-// The two knobs that tune how closely this analytical model matches the real
-// canvas. Kept together at module level so a calibration pass has one place to
-// look — neither is a per-entity detail.
+// The knob that tunes how closely this analytical model matches the real
+// canvas. Kept at module level so a calibration pass has one place to look —
+// it is not a per-entity detail. (A second, GLOW_SPREAD, modelled an additive
+// halo past a soft sprite's radius; the canvas draws none, and pixel truth
+// removed it — perception-lab S1-03b, S1-07.)
 // ---------------------------------------------------------------------------
-
-/**
- * How far an additive glow blooms past its radius, as a multiple of that radius.
- * A soft circle drawn with `lighter`/`screen` spreads well beyond its geometric
- * edge on the real canvas (shadowBlur halos, stacked soft discs), so a
- * hard-edged analytical disc badly under-reports coverage for glow-heavy scenes.
- *
- * First pass, tuned by intuition rather than measurement: it fixes the direction
- * and rough magnitude, not the exact number. A playground-calibrated value is
- * future work (docs/future-ideas.md G1).
- */
-const GLOW_SPREAD = 2.4;
 
 /**
  * How much more visually prominent line-like ink is than the same area of fill.
@@ -163,15 +153,32 @@ function posOf(scene: BuiltScene, e: Entity, t: number): { x: number; y: number 
  * shorthand containing a px size overrides the seeded per-entity size.
  * Returns the box CENTRE (accounting for align/baseline) and half-extents.
  */
+/**
+ * The renderer's font scale (compile.ts fontScale): a font's own px size is
+ * authored for the reference viewport and drawn at min(w, h) / reference of it.
+ */
+function fontScaleFor(spec: SaverSpec, w: number, h: number): number {
+  return spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
+}
+
+/** Px size a text sprite draws at: its font's px × the font scale, else the entity's size. */
+function textFontPx(s: Extract<LayerSpec['sprite'], { kind: 'text' }>, size: number, fontScale: number): number {
+  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+  return m ? Number(m[1]) * fontScale : size;
+}
+
 function textBox(
   s: Extract<LayerSpec['sprite'], { kind: 'text' }>,
   e: Entity,
   p: { x: number; y: number },
+  fontScale: number,
+  unitScale: number,
 ): { cx: number; cy: number; halfX: number; halfY: number } {
-  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
-  const fh = m ? Number(m[1]) : e.size;
+  const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
-  const fw = Math.max(fh, 0.62 * fh * Math.min(str.length, 48));
+  // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
+  const est = Math.max(fh, 0.62 * fh * Math.min(str.length, 48));
+  const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';
   return {
@@ -303,23 +310,6 @@ function polygonCellCoverage(
   return cov;
 }
 
-/** Distance from (x, y) to the nearest edge of a closed outline. */
-function distanceToOutline(pts: Array<{ x: number; y: number }>, x: number, y: number): number {
-  let best = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i]!;
-    const q = pts[(i + 1) % pts.length]!;
-    const ex = q.x - p.x;
-    const ey = q.y - p.y;
-    const len2 = ex * ex + ey * ey;
-    const u = len2 > 0 ? Math.max(0, Math.min(1, ((x - p.x) * ex + (y - p.y) * ey) / len2)) : 0;
-    const dx = x - (p.x + ex * u);
-    const dy = y - (p.y + ey * u);
-    best = Math.min(best, dx * dx + dy * dy);
-  }
-  return Math.sqrt(best);
-}
-
 // ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
@@ -354,6 +344,55 @@ export interface LuminanceGridOptions extends PerceiveOptions {
   rows?: number;
 }
 
+/** The canvas's soft-sprite alpha at radius fraction u: stops 1 @ 0, 0.75 @ 0.35, 0 @ 1 (compile.ts). */
+function softProfile(u: number): number {
+  if (u <= 0) return 1;
+  if (u >= 1) return 0;
+  return u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65);
+}
+
+/** Mean of softProfile over a disc's area, ∫₀¹ softProfile(u)·2u du. */
+const SOFT_DISC_MEAN = 0.3783;
+
+/**
+ * The ink (0..1 of the cell's area) that a disc — or the annulus
+ * rInner ≤ |p − (cx, cy)| ≤ rOuter — lays in the cell [x0, x0+cw) × [y0, y0+ch):
+ * covered area, weighted by the soft gradient when `soft`. Exact when the cell
+ * is wholly outside or inside the shape, or the shape wholly inside the cell;
+ * otherwise sampled over the part of the cell the shape's box overlaps, at a
+ * spacing set by the radius, so a disc smaller than a cell is never stepped
+ * over (perception-lab S1-09: a field of 3 px soft dots read 6× too dark).
+ */
+function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, soft: boolean, x0: number, y0: number, cw: number, ch: number): number {
+  const nx = Math.max(x0, Math.min(cx, x0 + cw)) - cx;
+  const ny = Math.max(y0, Math.min(cy, y0 + ch)) - cy;
+  const near = Math.hypot(nx, ny);
+  const fx = Math.max(Math.abs(x0 - cx), Math.abs(x0 + cw - cx));
+  const fy = Math.max(Math.abs(y0 - cy), Math.abs(y0 + ch - cy));
+  const far = Math.hypot(fx, fy);
+  if (near >= rOuter || far <= rInner) return 0;
+  if (far <= rOuter && near >= rInner) return soft ? softProfile(Math.hypot(x0 + cw / 2 - cx, y0 + ch / 2 - cy) / rOuter) : 1;
+  if (cx - rOuter >= x0 && cx + rOuter <= x0 + cw && cy - rOuter >= y0 && cy + rOuter <= y0 + ch) {
+    return (Math.PI * (soft ? rOuter * rOuter * SOFT_DISC_MEAN : rOuter * rOuter - rInner * rInner)) / (cw * ch);
+  }
+  const bx0 = Math.max(x0, cx - rOuter);
+  const by0 = Math.max(y0, cy - rOuter);
+  const sx = Math.min(x0 + cw, cx + rOuter) - bx0;
+  const sy = Math.min(y0 + ch, cy + rOuter) - by0;
+  if (sx <= 0 || sy <= 0) return 0;
+  const step = Math.max(rOuter / 4, 1e-6);
+  const ni = Math.max(4, Math.min(16, Math.ceil(sx / step)));
+  const nj = Math.max(4, Math.min(16, Math.ceil(sy / step)));
+  let ink = 0;
+  for (let j = 0; j < nj; j++) {
+    for (let i = 0; i < ni; i++) {
+      const d = Math.hypot(bx0 + ((i + 0.5) * sx) / ni - cx, by0 + ((j + 0.5) * sy) / nj - cy);
+      if (d <= rOuter && d >= rInner) ink += soft ? softProfile(d / rOuter) : 1;
+    }
+  }
+  return ((ink / (ni * nj)) * sx * sy) / (cw * ch);
+}
+
 /**
  * Sample the spec into a coarse luminance image — analytically, no renderer.
  * Persistence is modeled, not simulated: because positions are pure functions
@@ -362,9 +401,9 @@ export interface LuminanceGridOptions extends PerceiveOptions {
  * re-uses drawTrail's sampling — past positions with decaying alpha and
  * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
  * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
- * Remaining approximations (documented, deliberate): soft circles use a linear
- * falloff, background drift is sampled at its rest position. Good enough to
- * perceive composition, focus, balance — and now smear.
+ * Remaining approximations (documented, deliberate): background drift is
+ * sampled at its rest position. Good enough to perceive composition, focus,
+ * balance — and now smear.
  */
 export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
@@ -463,11 +502,14 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const r1 = Math.min(rows - 1, Math.floor((pos.y + rad) / cellH));
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
-          const dx = (c + 0.5) * cellW - pos.x;
-          const dy = (r + 0.5) * cellH - pos.y;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d > rad + Math.min(cellW, cellH) / 2) continue;
-          const wgt = soft ? Math.max(0.1, 1 - d / Math.max(rad, 1e-6)) : 1;
+          let wgt = 1;
+          if (soft) {
+            wgt = discCellInk(pos.x, pos.y, rad, 0, true, c * cellW, r * cellH, cellW, cellH);
+            if (wgt <= 0) continue;
+          } else {
+            const d = Math.hypot((c + 0.5) * cellW - pos.x, (r + 0.5) * cellH - pos.y);
+            if (d > rad + Math.min(cellW, cellH) / 2) continue;
+          }
           compose(r * cols + c, lum, Math.min(1, a * wgt), layer.blend);
         }
       }
@@ -478,24 +520,13 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   // `rotationAt` about the entity — instead of its circumscribed disc. Weight
   // per cell is the fraction of it the outline fills; `soft` is the renderer's
   // radial gradient (centred on the entity, radius = circumradius) clipped to
-  // that outline. The additive halo spreads past the OUTLINE, not a disc: its
-  // band is GLOW_SPREAD − 1 times the glyph's thickness (2·area/perimeter —
-  // the radius for a disc, the apothem for a regular n-gon), so a soft
-  // `lighter` hexagon blooms about as far as the disc model did while a
-  // full-width band or ridge doesn't re-inflate into a screen-filling dome.
+  // that outline, additive or not — nothing reaches past it (perception-lab S1-07).
   const splatPolygonOutline = (layer: LayerSpec, s: PolygonSprite, e: Entity, p: { x: number; y: number }, sz: number, a: number, lum: number, tPass: number): void => {
     const radius = sz / 2;
     const rot = rotationAt(e, tPass);
     const cr = Math.cos(rot);
     const sr = Math.sin(rot);
     const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
-    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
-    const glow = !!s.soft && additive;
-    let band = 0;
-    if (glow) {
-      const perimeter = pts.reduce((acc, q, i) => { const n = pts[(i + 1) % pts.length]!; return acc + Math.hypot(n.x - q.x, n.y - q.y); }, 0);
-      band = perimeter > 0 ? (GLOW_SPREAD - 1) * ((2 * polygonArea(pts)) / perimeter) : 0;
-    }
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -504,10 +535,10 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
       minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
     }
-    const c0 = Math.max(0, Math.floor((minX - band) / cellW));
-    const c1 = Math.min(cols - 1, Math.floor((maxX + band) / cellW));
-    const r0 = Math.max(0, Math.floor((minY - band) / cellH));
-    const r1 = Math.min(rows - 1, Math.floor((maxY + band) / cellH));
+    const c0 = Math.max(0, Math.floor(minX / cellW));
+    const c1 = Math.min(cols - 1, Math.floor(maxX / cellW));
+    const r0 = Math.max(0, Math.floor(minY / cellH));
+    const r1 = Math.min(rows - 1, Math.floor(maxY / cellH));
     if (c0 > c1 || r0 > r1) return;
     const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
     const nc = c1 - c0 + 1;
@@ -516,22 +547,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         const f = cov[(r - r0) * nc + (c - c0)]!;
         const x = (c + 0.5) * cellW;
         const y = (r + 0.5) * cellH;
-        let wgt: number;
-        if (glow) {
-          // Outside the outline's box by more than the band: no halo reaches.
-          const outX = Math.max(0, minX - x, x - maxX);
-          const outY = Math.max(0, minY - y, y - maxY);
-          if (f >= 1) wgt = 1;
-          else if (outX * outX + outY * outY >= band * band) wgt = f;
-          else {
-            const k = band > 0 ? Math.max(0, 1 - distanceToOutline(pts, x, y) / band) : 0;
-            wgt = f + (1 - f) * k * k;
-          }
-        } else if (s.soft) {
-          wgt = f * Math.max(0.1, 1 - Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6));
-        } else {
-          wgt = f;
-        }
+        const wgt = s.soft ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
         if (wgt > 0) compose(r * cols + c, lum, a * Math.min(1, wgt), layer.blend);
       }
     }
@@ -614,7 +630,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       let halfX = sz / 2;
       let halfY = s.kind === 'rect' ? ((e.size2 ?? sz) * (e.size > 0 ? sz / e.size : 1)) / 2 : sz / 2;
       if (s.kind === 'text') {
-        const box = textBox(s, e, p);
+        const box = textBox(s, e, p, fontScaleFor(spec, w, h), scale);
         centerX = box.cx;
         centerY = box.cy;
         halfX = box.halfX;
@@ -650,17 +666,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         : s.kind === 'rect' && s.feather
           ? (1 - s.feather / 2) * (1 - s.feather / 2)
           : 1;
-      const additive = layer.blend === 'lighter' || layer.blend === 'screen';
-      // Model the halo (see GLOW_SPREAD): reach past the radius with a quadratic
-      // falloff outside the solid core, so coverage tracks what the audience
-      // actually sees. Non-additive / hard-edged sprites are unchanged.
-      const glow = soft && additive;
-      const reachX = glow ? halfX * GLOW_SPREAD : halfX;
-      const reachY = glow ? halfY * GLOW_SPREAD : halfY;
-      const c0 = Math.max(0, Math.floor((centerX - reachX) / cellW));
-      const c1 = Math.min(cols - 1, Math.floor((centerX + reachX) / cellW));
-      const r0 = Math.max(0, Math.floor((centerY - reachY) / cellH));
-      const r1 = Math.min(rows - 1, Math.floor((centerY + reachY) / cellH));
+      // The canvas draws a soft sprite as a radial gradient that ends AT its
+      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
+      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
+      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
@@ -669,36 +680,22 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       // to the area the box covers. Without this a 2 px scan line darkened
       // its whole 22 px grid row at full alpha, and 270 of them read as a
       // black veil (mean 0.035 where the canvas paints 0.41).
-      const byArea = s.kind === 'rect' || s.kind === 'bar';
+      const byArea = s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock';
       for (let r = r0; r <= r1; r++) {
         const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
         if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
-          const dx = (c + 0.5) * cellW - centerX;
-          const dy = (r + 0.5) * cellH - centerY;
           if (circular) {
-            const d = Math.sqrt(dx * dx + dy * dy);
-            const reach = glow ? reachX : halfX;
-            if (d > reach + Math.min(cellW, cellH) / 2) continue;
-            if (s.kind === 'ring') {
-              const strokeW = (s.width ?? (scale === 1 ? 2 : 0.002)) * scale;
-              if (d < halfX - strokeW) continue;
-            }
-            let wgt: number;
-            if (glow) {
-              const core = halfX;
-              if (d <= core) wgt = 1;
-              else {
-                const f = Math.max(0, 1 - (d - core) / Math.max(reachX - core, 1e-6));
-                wgt = f * f;
-              }
-            } else {
-              wgt = soft ? Math.max(0.1, 1 - d / Math.max(halfX, 1e-6)) : 1;
-            }
+            const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
+            // The canvas averages each cell, so a disc (or ring) that covers a
+            // quarter of a cell moves that cell's mean by a quarter of its
+            // contrast — light it by the ink it lays there, as rect/bar are.
+            const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
+            if (wgt <= 0) continue;
             compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
           } else if (byArea) {
             const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
-            if (fx > 0) compose(r * cols + c, lum, a * shapeWeight * fx * fy, layer.blend);
+            if (fx > 0) compose(r * cols + c, lum, a * inkWeight * shapeWeight * fx * fy, layer.blend);
           } else {
             compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
           }
@@ -827,7 +824,7 @@ const DOT_BIT: number[][] = [
  * on the grid itself stay raw.
  *
  * Shared by every renderer below, deliberately: if the curve is ever
- * recalibrated (e.g. once GLOW_SPREAD is tuned and coverage shifts), the braille
+ * recalibrated (e.g. once a calibration constant moves coverage), the braille
  * and density views must move together or they'd silently disagree about the
  * same scene.
  */
@@ -931,8 +928,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     }
     if (layer.sprite.kind !== 'text') return;
     const s = layer.sprite;
-    const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
-    const sizePx = m ? Number(m[1]) : entities[0] ? sizeAt(entities[0], t) : 0;
+    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h));
     out.push({ layerIndex, key: layer.key, strings: [...s.strings], count: entities.length, sizePx: Math.round(sizePx) });
   });
   return out;
@@ -1004,7 +1000,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
   // for a comet layer the trail IS the visual event. Model both effects as
   // swept ribbons (path length × stroke width × mean surviving alpha), using
   // the straight-line displacement as a lower-bound path length and skipping
-  // wrap seams. First-pass fidelity, same spirit as GLOW_SPREAD.
+  // wrap seams. First-pass fidelity, not yet checked against pixels.
   const ghost = spec.ghosting ?? 0;
   let ghostWindowMs = 0;
   let ghostMeanW = 0;
@@ -1054,7 +1050,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
-        const box = textBox(s, e, { x: 0, y: 0 });
+        const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
       } else if (s.kind === 'textBlock') {
         const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
