@@ -152,7 +152,10 @@ final class CompiledSpriteScene: SKScene {
                                           end: CGPoint(x: 0, y: h), options: [])
                 }
             } else {
-                UIColor(hexString: bg?.color ?? "000000").setFill()
+                // A solid ground, or a `field`'s key band (not rasterised
+                // natively) — the same stand-in the Canvas tier paints, never
+                // black for a scene that has a ground.
+                UIColor(hexString: bg?.primaryColor ?? "05050a").setFill()
                 cg.fill(CGRect(x: 0, y: 0, width: 1, height: h))
             }
         }
@@ -233,6 +236,20 @@ final class CompiledSpriteScene: SKScene {
                 text: text, maxWidth: maxWidth, fontSize: fontSize,
                 lineHeight: lineHeight, align: align, color: color, dim: dim))
             node.anchorPoint = CGPoint(x: 0, y: 1)
+            // `anchor` names a point of the INK (widest line × lines, as
+            // `align` placed it) for `position` — the Canvas tier's
+            // TextStyle.anchorOffset, expressed as the node's anchor point.
+            if let style = layer.textStyle, style.anchor != nil {
+                let fsPx = fontSize * dim
+                let lines = breakTextBlock(text: text, maxWidthEm: maxWidth * dim / fsPx)
+                let font = UIFont.systemFont(ofSize: fsPx)
+                let widest = lines.map { ($0.text as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+                let boxW = ceil(max(1, maxWidth * dim))
+                let boxH = ceil(max(1, CGFloat(lines.count) * lineHeight * fsPx))
+                let off = style.anchorOffset(align: align, maxWidthPx: maxWidth * dim, widestLinePx: widest,
+                                             totalHeightPx: CGFloat(lines.count) * lineHeight * fsPx)
+                node.anchorPoint = CGPoint(x: -off.dx / boxW, y: 1 + off.dy / boxH)
+            }
             return node
 
         case .polygon(_, _, _, let sides, let points, let soft):
