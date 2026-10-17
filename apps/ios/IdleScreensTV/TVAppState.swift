@@ -331,10 +331,16 @@ final class TVAppState {
         historyTask?.cancel()
         historyTask = Task { [weak self] in
             guard let self else { return }
-            if self.historyStops.isEmpty, older {
-                let events = (try? await self.gallery.fetchHistory(channelId: channelId)) ?? []
-                guard !Task.isCancelled, self.selectedChannelId == channelId else { return }
-                self.historyStops = ChannelFeed.stops(from: events)
+            if older, self.historyEvents.isEmpty || self.atOldestLoadedStop, self.historyHasMore {
+                // First Left fetches a page; reaching its oldest stop fetches
+                // the next, so the past keeps going instead of hitting a wall
+                // at one page (the phone pages the same way).
+                guard let page = try? await self.gallery.fetchHistoryPage(
+                    channelId: channelId, limit: 40, before: self.historyEvents.map(\.id).min()),
+                      !Task.isCancelled, self.selectedChannelId == channelId else { return }
+                self.historyEvents += page.events
+                self.historyHasMore = (page.hasMore ?? false) && !page.events.isEmpty
+                self.historyStops = ChannelFeed.stops(from: self.historyEvents, limit: nil)
             }
             let target = Self.timelineStep(from: self.timeline, older: older,
                                            stops: self.historyStops.count)
@@ -362,10 +368,22 @@ final class TVAppState {
         if let live = liveScene { render(live.json, fallbackSeed: live.seed) }
     }
 
+    /// Every event fetched so far, newest pages first, and whether the server
+    /// has older ones.
+    private var historyEvents: [ChannelEvent] = []
+    private var historyHasMore = true
+
+    private var atOldestLoadedStop: Bool {
+        if case .past(let i) = timeline { return i >= historyStops.count - 1 }
+        return historyStops.isEmpty
+    }
+
     private func resetTimeline() {
         historyTask?.cancel()
         timeline = .live
         historyStops = []
+        historyEvents = []
+        historyHasMore = true
         pastScene = nil
         liveScene = nil
         liveClassicParams = [:]
