@@ -82,4 +82,28 @@ final class TankLoadStateTests: XCTestCase {
         XCTAssertTrue(tank.isLoading(elapsed: 1))
         XCTAssertFalse(tank.isLoading(elapsed: TankLoadState.quietGrace))
     }
+
+    func testAFullCastIsInAtOnceWhenTheTankSaysWhatItWants() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(3, want: 8, at: t0)
+        XCTAssertFalse(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet + 0.01)),
+                       "short of the cast it wants, a quiet beat is not enough")
+        tank.reportFish(8, want: 8, at: t0.addingTimeInterval(1.5))
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(1.5)), "no quiet window once all are in")
+    }
+
+    func testAFishThatNeverArrivesDoesNotHoldTheTankToTheCeiling() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(5, want: 6, at: t0)
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet * 3 + 0.01)))
+    }
+
+    func testAnOlderSiteThatSaysNothingKeepsTheQuietRule() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(4, want: 0, at: t0)
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet + 0.01)))
+    }
 }

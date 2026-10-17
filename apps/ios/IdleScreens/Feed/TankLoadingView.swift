@@ -6,8 +6,10 @@ import SwiftUI
 
 /// When a 3D tank counts as loaded.
 ///
-/// Best signal: the tank's own fish count (`data-mq-fish`). Once it is above
-/// zero and has held still for `castQuiet`, the cast is in. Measured
+/// Best signal: the tank's own fish count (`data-mq-fish`) reaching the cast
+/// it is filling toward (`data-mq-want`) — in at once. A page that doesn't
+/// say what it wants: once the count is above zero and has held still for
+/// `castQuiet`, the cast is in. Measured
 /// 2026-10-17, a cached cast lands within ~0.3 s of mount (gaps of ~0.7 s between breeds when one is fetched) — the old rule below
 /// had no downloads to see (models are bundled now) and so sat out its full
 /// grace on every tank, ~4.3 s of nothing.
@@ -19,22 +21,29 @@ struct TankLoadState: Equatable {
     private(set) var sawDownloads = false
     private(set) var settled = false
     private(set) var fish: Int?
+    private(set) var want: Int?
     private(set) var fishChangedAt: Date?
 
     /// How long the fish count must hold before the cast counts as in. Long
     /// enough to span the gap between breed chunks arriving on a cold install.
     static let castQuiet: TimeInterval = 1.0
 
-    mutating func reportFish(_ count: Int, at now: Date = Date()) {
+    mutating func reportFish(_ count: Int, want: Int? = nil, at now: Date = Date()) {
+        self.want = want
         guard count != fish else { return }
         fish = count
         fishChangedAt = now
     }
 
-    /// The tank has fish, and has stopped adding them.
+    /// The tank has all the fish it wants — or, when it doesn't say, has fish
+    /// and has stopped adding them.
     func castIsIn(at now: Date = Date()) -> Bool {
         guard let fish, fish > 0, let fishChangedAt else { return false }
-        return now.timeIntervalSince(fishChangedAt) >= Self.castQuiet
+        let quiet = now.timeIntervalSince(fishChangedAt)
+        // Short of what it wants: a fish that never arrives must not hold the
+        // tank back to the ceiling, so a long quiet spell still lets it in.
+        if let want, want > 0 { return fish >= want || quiet >= Self.castQuiet * 3 }
+        return quiet >= Self.castQuiet
     }
 
     /// Longest the loader may stay up, whatever the page says.
