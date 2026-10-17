@@ -192,9 +192,7 @@ final class RenderSmokeTests: XCTestCase {
         XCTAssertEqual(AquariumField.castIndices(fishMix: "12:999", cap: 100)?.count, 24)
         XCTAssertEqual(AquariumField.castIndices(fishMix: "12:9", cap: 4)?.count, 4)
         // An unbundled id lands on a bundled fish of the same breed.
-        let near = AquariumField.castIndices(fishMix: "13", cap: 1)
-        XCTAssertNotNil(near)
-        // A breed name casts the same fish every time.
+        XCTAssertNotNil(AquariumField.castIndices(fishMix: "13", cap: 1))
         XCTAssertEqual(AquariumField.castIndices(fishMix: "seahorse:2", cap: 9),
                        AquariumField.castIndices(fishMix: " SeaHorse :2", cap: 9))
     }

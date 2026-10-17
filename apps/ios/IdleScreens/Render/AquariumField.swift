@@ -105,45 +105,31 @@ struct AquariumField: Sendable {
     static let castIds: [Int] = [12, 100, 180, 257, 300, 340, 380, 420, 450, 457, 470, 488, 497, 505, 512]
     static let cast: [String] = castIds.map { "mqfish\($0)" }
 
-    /// A scene's `fishMix` ("id[:count],breed[:count],…") interpreted against
-    /// the bundled cast: exact id when bundled, else the nearest bundled fish
-    /// of the SAME breed — the scene's species balance survives even when its
-    /// exact mints aren't on disk. Returns cast indices, one per fish.
+    /// A scene's `fishMix` interpreted against the bundled cast, one index
+    /// per fish. The mix is read with the engine's own grammar (`FishMix`:
+    /// `@style` / `*size` suffixes, uniqueness, breed aliases); each minted
+    /// fish then maps to its exact bundled icon, else the nearest bundled
+    /// fish of the SAME breed — the scene's species balance survives even
+    /// when its exact mints aren't on disk. Unminted breeds have no icon
+    /// here and drop out, as in `lofi.ts` `lofiCast`.
     static func castIndices(fishMix: String?, cap: Int) -> [Int]? {
-        guard let mix = fishMix, !mix.isEmpty else { return nil }
+        guard let mix = fishMix, !mix.isEmpty, cap > 0 else { return nil }
         var out: [Int] = []
-        for token in mix.split(separator: ",") {
-            let parts = token.split(separator: ":")
-            guard let head = parts.first?.trimmingCharacters(in: .whitespaces), !head.isEmpty else { continue }
-            let count = parts.count > 1 ? min(24, max(1, Int(parts[1]) ?? 1)) : 1
-            let wantBreed: Breed?
-            let wantId: Int?
-            if let id = Int(head), (1...512).contains(id) {
-                wantId = id; wantBreed = Breed.of(id: id)
-            } else {
-                wantId = nil
-                switch head.lowercased() {
-                case "betafish": wantBreed = .beta
-                case "angelfish": wantBreed = .angel
-                case "seahorse": wantBreed = .seahorse
-                case "seaturtle": wantBreed = .turtle
-                default: wantBreed = nil
-                }
-            }
-            guard let breed = wantBreed else { continue }
-            // Exact bundled id, else nearest bundled id in the same breed.
-            let idx: Int
-            if let id = wantId, let exact = castIds.firstIndex(of: id) {
-                idx = exact
-            } else {
-                let sameBreed = castIds.enumerated().filter { Breed.of(id: $0.element) == breed }
-                guard !sameBreed.isEmpty else { continue }
-                let target = wantId ?? sameBreed[0].element
-                idx = sameBreed.min(by: { abs($0.element - target) < abs($1.element - target) })!.offset
-            }
-            for _ in 0..<count where out.count < cap { out.append(idx) }
+        for entry in FishMix.parse(mix) where entry.id <= FishMix.totalSupply {
+            guard out.count < cap, let idx = bundledIndex(nearest: entry.id) else { continue }
+            out.append(idx)
         }
         return out.isEmpty ? nil : out
+    }
+
+    /// The bundled icon for minted `id`: exact, else nearest of its breed.
+    static func bundledIndex(nearest id: Int) -> Int? {
+        if let exact = castIds.firstIndex(of: id) { return exact }
+        let breed = Breed.of(id: id)
+        return castIds.enumerated()
+            .filter { Breed.of(id: $0.element) == breed }
+            .min { abs($0.element - id) < abs($1.element - id) }?
+            .offset
     }
 
     let fish: [Fish]
