@@ -465,17 +465,27 @@ final class CompiledSpriteScene: SKScene {
             let parentEntity = layer.orbitParentKey.flatMap { key in
                 layersData.first { $0.key == key }?.entities.first
             }
-            let p = SceneMotion.position(of: entity, at: t, in: size,
+            var p = SceneMotion.position(of: entity, at: t, in: size,
                                          dim: dim, wrap: layer.wrap, parent: parentEntity)
+            // A paint transform moves the point through G·L; a node can't
+            // take a full affine, so it also takes the summed rotation and
+            // per-axis scale (exact unless a rotated layer is scaled unevenly).
+            if let paint = layer.paint { p = p.applying(paint.affine(in: size, unit: dim)) }
             // Compile space is top-left y-down; SpriteKit is bottom-left y-up.
             node.position = CGPoint(x: p.x, y: size.height - p.y)
-            // The layer's own lifecycle envelope multiplies every entity's
-            // alpha, so a layer enters and leaves as one thing.
+            // The layer's own lifecycle envelope and paint opacity multiply
+            // every entity's alpha, so a layer enters and leaves as one thing.
             node.alpha = SceneMotion.pulsedAlpha(of: entity, layer: layer, at: t)
-                * (layer.life?.alpha(at: t * 1000) ?? 1)
+                * (layer.life?.alpha(at: t * 1000) ?? 1) * layer.opacity
             let grow = SceneMotion.growScale(of: entity, at: t)
-            if grow != 1 { node.setScale(grow) }
-            let deg = SceneMotion.rotationDegrees(of: entity, at: t)
+            let deg = SceneMotion.rotationDegrees(of: entity, at: t) + (layer.paint?.rotationDegrees ?? 0)
+            if let paint = layer.paint {
+                let k = paint.scaleXY
+                node.xScale = grow * k.x
+                node.yScale = grow * k.y
+            } else if grow != 1 {
+                node.setScale(grow)
+            }
             if deg != 0 { node.zRotation = -deg * .pi / 180 }
         }
     }

@@ -108,18 +108,26 @@ struct NativeSceneView: View {
             // Layer lifecycle: the whole layer fades in and out on its own
             // envelope, and is skipped outright before it enters / after it
             // leaves (web parity: compile.ts `lifeAlphaAt` gate).
-            let lifeAlpha = layer.life?.alpha(at: t * 1000) ?? 1
+            // Paint opacity (the layer's own × its group's) multiplies the
+            // envelope, and 0 skips the layer, as on the web.
+            let lifeAlpha = (layer.life?.alpha(at: t * 1000) ?? 1) * layer.opacity
             if lifeAlpha <= 0 { continue }
+            // A paint transform draws the whole layer through G·L on a copy
+            // of the context, so nothing below needs to know about it.
+            var layerCtx = ctx
+            if let paint = layer.paint {
+                layerCtx.concatenate(paint.affine(in: space, unit: dim))
+            }
             // A parented orbit rides another layer's first entity (web
             // parity: compile.ts `parentEntityFor`), which is how a compound
             // creature keeps its parts attached.
             let parentEntity = layer.orbitParentKey.flatMap { key in
                 layers.first { $0.key == key }?.entities.first
             }
-            if tier == .t3 { applyBlend(ctx: &ctx, blend: layer.blend) }
+            if tier == .t3 { applyBlend(ctx: &layerCtx, blend: layer.blend) }
             if let links = layer.links {
                 drawLinks(links, layer: layer, at: t, in: space, dim: dim,
-                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &ctx)
+                          lifeAlpha: lifeAlpha, parent: parentEntity, ctx: &layerCtx)
             }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
@@ -149,20 +157,19 @@ struct NativeSceneView: View {
                         draw(entity: entity,
                              size: entity.size * SceneMotion.growScale(of: entity, at: back),
                              sprite: layer.sprite, textStyle: layer.textStyle, units: layer.units, at: ghostPoint,
-                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &ctx)
+                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &layerCtx)
                     }
                 }
                 if let trail = layer.trail {
                     drawTrail(trail, entity: entity, layer: layer, at: t, head: point,
                               in: space, dim: dim, alpha: alpha * lifeAlpha,
-                              parent: parentEntity, ctx: &ctx)
+                              parent: parentEntity, ctx: &layerCtx)
                 }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
                 draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
                      units: layer.units, at: point,
-                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &ctx)
+                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &layerCtx)
             }
-            ctx.blendMode = .normal
         }
     }
 
