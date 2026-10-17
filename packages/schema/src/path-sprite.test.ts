@@ -19,6 +19,10 @@ describe('polygon.path', () => {
     expect(area('M -1 -1 H 1 V 1 H -1 Z M -0.5 -0.5 H 0.5 V 0.5 H -0.5 Z')).toBeCloseTo(3, 6);
     expect(area('M -1 -1 H 1 V 1 H -1 Z M -0.5 -0.5 V 0.5 H 0.5 V -0.5 Z')).toBeCloseTo(3, 6);
   });
+  it('fills an island inside a hole (even nesting depth)', () => {
+    const eye = 'M -1 -1 H 1 V 1 H -1 Z M -0.5 -0.5 H 0.5 V 0.5 H -0.5 Z M -0.2 -0.2 H 0.2 V 0.2 H -0.2 Z';
+    expect(area(eye)).toBeCloseTo(4 - 1 + 0.16, 6);
+  });
   it('keeps a separate subpath as its own piece', () => {
     expect(area('M -1 -1 H -0.5 V -0.5 H -1 Z M 0.5 0.5 H 1 V 1 H 0.5 Z')).toBeCloseTo(0.5, 6);
   });

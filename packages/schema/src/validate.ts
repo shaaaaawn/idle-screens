@@ -927,8 +927,8 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
     if (sprite.path !== undefined) {
       if (sprite.points !== undefined || sprite.sides !== undefined) err(`${path}.path`, 'use path, points or sides, not more than one');
-      if (typeof sprite.path !== 'string' || sprite.path.length === 0 || sprite.path.length > 8000) {
-        err(`${path}.path`, 'must be an SVG path d string (1..8000 chars) in the -1..1 unit box');
+      if (typeof sprite.path !== 'string' || sprite.path.length === 0 || sprite.path.length > 20000) {
+        err(`${path}.path`, 'must be an SVG path d string (1..20000 chars) in the -1..1 unit box');
       } else {
         const flat = flattenPath(sprite.path);
         if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);

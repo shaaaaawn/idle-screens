@@ -277,7 +277,7 @@ export function flattenPath(d: string): FlattenedPath {
   if (hit) return hit;
   let out: FlattenedPath;
   try {
-    const rings = parseAndFlatten(d);
+    const rings = parseAndFlatten(d).map(simplifyRing).filter((r) => r.length >= 3);
     out = { points: joinRings(rings), subpaths: rings.length };
   } catch (e) {
     out = { points: [], subpaths: 0, error: e instanceof Error ? e.message : String(e) };
@@ -420,6 +420,41 @@ function parseAndFlatten(d: string): Pt[][] {
   return rings;
 }
 
+/**
+ * Douglas–Peucker on a closed ring at the flattening tolerance: drops points
+ * that sit on (or within PATH_TOLERANCE of) the line through their neighbours,
+ * so a hand-sampled polyline costs only the points that change its outline.
+ */
+function simplifyRing(r: Pt[]): Pt[] {
+  if (r.length <= 4) return r;
+  // Split the ring at vertex 0 and the vertex farthest from it; simplify both halves.
+  let far = 0, fd = -1;
+  for (let k = 1; k < r.length; k++) {
+    const d = (r[k]![0] - r[0]![0]) ** 2 + (r[k]![1] - r[0]![1]) ** 2;
+    if (d > fd) { fd = d; far = k; }
+  }
+  const keep = new Uint8Array(r.length);
+  keep[0] = 1; keep[far] = 1;
+  const at = (k: number): Pt => r[k % r.length]!;
+  const stack: Array<[number, number]> = [[0, far], [far, r.length]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const A = at(a), B = at(b);
+    const dx = B[0] - A[0], dy = B[1] - A[1], len = Math.hypot(dx, dy);
+    let best = -1, bd = 0;
+    for (let k = a + 1; k < b; k++) {
+      const P = at(k);
+      const d = len > 1e-12 ? Math.abs(dx * (A[1] - P[1]) - dy * (A[0] - P[0])) / len : Math.hypot(P[0] - A[0], P[1] - A[1]);
+      if (d > bd) { bd = d; best = k; }
+    }
+    if (best >= 0 && bd > PATH_TOLERANCE) {
+      keep[best % r.length] = 1;
+      stack.push([a, best], [best, b]);
+    }
+  }
+  return r.filter((_, k) => keep[k] === 1);
+}
+
 function signedArea(r: Pt[]): number {
   let a = 0;
   for (let k = 0; k < r.length; k++) {
@@ -440,8 +475,8 @@ function inside(pt: Pt, r: Pt[]): boolean {
 
 /**
  * Subpaths → one ring the nonzero fill paints as the author meant: a subpath
- * inside an earlier one is wound opposite (a hole), any other the same way
- * (a separate piece), each joined to the ring so far by a zero-width bridge
+ * nested inside an odd number of earlier ones is wound opposite (a hole), any
+ * other the same way (a separate piece, or an island inside a hole), each joined to the ring so far by a zero-width bridge
  * at the closest vertex pair. This is the "retrace the hole" trick FORMAT.md
  * teaches by hand, done by the compiler so the winding is always right.
  */
@@ -452,8 +487,10 @@ function joinRings(rings: Pt[][]): Pt[] {
   let ring = outer.slice();
   for (let n = 1; n < rings.length; n++) {
     let sub = rings[n]!;
-    const isHole = rings.slice(0, n).some((r) => inside(sub[0]!, r));
-    const want = isHole ? -sign : sign;
+    // Nesting depth decides: inside an odd number of earlier subpaths = a hole,
+    // even = solid (an island in a hole, like a pupil in an eye-spot ring).
+    const depth = rings.slice(0, n).filter((r) => inside(sub[0]!, r)).length;
+    const want = depth % 2 === 1 ? -sign : sign;
     if (Math.sign(signedArea(sub)) !== want) sub = sub.slice().reverse();
     let bi = 0, bj = 0, best = Infinity;
     for (let a = 0; a < ring.length; a++) {
