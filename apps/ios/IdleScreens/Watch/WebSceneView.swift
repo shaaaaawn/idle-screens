@@ -36,6 +36,8 @@ struct WebSceneView: UIViewRepresentable {
     var onFrame: (String) -> Void
     /// 3D models still downloading in the page (0 = the scene has its cast).
     var onAssets: ((Int) -> Void)? = nil
+    /// Fish a 3D tank has spawned so far (the tank's own count).
+    var onFish: ((Int) -> Void)? = nil
     /// The pinned scene (see `sceneId`) has mounted and drawn in the page.
     var onPinned: (() -> Void)? = nil
     /// Reusing an already-loaded page from `WebScenePool`: it has painted
@@ -61,6 +63,7 @@ struct WebSceneView: UIViewRepresentable {
         let coordinator = Coordinator(baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
         coordinator.onAssets = onAssets
         coordinator.onPinned = onPinned
+        coordinator.onFish = onFish
         return coordinator
     }
 
@@ -91,6 +94,7 @@ struct WebSceneView: UIViewRepresentable {
                     contentWorld: .page)
                 if let frame = host.lastFrame { coordinator.onFrame(frame) }
                 if let assets = host.lastAssets { coordinator.onAssets?(assets) }
+                if let fish = host.lastFish { coordinator.onFish?(fish) }
                 if host.painted { coordinator.onPinned?() }
                 if host.lastFrame != nil || host.painted { coordinator.onReused?() }
             }
@@ -148,6 +152,7 @@ struct WebSceneView: UIViewRepresentable {
         context.coordinator.onFrame = onFrame
         context.coordinator.onAssets = onAssets
         context.coordinator.onPinned = onPinned
+        context.coordinator.onFish = onFish
         context.coordinator.onReused = onReused
         context.coordinator.onFailure = onFailure
         guard context.coordinator.loaded != (channelId, reloadCount) else { return }
@@ -282,6 +287,21 @@ struct WebSceneView: UIViewRepresentable {
             });
             watch.observe(document.documentElement, { childList: true, subtree: true });
           }
+          // How many fish a 3D tank has spawned: the tank writes it on its
+          // host as data-mq-fish. Its models are bundled now, so the fetch tap
+          // above rarely sees one — this is the tank's own word on its cast.
+          // A clamped integer only.
+          if (window.MutationObserver && !window.__idleFishWatch) {
+            window.__idleFishWatch = true;
+            let lastFish = null;
+            new MutationObserver((records) => {
+              for (const r of records) {
+                const n = parseInt(r.target.getAttribute('data-mq-fish') || '0', 10);
+                const v = String(Math.max(0, Math.min(isNaN(n) ? 0 : n, 999)));
+                if (v !== lastFish) { lastFish = v; post('fish', v); }
+              }
+            }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-mq-fish'], subtree: true });
+          }
           const css = document.createElement('style');
           // The token gate is web UI; the native app states privacy itself.
           css.textContent = '.private-gate{display:none!important}' +
@@ -313,6 +333,7 @@ struct WebSceneView: UIViewRepresentable {
         var onFailure: () -> Void
         var onAssets: ((Int) -> Void)?
         var onPinned: (() -> Void)?
+        var onFish: ((Int) -> Void)?
         var onReused: (() -> Void)?
         var sawFrame = false
         var loaded: (String, Int) = ("", -1)
@@ -323,6 +344,7 @@ struct WebSceneView: UIViewRepresentable {
         var poolKey: WebScenePool.Key?
         private(set) var lastFrame: String?
         private(set) var lastAssets: Int?
+        private(set) var lastFish: Int?
         private(set) var painted = false
         private var out: Coordinator { sink ?? self }
         var snapshotTask: Task<Void, Never>?
@@ -370,7 +392,13 @@ struct WebSceneView: UIViewRepresentable {
             // A count, clamped: the page is untrusted, and this only ever
             // decides how long a loading animation plays.
             case "assets":
-                if let n = Int(body) { lastAssets = max(0, min(n, 99)); out.onAssets?(lastAssets!) }
+                if let n = Int(body) { lastAssets = max(0, min(n, 99)); SwipeTiming.mark("assets pending \(n)"); out.onAssets?(lastAssets!) }
+            case "fish":
+                if let n = Int(body) {
+                    lastFish = max(0, min(n, 999))
+                    SwipeTiming.mark("fish \(lastFish!)")
+                    out.onFish?(lastFish!)
+                }
             case "pinned":
                 SwipeTiming.mark("pinned scene painted")
                 painted = true

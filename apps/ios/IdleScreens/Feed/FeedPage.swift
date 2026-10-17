@@ -33,6 +33,10 @@ struct FeedPage: View {
     @State private var captionEntered = false
     /// `"live"`, or a stop's key. Optional only because `scrollPosition` binds one.
     @State private var moment: String? = FeedPage.liveKey
+    /// `moment` once the pager has come to rest (`moment` flips the instant a
+    /// swipe crosses halfway). See `engineMoment` for who uses which.
+    @State private var settledMoment: String? = FeedPage.liveKey
+    @State private var scrolling = false
     /// Changes when the feed was pulled to refresh.
     var refreshToken: Int = 0
     @Binding var chromeHidden: Bool
@@ -46,6 +50,8 @@ struct FeedPage: View {
     @State private var liveTankLoading = false
     /// The 3D tank is in: show the real thing.
     @State private var liveTankRevealed = false
+    /// The 3D tank has finished fading in over the lo-fi one.
+    @State private var liveTankStandInGone = false
     /// This web view (not merely the session) has painted. Coming back from a
     /// history page reloads it, and the session is still "live" from before —
     /// gating on that showed the site's bare black page for ~1 s.
@@ -69,7 +75,7 @@ struct FeedPage: View {
     /// three.js contexts is how a 13 Pro gets jettisoned. Coming back to live
     /// pays a reload; that is the right side of the trade.
     private var historyHoldsTheEngine: Bool {
-        guard let stop = currentStop else { return false }
+        guard let stop = stops.first(where: { Self.key($0) == engineMoment }) else { return false }
         return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.needsWebEngine == true
     }
 
@@ -87,6 +93,21 @@ struct FeedPage: View {
                                     token: app.token(for: channelId),
                                     baseURL: URL(string: Config.baseURL)!)
     }
+    /// Which page gets the web engine. Normally the page a swipe is crossing
+    /// into (`moment`), so a warm page is already live as it lands. With a 3D
+    /// tank on either side it waits for the pager to rest: one 3D engine at a
+    /// time, and handing over mid-slide swapped the bright 3D tank for its
+    /// dark 2D stand-in in full view (2026-10-17).
+    private var engineMoment: String? {
+        let tankInvolved = isTank || isTankMoment(moment) || isTankMoment(settledMoment)
+        return tankInvolved ? settledMoment : moment
+    }
+
+    private func isTankMoment(_ key: String?) -> Bool {
+        guard let stop = stops.first(where: { Self.key($0) == key }) else { return false }
+        return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.isTank == true
+    }
+
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
     private var currentIndex: Int? { stops.firstIndex { Self.key($0) == moment } }
 
@@ -107,7 +128,7 @@ struct FeedPage: View {
                         .id(Self.liveKey)
                     ForEach(stops) { stop in
                         HistoryMomentPage(channelId: channelId, stop: stop,
-                                          isShowing: isActive && moment == Self.key(stop),
+                                          isShowing: isActive && engineMoment == Self.key(stop),
                                           holdingColor: backdropHex)
                             .containerRelativeFrame([.horizontal, .vertical])
                             .momentCard()
@@ -119,6 +140,7 @@ struct FeedPage: View {
             .modifier(SwipeProgressReader(progress: $swipeProgress))
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $moment)
+            .modifier(SettleReader(moment: moment, settled: $settledMoment, scrolling: $scrolling))
             .scrollIndicators(.hidden)
             .ignoresSafeArea()
             // A still page is not a dead page: the past is a scroll away.
@@ -282,6 +304,7 @@ struct FeedPage: View {
         // Flip back to a channel and it is live again — returning to a feed
         // page parked on last Tuesday would be disorienting.
         moment = Self.liveKey
+        settledMoment = Self.liveKey
     }
 
     // MARK: Live page
@@ -293,7 +316,12 @@ struct FeedPage: View {
             // A 3D tank mounts empty and fills over many seconds. Until its
             // cast is in, the 2D tank swims here — the loading scene is the
             // lo-fi tank itself, with no message on top of it.
-            if isActive && !historyHoldsTheEngine && isTank && !liveTankRevealed {
+            // Also whenever the 3D engine is away — lent to a history page, or
+            // this page is a neighbour mid-swipe. Without it the page went
+            // black the instant a swipe crossed halfway (2026-10-17).
+            // It stays under the 3D view until that has FINISHED fading in:
+            // dropping both at once let the dark backdrop through mid-fade.
+            if isTank && !(isActive && !historyHoldsTheEngine && liveTankStandInGone) {
                 ClassicSaverView(kind: .metaquarium, seed: ClassicSaverKind.seed(forChannel: channelId),
                                  params: tankParams)
                     .ignoresSafeArea()
@@ -331,6 +359,7 @@ struct FeedPage: View {
                         }
                     },
                     onAssets: { liveTank.report($0) },
+                    onFish: { liveTank.reportFish($0) },
                     onReused: { liveWebPainted = true },
                     poolable: !isTank,
                     onFailure: { session.hostFailed() }
@@ -345,7 +374,7 @@ struct FeedPage: View {
                 // runs — the dark frame on every swipe back to live.
                 .onDisappear {
                     var quiet = Transaction(); quiet.disablesAnimations = true
-                    withTransaction(quiet) { liveWebPainted = false; liveStillGone = false }
+                    withTransaction(quiet) { liveWebPainted = false; liveStillGone = false; liveTankRevealed = false; liveTankStandInGone = false }
                 }
                 .onChange(of: liveWebPainted) { _, painted in
                     guard painted else { liveStillGone = false; return }
@@ -356,7 +385,7 @@ struct FeedPage: View {
                 }
                 .opacity(session.phase == .live && liveWebPainted && !session.sleeping && (!isTank || liveTankRevealed) ? 1 : 0)
                 .animation(.easeInOut(duration: 0.4), value: liveWebPainted)
-                .animation(.easeInOut(duration: 0.9), value: liveTankRevealed)
+                .animation(.easeInOut(duration: 0.5), value: liveTankRevealed)
                 .animation(.easeInOut(duration: 0.5), value: session.phase)
                 .animation(.easeInOut(duration: 0.6), value: session.sleeping)
             }
@@ -367,13 +396,15 @@ struct FeedPage: View {
             liveTank = TankLoadState()
             liveTankLoading = true
             liveTankRevealed = false
+            liveTankStandInGone = false
             await TankLoadState.watch(state: { liveTank }, settle: { liveTank.markSettled() }) { loading in
                 liveTankLoading = loading
             }
-            // In: release the ring, and let the 3D tank fade up as the fish
-            // scatter back to their lanes.
-            try? await Task.sleep(for: .seconds(0.9))
-            if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.9)) { liveTankRevealed = true } }
+            // In: a beat for the cast's first frame to draw, then fade up.
+            try? await Task.sleep(for: .seconds(0.15))
+            if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.5)) { liveTankRevealed = true } }
+            try? await Task.sleep(for: .seconds(0.6))
+            if !Task.isCancelled { liveTankStandInGone = true }
         }
     }
 
@@ -1024,6 +1055,7 @@ private struct HistoryMomentPage: View {
                             }
                         },
                         onAssets: { tank.report($0) },
+                        onFish: { tank.reportFish($0) },
                         onPinned: {
                             if !webReady { webReady = true; SwipeTiming.mark("webReady (pinned painted)") }
                         },
@@ -1080,10 +1112,11 @@ private struct HistoryMomentPage: View {
             placeholderGone = false
             // A page the pool already holds (visited a moment ago, or warmed
             // ahead of this swipe) costs nothing to show: no wait. Otherwise
-            // wait long enough that flicking THROUGH pages boots nothing.
+            // wait long enough that flicking THROUGH pages boots nothing. A
+            // tank needs no wait: it is only shown once the pager is at rest.
             let warm = scene.map { !$0.isTank } == true
                 && WebScenePool.shared.has(channelId: channelId, sceneId: stop.sceneId)
-            if !warm {
+            if !warm && scene?.isTank != true {
                 try? await Task.sleep(for: .seconds(0.2))
                 if Task.isCancelled { return }
             }
@@ -1098,9 +1131,11 @@ private struct HistoryMomentPage: View {
             }
             await TankLoadState.watch(state: { tank }, settle: { tank.markSettled() }) { loading in
                 tankLoading = loading
+                SwipeTiming.mark("tank loading=\(loading)")
             }
-            try? await Task.sleep(for: .seconds(0.9))
-            if !Task.isCancelled { tankRevealed = true }
+            // A beat for the cast's first frame to draw before the fade.
+            try? await Task.sleep(for: .seconds(0.15))
+            if !Task.isCancelled { tankRevealed = true; SwipeTiming.mark("tank revealed") }
         }
         // The safety net under the prefetch: a page that somehow arrives
         // without its scene still asks for it.
@@ -1134,6 +1169,30 @@ extension SpecSubset.Background {
 /// iOS 18 can read a scroll view's offset directly. iOS 17 cannot do it
 /// reliably from inside a lazy paging stack, so there the caption skips the
 /// finger-tied dissolve and only plays its entrance — still correct, less lush.
+/// Copies `moment` into `settled` once the scroll is idle. A change made while
+/// nothing is scrolling (a tap, a reset) lands at once. Before iOS 18 there is
+/// no scroll phase to read, so it simply follows `moment`.
+private struct SettleReader: ViewModifier {
+    let moment: String?
+    @Binding var settled: String?
+    @Binding var scrolling: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in
+                    scrolling = phase != .idle
+                    if phase == .idle, settled != moment { settled = moment }
+                }
+                .onChange(of: moment) { _, now in
+                    if !scrolling { settled = now }
+                }
+        } else {
+            content.onChange(of: moment) { _, now in settled = now }
+        }
+    }
+}
+
 private struct SwipeProgressReader: ViewModifier {
     @Binding var progress: CGFloat
 
