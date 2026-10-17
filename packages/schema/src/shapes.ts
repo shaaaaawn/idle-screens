@@ -48,7 +48,7 @@ export const STROKE_SAMPLES = 24;
 /** Polygon vertices centred on (0,0), unrotated, circumradius `radius` px. Regular n-gons point up. */
 export function polygonPoints(s: PolygonSprite, radius: number): Array<{ x: number; y: number }> {
   if (typeof s.path === 'string') {
-    const unit = flattenPath(s.path);
+    const unit = flattenPath(s.path, s.fillRule ?? 'auto');
     if (unit.points.length >= 3) return unit.points.map(([x, y]) => ({ x: x * radius, y: y * radius }));
   }
   if (s.points && s.points.length >= 3) {
@@ -257,8 +257,14 @@ export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, 
 // cohesion) reads polygonPoints(), so a path sprite is a polygon everywhere.
 // ---------------------------------------------------------------------------
 
-/** Most outline points a flattened path may produce (the canvas fills one path either way). */
-export const MAX_PATH_POINTS = 512;
+/** Most outline points one flattened path may produce. */
+export const MAX_PATH_POINTS = 4096;
+/**
+ * Scene budget for path outlines: Σ over path layers of flattened points ×
+ * entity count — the vertices the canvas fills per frame. Detail spends it
+ * wherever the drawing needs it, rather than a fixed allowance per layer.
+ */
+export const MAX_SCENE_PATH_POINTS = 16384;
 /** Flattening tolerance, unit-box units: a chord never strays further than this from its curve (≈0.27 px for a full-box glyph at radius 0.5 on 1080p, ≈0.5 px on 4K). */
 const PATH_TOLERANCE = 0.0005;
 
@@ -270,21 +276,36 @@ export interface FlattenedPath {
   error?: string;
 }
 
+/**
+ * How a path's subpaths combine. `auto` (default): containment decides which
+ * subpaths are holes (see joinRings) — for authors who never think about
+ * winding. `nonzero` / `evenodd`: SVG's own fill rules, honouring the winding
+ * as drawn — for pasted SVG, and for a deliberate same-colour shape that sits
+ * inside another (auto would read it as a hole).
+ */
+export type PathFillRule = 'auto' | 'nonzero' | 'evenodd';
+
 const pathCache = new Map<string, FlattenedPath>();
 
-export function flattenPath(d: string): FlattenedPath {
-  const hit = pathCache.get(d);
+export function flattenPath(d: string, rule: PathFillRule = 'auto'): FlattenedPath {
+  const key = `${rule}|${d}`;
+  const hit = pathCache.get(key);
   if (hit) return hit;
   let out: FlattenedPath;
   try {
     const rings = parseAndFlatten(d).map(simplifyRing).filter((r) => r.length >= 3);
-    out = { points: joinRings(rings), subpaths: rings.length };
+    out = { points: rule === 'auto' ? joinRings(rings) : bridge(rings), subpaths: rings.length };
   } catch (e) {
     out = { points: [], subpaths: 0, error: e instanceof Error ? e.message : String(e) };
   }
   if (pathCache.size > 256) pathCache.clear();
-  pathCache.set(d, out);
+  pathCache.set(key, out);
   return out;
+}
+
+/** The canvas fill rule for a polygon: evenodd only for a path that asks for it. */
+export function polygonFillRule(s: PolygonSprite): 'nonzero' | 'evenodd' {
+  return typeof s.path === 'string' && s.fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
 }
 
 type Pt = [number, number];
@@ -473,25 +494,129 @@ function inside(pt: Pt, r: Pt[]): boolean {
   return c;
 }
 
+/** Every vertex of `sub` inside `r` (bbox first): `sub` is nested in `r`, not merely overlapping it. */
+function containsRing(r: Pt[], rb: Box, sub: Pt[], sb: Box): boolean {
+  if (sb.x0 < rb.x0 || sb.x1 > rb.x1 || sb.y0 < rb.y0 || sb.y1 > rb.y1) return false;
+  for (const p of sub) if (!inside(p, r)) return false;
+  return true;
+}
+
+interface Box { x0: number; x1: number; y0: number; y1: number }
+function boxOf(r: Pt[]): Box {
+  const b = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity };
+  for (const [x, y] of r) { b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x); b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y); }
+  return b;
+}
+
 /**
- * Subpaths → one ring the nonzero fill paints as the author meant: a subpath
- * nested inside an odd number of earlier ones is wound opposite (a hole), any
- * other the same way (a separate piece, or an island inside a hole), each joined to the ring so far by a zero-width bridge
- * at the closest vertex pair. This is the "retrace the hole" trick FORMAT.md
- * teaches by hand, done by the compiler so the winding is always right.
+ * Subpaths → one ring the nonzero fill paints as the author meant, whatever
+ * direction each was drawn in or which came first. Containment decides
+ * (every vertex inside, not just one):
+ *   - a subpath inside nothing is solid;
+ *   - inside a filled region (its smallest container is filled), a hole;
+ *   - inside a hole, solid again (an island: a pupil in an eye-spot ring);
+ *   - one that only partly overlaps another stays solid and merges with it
+ *     (a vein crossing a vein, a leaflet over its stem), never cutting it.
+ * Each subpath gets a winding multiplicity m so the net winding just inside
+ * it is exactly 1 (filled) or 0 (empty), counting every container — so a
+ * window through two overlapping walls is wound −2 and still opens. A ring
+ * with |m| > 1 is traced |m| times; m = 0 drops it. Pieces join the ring so
+ * far by zero-width bridges at the closest vertex pair: the "retrace the
+ * hole" trick FORMAT.md teaches by hand, done by the compiler.
  */
 function joinRings(rings: Pt[][]): Pt[] {
   if (rings.length === 0) return [];
-  const outer = rings[0]!;
-  const sign = Math.sign(signedArea(outer)) || 1;
-  let ring = outer.slice();
+  const boxes = rings.map(boxOf);
+  const areas = rings.map((r) => Math.abs(signedArea(r)));
+  // Largest first, so every container is decided before what it contains.
+  const order = rings.map((_, i) => i).sort((p, q) => areas[q]! - areas[p]!);
+  const mult = new Array<number>(rings.length).fill(0);
+  const net = new Array<number>(rings.length).fill(0);
+  const done: number[] = [];
+  for (const n of order) {
+    const containers = done.filter((m) => areas[m]! > areas[n]! && containsRing(rings[m]!, boxes[m]!, rings[n]!, boxes[n]!));
+    const around = containers.reduce((sum, m) => sum + mult[m]!, 0);
+    let want = 1;
+    if (containers.length) {
+      const parent = containers.reduce((p, m) => (areas[m]! < areas[p]! ? m : p));
+      want = net[parent] !== 0 ? 0 : 1;
+    }
+    net[n] = want;
+    mult[n] = want - around;
+    done.push(n);
+  }
+  const traced: Pt[][] = [];
+  const trace = (r: Pt[], m: number): void => {
+    const o = Math.sign(signedArea(r)) === Math.sign(m) ? r : r.slice().reverse();
+    for (let k = 0; k < Math.abs(m); k++) traced.push(o);
+  };
+  for (let n = 0; n < rings.length; n++) {
+    if (mult[n] !== 0) trace(rings[n]!, mult[n]!);
+  }
+  // In auto a hole is a stencil cut-out through the whole layer. A solid that
+  // only partly crosses a hole (a window across the seam where a tower's top
+  // overlaps its base; a spoke across a ring's opening) is cancelled where it
+  // covers the hole: add (solid ∩ hole) wound against it. Exact for a convex
+  // hole (windows, ovals, circles); a concave hole cuts only what contains it.
+  // For each solid, the holes it partly crosses; only the OUTERMOST of those
+  // cut it — a hole inside another hole is already in the cut region, and
+  // cutting twice would wind the solid back to −1 (visible again).
+  const holes = rings.map((_, n) => n).filter((n) => net[n] === 0 && mult[n] !== 0 && isConvex(rings[n]!));
+  for (let m = 0; m < rings.length; m++) {
+    if (mult[m]! <= 0) continue;
+    const bm = boxes[m]!;
+    const crossing = holes.filter((n) => {
+      const bn = boxes[n]!;
+      if (n === m || bm.x1 <= bn.x0 || bm.x0 >= bn.x1 || bm.y1 <= bn.y0 || bm.y0 >= bn.y1) return false;
+      return !containsRing(rings[m]!, bm, rings[n]!, bn) && !containsRing(rings[n]!, bn, rings[m]!, bm);
+    });
+    for (const n of crossing) {
+      if (crossing.some((o) => o !== n && areas[o]! > areas[n]! && containsRing(rings[o]!, boxes[o]!, rings[n]!, boxes[n]!))) continue;
+      const piece = clipToConvex(rings[m]!, rings[n]!);
+      if (piece.length >= 3 && Math.abs(signedArea(piece)) > 1e-9) trace(piece, -mult[m]!);
+    }
+  }
+  return bridge(traced);
+}
+
+function isConvex(r: Pt[]): boolean {
+  let sign = 0;
+  for (let k = 0; k < r.length; k++) {
+    const a = r[k]!, b = r[(k + 1) % r.length]!, c = r[(k + 2) % r.length]!;
+    const z = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    if (Math.abs(z) < 1e-12) continue;
+    if (sign === 0) sign = Math.sign(z);
+    else if (Math.sign(z) !== sign) return false;
+  }
+  return true;
+}
+
+/** Sutherland–Hodgman: `subject` clipped to the convex polygon `clip`. */
+function clipToConvex(subject: Pt[], clip: Pt[]): Pt[] {
+  const o = Math.sign(signedArea(clip)) || 1;
+  let out = subject;
+  for (let k = 0; k < clip.length && out.length; k++) {
+    const a = clip[k]!, b = clip[(k + 1) % clip.length]!;
+    const side = (p: Pt): number => o * ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
+    const cut = (p: Pt, q: Pt): Pt => { const sp = side(p), sq = side(q), t = sp / (sp - sq); return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]; };
+    const next: Pt[] = [];
+    for (let i = 0; i < out.length; i++) {
+      const p = out[i]!, q = out[(i + 1) % out.length]!;
+      const pin = side(p) >= 0, qin = side(q) >= 0;
+      if (pin) next.push(p);
+      if (pin !== qin) next.push(cut(p, q));
+    }
+    out = next;
+  }
+  return out;
+}
+
+/** Join rings into one by zero-width bridges at the closest vertex pairs; windings kept as given. */
+function bridge(rings: Pt[][]): Pt[] {
+  if (rings.length === 0) return [];
+  let ring = rings[0]!.slice();
   for (let n = 1; n < rings.length; n++) {
-    let sub = rings[n]!;
-    // Nesting depth decides: inside an odd number of earlier subpaths = a hole,
-    // even = solid (an island in a hole, like a pupil in an eye-spot ring).
-    const depth = rings.slice(0, n).filter((r) => inside(sub[0]!, r)).length;
-    const want = depth % 2 === 1 ? -sign : sign;
-    if (Math.sign(signedArea(sub)) !== want) sub = sub.slice().reverse();
+    const sub = rings[n]!;
     let bi = 0, bj = 0, best = Infinity;
     for (let a = 0; a < ring.length; a++) {
       for (let b = 0; b < sub.length; b++) {

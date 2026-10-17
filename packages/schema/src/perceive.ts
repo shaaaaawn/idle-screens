@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, isShapedSprite, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, isShapedSprite, pathLength, polygonArea, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -266,6 +266,7 @@ function polygonCellCoverage(
   c1: number,
   r0: number,
   r1: number,
+  evenodd = false,
 ): Float64Array {
   const nc = c1 - c0 + 1;
   const cov = new Float64Array(nc * (r1 - r0 + 1));
@@ -299,11 +300,13 @@ function polygonCellCoverage(
       hits.sort((m, n) => m.x - n.x);
       let wind = 0;
       let start = 0;
+      const filled = (w: number): boolean => (evenodd ? (w & 1) !== 0 : w !== 0);
       for (const hit of hits) {
-        const before = wind;
+        const before = filled(wind);
         wind += hit.dir;
-        if (before === 0 && wind !== 0) start = hit.x;
-        else if (before !== 0 && wind === 0) addSpan(r - r0, start, hit.x);
+        const after = filled(wind);
+        if (!before && after) start = hit.x;
+        else if (before && !after) addSpan(r - r0, start, hit.x);
       }
     }
   }
@@ -540,7 +543,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const r0 = Math.max(0, Math.floor(minY / cellH));
     const r1 = Math.min(rows - 1, Math.floor(maxY / cellH));
     if (c0 > c1 || r0 > r1) return;
-    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
+    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1, polygonFillRule(s) === 'evenodd');
     const nc = c1 - c0 + 1;
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {

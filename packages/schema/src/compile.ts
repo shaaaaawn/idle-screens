@@ -28,7 +28,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isShapedSprite, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isShapedSprite, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -1027,7 +1027,7 @@ class SpecInstance implements SaverInstance {
       ctx.moveTo(pts[0]!.x, pts[0]!.y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
       ctx.closePath();
-      ctx.fill();
+      ctx.fill(polygonFillRule(sprite));
       ctx.restore();
       return;
     }

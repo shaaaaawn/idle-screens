@@ -2,7 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, flattenPath } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, type PathFillRule } from './shapes';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -30,7 +30,7 @@ const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'color
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
-const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'soft', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
@@ -253,6 +253,18 @@ function validateSpecCore(spec: unknown): ValidationResult {
     err('layers', 'must be a non-empty array');
   } else {
     if (spec.layers.length > LIMITS.maxLayers) err('layers', `at most ${LIMITS.maxLayers} layers`);
+    {
+      let pathPoints = 0;
+      for (const l of spec.layers as Array<Record<string, unknown>>) {
+        const sp = isObj(l) ? (l.sprite as Record<string, unknown> | undefined) : undefined;
+        if (!sp || sp.kind !== 'polygon' || typeof sp.path !== 'string') continue;
+        const n = typeof l.count === 'number' && l.count > 0 ? l.count : 1;
+        pathPoints += flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').points.length * n;
+      }
+      if (pathPoints > MAX_SCENE_PATH_POINTS) {
+        err('layers', `path outlines total ${pathPoints} points (flattened points × count); the scene budget is ${MAX_SCENE_PATH_POINTS}`);
+      }
+    }
     let total = 0;
     spec.layers.forEach((layer, i) => {
       total += isObj(layer) && isNum(layer.count) ? layer.count : 0;
@@ -927,15 +939,19 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
     if (sprite.path !== undefined) {
       if (sprite.points !== undefined || sprite.sides !== undefined) err(`${path}.path`, 'use path, points or sides, not more than one');
-      if (typeof sprite.path !== 'string' || sprite.path.length === 0 || sprite.path.length > 20000) {
-        err(`${path}.path`, 'must be an SVG path d string (1..20000 chars) in the -1..1 unit box');
+      if (typeof sprite.path !== 'string' || sprite.path.length === 0 || sprite.path.length > 65536) {
+        err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
       } else {
-        const flat = flattenPath(sprite.path);
+        const flat = flattenPath(sprite.path, (sprite.fillRule as PathFillRule | undefined) ?? 'auto');
         if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);
         else if (flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points)');
         else if (flat.points.length > MAX_PATH_POINTS) err(`${path}.path`, `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`);
         else if (flat.points.some(([x, y]) => Math.abs(x) > 1.0001 || Math.abs(y) > 1.0001)) err(`${path}.path`, 'must stay inside the -1..1 unit box (curves included)');
       }
+    }
+    if (sprite.fillRule !== undefined) {
+      if (!['auto', 'nonzero', 'evenodd'].includes(sprite.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
+      else if (sprite.path === undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
     }
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);
