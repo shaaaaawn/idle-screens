@@ -48,7 +48,7 @@ export const STROKE_SAMPLES = 24;
 /** Polygon vertices centred on (0,0), unrotated, circumradius `radius` px. Regular n-gons point up. */
 export function polygonPoints(s: PolygonSprite, radius: number): Array<{ x: number; y: number }> {
   if (typeof s.path === 'string') {
-    const unit = flattenPath(s.path, s.fillRule ?? 'auto');
+    const unit = flattenSprite(s);
     if (unit.points.length >= 3) return unit.points.map(([x, y]) => ({ x: x * radius, y: y * radius }));
   }
   if (s.points && s.points.length >= 3) {
@@ -301,6 +301,22 @@ export function flattenPath(d: string, rule: PathFillRule = 'auto'): FlattenedPa
   if (pathCache.size > 256) pathCache.clear();
   pathCache.set(key, out);
   return out;
+}
+
+const spriteFlat = new WeakMap<object, { d: string; rule: PathFillRule; flat: FlattenedPath }>();
+/**
+ * flattenPath for a polygon sprite, memoised on the sprite object: every
+ * frame asks for the same outline, and hashing a 60,000-character path
+ * string as a Map key each time cost more than drawing it.
+ */
+export function flattenSprite(s: PolygonSprite): FlattenedPath {
+  const d = s.path ?? '';
+  const rule = s.fillRule ?? 'auto';
+  const hit = spriteFlat.get(s);
+  if (hit && hit.d === d && hit.rule === rule) return hit.flat;
+  const flat = flattenPath(d, rule);
+  spriteFlat.set(s, { d, rule, flat });
+  return flat;
 }
 
 /** The canvas fill rule for a polygon: evenodd only for a path that asks for it. */
