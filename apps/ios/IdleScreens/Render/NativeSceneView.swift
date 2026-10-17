@@ -82,6 +82,7 @@ struct NativeSceneView: View {
 
     /// One frame, drawn in reference space and mapped into the real view.
     private func draw(into ctx: inout GraphicsContext, size: CGSize, t: TimeInterval) {
+        RenderProbe.hit(staticFrame ? "scene.static" : "scene.live")
         // Everything below computes in `space`. When a referenceSize is set the
         // context is scaled/centred instead of the VIEW being oversized, so a
         // 148pt tile allocates a 148pt backing store while still composing the

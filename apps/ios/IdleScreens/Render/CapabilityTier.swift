@@ -65,6 +65,16 @@ enum RenderClass: String, Sendable, CaseIterable {
 
     /// Entities a scene may compile to before the Canvas tier gives way to
     /// the GPU sprite tier.
+    /// Entity ceiling for a gallery poster. A pre-4K box rasterises each poster
+    /// on its CPU as the row scrolls into view, so it gets a thinner frame —
+    /// the same scene, fewer motes — instead of a hitch on every swipe.
+    var previewEntityBudget: Int {
+        switch self {
+        case .legacy: return 240
+        case .standard, .high: return SpecSubset.Budget.preview.entities
+        }
+    }
+
     var maxCanvasEntities: Int {
         switch self {
         case .legacy: return 600

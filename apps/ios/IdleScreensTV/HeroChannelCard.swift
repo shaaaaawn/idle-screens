@@ -33,7 +33,13 @@ struct HeroChannelCard: View {
             // blurry one, and costs nothing.
             ScenePreviewView(spec: spec, fallbackSeed: channel.id,
                              live: app.effectiveTier == .t3)
-                .background(ProceduralChannelArt(channelId: channel.id))
+                .background {
+                    if app.lightweightGallery {
+                        Color(hex: spec.background?.primaryColor ?? "0A0A0F")
+                    } else {
+                        ProceduralChannelArt(channelId: channel.id)
+                    }
+                }
         } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId),
                   let tier = app.classicRenderTier {
             ClassicSaverView(kind: kind,

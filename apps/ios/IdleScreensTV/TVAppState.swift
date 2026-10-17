@@ -77,6 +77,12 @@ final class TVAppState {
     let detectedTier: CapabilityTier
     /// How hard this box may be pushed at whatever tier it renders on.
     let renderClass: RenderClass
+
+    /// The gallery on a box that rasterises on its CPU (the sprite tier, or a
+    /// pre-4K Apple TV): thinner posters, no second canvas behind each one,
+    /// and a flat tint instead of a 90 pt blurred backdrop — remote swipes on
+    /// the home screen lagged there.
+    var lightweightGallery: Bool { effectiveTier != .t3 || renderClass == .legacy }
     /// Set by ThumbStreamView after repeated thumb failures — forces the t0 floor.
     var thumbFailed = false
     private(set) var watchdogDowngraded = false

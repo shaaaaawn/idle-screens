@@ -14,7 +14,6 @@ struct SearchView: View {
     @State private var query = ""
     /// A browse filter picked instead of typing (shared with the iPhone).
     @State private var filter: ChannelBrowse.Filter?
-    @FocusState private var focusedChannelId: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: TV.columnGap), count: 3)
 
@@ -159,9 +158,7 @@ struct SearchView: View {
     private func grid(_ channels: [PublicChannel]) -> some View {
         LazyVGrid(columns: columns, spacing: TV.rowGap) {
             ForEach(channels) { channel in
-                ChannelCard(channel: channel,
-                            focusBinding: $focusedChannelId,
-                            surface: .search)
+                ChannelCard(channel: channel, surface: .search)
             }
         }
     }
