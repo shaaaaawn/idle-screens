@@ -700,6 +700,25 @@ describe('describeScene', () => {
     expect(large.snapshots[0]!.layers[0]!.count).toBe(200);
   });
 
+  it('counts a chain that omits k and maxDist as the chain itself (X541)', () => {
+    const chain: SaverSpec = {
+      ...base,
+      units: 'viewport',
+      layers: [{
+        count: 12,
+        sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#fff' },
+        motion: { type: 'drift', speed: [0.01, 0.02] },
+        links: { mode: 'chain', closed: true },
+      }],
+    };
+    const layer = describeScene(chain, { times: [0] }).snapshots[0]!.layers[0]!;
+    expect(layer.linksDrawn).toBe(12);
+    expect(layer.linksExpected).toBe(12);
+    expect(layer.connectedComponents).toBe(1);
+    expect(layer.isolatedNodes).toBe(0);
+    expect(adviseSpec(chain).some((w) => w.code === 'link-starvation')).toBe(false);
+  });
+
   it('reports link connectivity for link layers', () => {
     const linked: SaverSpec = {
       ...base,

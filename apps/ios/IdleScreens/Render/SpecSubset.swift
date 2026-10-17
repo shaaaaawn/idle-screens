@@ -305,9 +305,12 @@ struct SpecSubset: Decodable, Equatable {
     }
 
     /// `links`: lines between nearby entities — constellations, webs, graphs.
+    /// `k` and `maxDist` are optional because a `chain` reads neither (it needs
+    /// `maxDist` only as the `falloff` fade distance); the validator requires
+    /// both for `nearest` and `random`.
     struct Links: Decodable, Equatable, Sendable {
-        var k: Int
-        var maxDist: Double
+        var k: Int?
+        var maxDist: Double?
         var color: String?
         var alpha: Double?
         var width: Double?

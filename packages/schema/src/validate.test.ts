@@ -143,6 +143,39 @@ describe('validateSpec', () => {
     expect(validateSpec({ ...base(), layers: [ok] }).valid).toBe(true);
   });
 
+  describe('links in chain mode (X541)', () => {
+    const layer = (links: Record<string, unknown>) => ({
+      count: 6, sprite: { kind: 'circle' as const, radius: [0.004, 0.008], color: '#fff' }, motion: { type: 'drift' as const, speed: [0.01, 0.02] }, links,
+    });
+    const spec = (links: Record<string, unknown>) => ({ ...base(), layers: [layer(links)] });
+
+    it('accepts a chain with neither k nor maxDist — it reads neither', () => {
+      expect(validateSpec(spec({ mode: 'chain' })).errors).toEqual([]);
+      expect(validateSpec(spec({ mode: 'chain', closed: true, color: '#37e5d7', alpha: 0.8, width: 0.002 })).valid).toBe(true);
+    });
+
+    it('requires maxDist on a chain only when falloff is true', () => {
+      expect(paths(spec({ mode: 'chain', falloff: true }))).toEqual(['layers[0].links.maxDist']);
+      expect(validateSpec(spec({ mode: 'chain', falloff: true })).errors[0]!.message).toMatch(/falloff/);
+      expect(validateSpec(spec({ mode: 'chain', falloff: true, maxDist: 0.3 })).valid).toBe(true);
+      expect(validateSpec(spec({ mode: 'chain', falloff: false })).valid).toBe(true);
+    });
+
+    it('still checks k and maxDist on a chain when they are given', () => {
+      expect(paths(spec({ mode: 'chain', k: 10 }))).toEqual(['layers[0].links.k']);
+      expect(paths(spec({ mode: 'chain', k: 1.5 }))).toEqual(['layers[0].links.k']);
+      expect(paths(spec({ mode: 'chain', maxDist: 0 }))).toEqual(['layers[0].links.maxDist']);
+      expect(paths(spec({ mode: 'chain', maxDist: [0.1, 0.2] }))).toEqual(['layers[0].links.maxDist']);
+    });
+
+    it('keeps k and maxDist required for nearest and random', () => {
+      for (const mode of [undefined, 'nearest', 'random']) {
+        expect(paths(spec({ mode, maxDist: 0.3 }))).toEqual(['layers[0].links.k']);
+        expect(paths(spec({ mode, k: 2 }))).toEqual(['layers[0].links.maxDist']);
+      }
+    });
+  });
+
   it('rejects links on high-count layers', () => {
     const layer = { count: 250, sprite: { kind: 'circle' as const, radius: [1, 2], color: '#fff' }, motion: { type: 'static' as const }, links: { k: 2, maxDist: 50 } };
     expect(validateSpec({ ...base(), layers: [layer] }).errors.some((e) => /links/.test(e.path))).toBe(true);

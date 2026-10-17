@@ -27,6 +27,7 @@ import {
   headingAt,
   lifeAlphaAt,
   linkEdges,
+  linkMaxDistPx,
   positionAt,
   revealState,
   rotationAt,
@@ -706,9 +707,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     // Link lines are visual mass too (for chain scenes they ARE the scene).
     if (layer.links) {
       const positions = entities.map((e) => posOf(scene, e, tPass));
-      const maxDistPx = layer.links.maxDist * scale;
       const motionWraps = ['drift', 'rise', 'wander'].includes(layer.motion.type);
-      const edges = linkEdges(layer.links, positions, maxDistPx, layer.wrap !== false && motionWraps, w, h);
+      const edges = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false && motionWraps, w, h);
       const la = Math.min(1, (layer.links.alpha ?? 0.6) * lifeA);
       const lum = layer.links.color ? hexLuma(layer.links.color) : 0.7;
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
@@ -1076,7 +1076,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
     if (layer.links && entities.length > 1) {
       const positions = entities.map((e) => posOf(scene, e, t));
       const motionWraps = ['drift', 'rise', 'wander'].includes(layer.motion.type);
-      const edges = linkEdges(layer.links, positions, layer.links.maxDist * scale, layer.wrap !== false && motionWraps, w, h);
+      const edges = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false && motionWraps, w, h);
       const la = (layer.links.alpha ?? 0.6) * lifeA;
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
       const lw = (layer.links.width ?? defaultWidth) * scale;

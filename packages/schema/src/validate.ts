@@ -667,10 +667,23 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.links !== undefined) {
     if (!isObj(layer.links)) err(`${path}.links`, 'must be an object');
     else {
-      if (!isNum(layer.links.k) || !Number.isInteger(layer.links.k) || layer.links.k < 1 || layer.links.k > LIMITS.maxLinksK) {
-        err(`${path}.links.k`, `must be an integer 1..${LIMITS.maxLinksK}`);
+      // A chain wires entities in order, so it reads neither `k` nor `maxDist`
+      // — except `maxDist` as the fade distance under `falloff: true`. Both
+      // are still checked when present (X541).
+      const chain = layer.links.mode === 'chain';
+      if (!chain || layer.links.k !== undefined) {
+        if (!isNum(layer.links.k) || !Number.isInteger(layer.links.k) || layer.links.k < 1 || layer.links.k > LIMITS.maxLinksK) {
+          err(`${path}.links.k`, `must be an integer 1..${LIMITS.maxLinksK}`);
+        }
       }
-      positiveScalar(layer.links.maxDist, `${path}.links.maxDist`, err);
+      if (!chain || layer.links.maxDist !== undefined || layer.links.falloff === true) {
+        positiveScalar(
+          layer.links.maxDist,
+          `${path}.links.maxDist`,
+          err,
+          chain && layer.links.maxDist === undefined ? 'is required (> 0) when a chain sets falloff: true — it is the fade distance' : undefined,
+        );
+      }
       if (layer.links.color !== undefined) color(layer.links.color, `${path}.links.color`, err);
       if (layer.links.alpha !== undefined && (!isNum(layer.links.alpha) || layer.links.alpha < 0 || layer.links.alpha > 1)) {
         err(`${path}.links.alpha`, 'must be 0..1');
