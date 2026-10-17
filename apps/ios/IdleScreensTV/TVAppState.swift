@@ -594,7 +594,6 @@ final class TVAppState {
 
     private func render(_ json: JSONValue, fallbackSeed: Int?) {
         currentSpecJSON = json
-        stopKeyframes()
         guard let data = try? JSONEncoder().encode(json) else { return }
         // Sequence envelope? Route to the timeline player — it carries no
         // top-level layers, so without this check it would misroute to the
@@ -608,6 +607,7 @@ final class TVAppState {
         }
         stopSequence()
         guard let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else {
+            stopKeyframes()
             // Not a schema spec (e.g. classic saver {"id":"warp"}). Savers
             // with a native port render locally; the rest stay on thumbs.
             isClassicSpec = true
@@ -624,6 +624,10 @@ final class TVAppState {
         isClassicSpec = false
         classicSaverId = nil
         let seed = spec.seed ?? fallbackSeed ?? 0
+        // Snapshots repeat the document. A timed scene already being driven
+        // keeps its clock and its current frame: recompiling the base here
+        // would flash the un-keyed scene, and restarting would rewind it.
+        if isDrivingKeyframes(json, seed: seed) { return }
         compiledScene = spec.compile(seed: seed, budget: sceneBudget)
         specBackground = spec.background
         specGhosting = spec.ghosting ?? 0
@@ -734,6 +738,13 @@ final class TVAppState {
     /// Ticks at the tier's rate only while a glide is in flight, and sleeps
     /// through holds until the next key.
     private var keyframeTask: Task<Void, Never>?
+    /// What the driver is playing: the authored JSON and its seed.
+    private var keyframeSource: (json: JSONValue, seed: Int)?
+
+    private func isDrivingKeyframes(_ json: JSONValue, seed: Int) -> Bool {
+        guard keyframeTask != nil, let src = keyframeSource else { return false }
+        return src.seed == seed && src.json == json
+    }
 
     /// How often a glide is re-resolved: smooth on Canvas; on the sprite tier
     /// every recompile rebuilds textures, so a glide steps a few times a second.
@@ -742,11 +753,14 @@ final class TVAppState {
     private func stopKeyframes() {
         keyframeTask?.cancel()
         keyframeTask = nil
+        keyframeSource = nil
     }
 
     private func startKeyframes(_ source: JSONValue, seed: Int) {
+        if isDrivingKeyframes(source, seed: seed) { return }
         stopKeyframes()
         guard SpecTimeline.hasTimeline(source) else { return }
+        keyframeSource = (source, seed)
         let epoch = Date()
         keyframeTask = Task { [weak self] in
             var last: JSONValue?

@@ -43,6 +43,38 @@ final class KeyframeDriverTests: XCTestCase {
         XCTAssertEqual(app.compiledScene.first?.entities.count, 3, "recompiles keep every entity")
     }
 
+    /// Snapshots repeat the document. A repeat must neither rewind the clock
+    /// nor flash the un-keyed base scene.
+    func testARepeatedSnapshotKeepsTheClock() async {
+        let app = makeApp()
+        app.selectChannel("timed")
+        app.handle(.scene(spec: json(timed), seed: 2))
+        try? await Task.sleep(for: .milliseconds(100))
+        app.handle(.scene(spec: json(timed), seed: 2))      // the same scene again
+        await wait { app.compiledScene.first?.entities.first?.color == "#0000ff" }
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#0000ff")
+        // Past the 150 ms key, a repeat must not paint the red base back.
+        app.handle(.scene(spec: json(timed), seed: 2))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#0000ff", "no flash of the base scene")
+        await wait { app.compiledScene.first?.opacity == 0 }
+        XCTAssertEqual(app.compiledScene.first?.opacity, 0, "the 300 ms key still lands on the original clock")
+    }
+
+    func testARepeatedSequenceKeepsItsSegmentKeysRunning() async {
+        let seq = ##"""
+        {"format":"idle-sequence","schemaVersion":1,"seed":3,"segments":[
+          {"key":"only","scene":{"layers":[{"key":"dots","count":2,"sprite":{"kind":"circle","radius":[0.02,0.02],"color":"#ff0000"},"motion":{"type":"static"}}],
+            "timeline":{"keys":[{"t":200,"path":"dots.sprite.color","value":"#00ff00","dur":0}]}}}]}
+        """##
+        let app = makeApp()
+        app.selectChannel("show")
+        app.handle(.scene(spec: json(seq), seed: 3))
+        try? await Task.sleep(for: .milliseconds(80))
+        app.handle(.scene(spec: json(seq), seed: 3))
+        await wait { app.compiledScene.first?.entities.first?.color == "#00ff00" }
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#00ff00", "the segment's key still fires")
+    }
+
     func testLeavingTheChannelStopsItsKeyframes() async {
         let app = makeApp()
         app.selectChannel("timed")
