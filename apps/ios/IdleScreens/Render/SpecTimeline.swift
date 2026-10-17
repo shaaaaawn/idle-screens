@@ -1,0 +1,322 @@
+import Foundation
+
+/// `timeline` — authored keyframes on a scene's own clock (schema 3.10).
+///
+/// A port of packages/schema/src/timeline.ts plus the steer.ts helpers it
+/// leans on (`resolveSpecPath`, `canonicalSpecPath`, `applyDeltasToSpec`,
+/// `lerpValue`, `easeSmooth`), over the raw spec JSON. Everything is a pure
+/// function of (spec, t): resolving a scene at a time never depends on what
+/// was drawn before, so a timeline scene seeks like any other.
+///
+/// Semantics (same as the web):
+/// - Keys address the same dot-paths as live steering; a path must already
+///   exist on the spec (a key cannot create a field).
+/// - A key glides from wherever its path is at `t` to `value` over `dur` ms
+///   (default 1000; 0 is a cut), eased `smooth` unless it says otherwise.
+///   Overlapping glides start from the earlier one's in-flight value.
+/// - Without `loop`, a path holds the base spec's value before its first key.
+/// - With `loop`, time wraps every `duration` ms and a path's value before its
+///   first key is its LAST key's value — one closed cycle per lap.
+///
+/// Read from JSON on purpose: `SpecSubset` is a lossy decode-only view, and a
+/// key may address any field the format has (not just the ones native draws).
+enum SpecTimeline {
+    static let defaultKeyDur = 1000.0
+
+    struct Key: Equatable, Sendable {
+        let t: Double
+        let path: String
+        let value: JSONValue
+        let ease: String?
+        let dur: Double?
+    }
+
+    struct Timeline: Equatable, Sendable {
+        let loop: Bool
+        let duration: Double?
+        let keys: [Key]
+    }
+
+    /// The spec's timeline, or nil when it has none (or one too broken to read).
+    static func timeline(of spec: JSONValue) -> Timeline? {
+        guard case .object(let root) = spec, case .object(let tl)? = root["timeline"] else { return nil }
+        var keys: [Key] = []
+        for raw in tl["keys"]?.array ?? [] {
+            guard case .object(let k) = raw, let t = k["t"]?.number, t.isFinite,
+                  let path = k["path"]?.string, let value = k["value"] else { continue }
+            keys.append(Key(t: t, path: path, value: value, ease: k["ease"]?.string, dur: k["dur"]?.number))
+        }
+        let loop: Bool = { if case .bool(let b)? = tl["loop"] { return b } else { return false } }()
+        return Timeline(loop: loop, duration: tl["duration"]?.number, keys: keys)
+    }
+
+    /// True when `spec` carries a timeline worth driving.
+    static func hasTimeline(_ spec: JSONValue) -> Bool { !(timeline(of: spec)?.keys.isEmpty ?? true) }
+
+    /// The spec without its `timeline`.
+    static func withoutTimeline(_ spec: JSONValue) -> JSONValue {
+        guard case .object(var root) = spec, root["timeline"] != nil else { return spec }
+        root.removeValue(forKey: "timeline")
+        return .object(root)
+    }
+
+    /// Keys grouped by the field they animate (index-form path), each group
+    /// sorted by time (stable: equal times keep authored order, later wins).
+    /// Keys whose path does not resolve are dropped, like the web runtime.
+    static func tracks(of spec: JSONValue) -> [(path: String, keys: [Key])] {
+        guard let tl = timeline(of: spec) else { return [] }
+        let base = withoutTimeline(spec)
+        var order: [String] = []
+        var byPath: [String: [Key]] = [:]
+        for k in tl.keys {
+            guard let cp = canonicalPath(base, k.path) else { continue }
+            if byPath[cp] == nil { order.append(cp) }
+            byPath[cp, default: []].append(k)
+        }
+        return order.map { path in
+            let sorted = byPath[path]!.enumerated()
+                .sorted { $0.element.t != $1.element.t ? $0.element.t < $1.element.t : $0.offset < $1.offset }
+                .map(\.element)
+            return (path, sorted)
+        }
+    }
+
+    /// Scene time folded into the timeline's own clock.
+    static func localTime(_ tl: Timeline, _ t: Double) -> Double {
+        let d = tl.duration ?? 0
+        if tl.loop, d > 0 { return (t.truncatingRemainder(dividingBy: d) + d).truncatingRemainder(dividingBy: d) }
+        return t
+    }
+
+    static func easeSmooth(_ k: Double) -> Double {
+        let c = Swift.max(0, Swift.min(1, k))
+        return c * c * (3 - 2 * c)
+    }
+
+    private static func ease(_ k: Key, _ x: Double) -> Double {
+        let c = x <= 0 ? 0 : x >= 1 ? 1 : x
+        switch k.ease {
+        case "step": return c >= 1 ? 1 : 0
+        case "linear": return c
+        default: return easeSmooth(c)
+        }
+    }
+
+    /// One path's value at timeline-local time `tt`, starting from `start`.
+    private static func evalTrack(_ keys: [Key], start: JSONValue?, tt: Double, leaf: String) -> JSONValue? {
+        var from = start
+        var key: Key?
+        func at(_ tau: Double) -> JSONValue? {
+            guard let key else { return from }
+            let dur = key.dur ?? defaultKeyDur
+            if dur <= 0 || tau >= key.t + dur { return key.value }
+            return lerpValue(from, key.value, ease(key, (tau - key.t) / dur), rootKey: leaf)
+        }
+        for k in keys {
+            if k.t > tt { break }
+            from = at(k.t)
+            key = k
+        }
+        return at(tt)
+    }
+
+    /// The scene at `t` ms with every key applied, and without its timeline,
+    /// so it decodes and compiles like any plain spec. A spec without a
+    /// timeline comes back unchanged.
+    static func resolve(_ spec: JSONValue, at t: Double) -> JSONValue {
+        guard let tl = timeline(of: spec) else { return spec }
+        let base = withoutTimeline(spec)
+        let tracks = tracks(of: spec)
+        if tracks.isEmpty { return base }
+        let tt = localTime(tl, t)
+        var out = base
+        for (path, keys) in tracks {
+            let start = tl.loop ? keys[keys.count - 1].value : read(base, path)
+            let leaf = path.split(separator: ".").last.map(String.init) ?? path
+            if let v = evalTrack(keys, start: start, tt: tt, leaf: leaf) { write(&out, path, v) }
+        }
+        return out
+    }
+
+    /// Scene time (ms) of the next moment the picture changes after `t`: a
+    /// key starting, or nil when nothing will ever move again. A glide in
+    /// flight at `t` returns `t` itself (it is changing now).
+    static func nextChange(_ spec: JSONValue, after t: Double) -> Double? {
+        guard let tl = timeline(of: spec), !tl.keys.isEmpty else { return nil }
+        let tt = localTime(tl, t)
+        var soonest: Double?
+        for k in tl.keys {
+            let dur = k.dur ?? defaultKeyDur
+            if tt >= k.t, tt < k.t + dur { return t }                  // gliding now
+            if k.t > tt { soonest = Swift.min(soonest ?? .infinity, t + (k.t - tt)) }
+        }
+        if let soonest { return soonest }
+        if tl.loop, let d = tl.duration, d > 0, let first = tl.keys.map(\.t).min() {
+            return t + (d - tt) + first
+        }
+        return nil
+    }
+
+    // MARK: - Paths (steer.ts resolveSpecPath / canonicalSpecPath)
+
+    private static let unsafeKeys: Set<String> = ["__proto__", "constructor", "prototype"]
+    private static let steerableRootKeys: Set<String> = ["ghosting", "referenceViewport", "finish", "groups"]
+
+    /// Index-form path parts, or nil when the path does not resolve.
+    private static func resolvedParts(_ spec: JSONValue, _ path: String) -> [String]? {
+        guard case .object(let root) = spec, !path.isEmpty else { return nil }
+        var parts = path.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        if parts.contains(where: unsafeKeys.contains) { return nil }
+        if parts[0] != "layers", parts[0] != "background", case .array(let layers)? = root["layers"] {
+            // A layer's own key wins over a root field of the same name.
+            if let idx = layers.firstIndex(where: { if case .object(let l) = $0, case .string(let k)? = l["key"] { return k == parts[0] } else { return false } }) {
+                parts.replaceSubrange(0...0, with: ["layers", String(idx)])
+            } else if !steerableRootKeys.contains(parts[0]) {
+                return nil
+            }
+        }
+        // Group membership and a transform's origin only step: not targets.
+        if parts[0] == "layers", parts.count == 3, parts[2] == "group" { return nil }
+        if parts.count >= 2, parts[parts.count - 1] == "origin", parts[parts.count - 2] == "transform" { return nil }
+        var node = spec
+        for p in parts.dropLast() {
+            switch node {
+            case .object(let o): guard let n = o[p] else { return nil }; node = n
+            case .array(let a): guard let i = Int(p), a.indices.contains(i) else { return nil }; node = a[i]
+            default: return nil
+            }
+        }
+        let last = parts[parts.count - 1]
+        switch node {
+        case .object(let o): return o[last] != nil ? parts : nil
+        case .array(let a): return Int(last).map { a.indices.contains($0) } == true ? parts : nil
+        default: return nil
+        }
+    }
+
+    static func canonicalPath(_ spec: JSONValue, _ path: String) -> String? {
+        resolvedParts(spec, path)?.joined(separator: ".")
+    }
+
+    static func read(_ spec: JSONValue, _ path: String) -> JSONValue? {
+        guard let parts = resolvedParts(spec, path) else { return nil }
+        var node = spec
+        for p in parts {
+            switch node {
+            case .object(let o): node = o[p] ?? .null
+            case .array(let a): node = a[Int(p)!]
+            default: return nil
+            }
+        }
+        return node
+    }
+
+    private static func write(_ spec: inout JSONValue, _ path: String, _ value: JSONValue) {
+        guard let parts = resolvedParts(spec, path) else { return }
+        spec = set(spec, parts[...], value)
+    }
+
+    private static func set(_ node: JSONValue, _ parts: ArraySlice<String>, _ value: JSONValue) -> JSONValue {
+        guard let head = parts.first else { return value }
+        let rest = parts.dropFirst()
+        switch node {
+        case .object(var o):
+            o[head] = set(o[head] ?? .null, rest, value)
+            return .object(o)
+        case .array(var a):
+            guard let i = Int(head), a.indices.contains(i) else { return node }
+            a[i] = set(a[i], rest, value)
+            return .array(a)
+        default:
+            return node
+        }
+    }
+
+    // MARK: - lerpValue (steer.ts)
+
+    private static let transformIdentity: [String: Double] = ["x": 0, "y": 0, "scale": 1, "scaleX": 1, "rotate": 0]
+
+    /// Two `transform` objects with each one's missing identity fields filled,
+    /// so a glide between them never steps.
+    private static func alignTransform(_ a: JSONValue?, _ b: JSONValue?) -> (JSONValue?, JSONValue?) {
+        guard case .object(var fa)? = a, case .object(var fb)? = b else { return (a, b) }
+        for key in Set(fa.keys).union(fb.keys) {
+            guard let id = transformIdentity[key] else { continue }
+            if fa[key] == nil { fa[key] = .double(id) }
+            if fb[key] == nil { fb[key] = .double(id) }
+        }
+        return (.object(fa), .object(fb))
+    }
+
+    private static func isHex(_ s: String) -> Bool {
+        guard s.first == "#" else { return false }
+        let body = s.dropFirst()
+        return (body.count == 3 || body.count == 6) && body.allSatisfy(\.isHexDigit)
+    }
+
+    private static func hexToRGB(_ hex: String) -> [Int] {
+        var h = String(hex.dropFirst())
+        if h.count == 3 { h = h.map { "\($0)\($0)" }.joined() }
+        let n = Int(h, radix: 16) ?? 0
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+    }
+
+    private static func lerpHex(_ a: String, _ b: String, _ k: Double) -> String {
+        let ca = hexToRGB(a), cb = hexToRGB(b)
+        // JS Math.round: halves round up (toward +∞).
+        let mix = (0..<3).map { i in Int((Double(ca[i]) + Double(cb[i] - ca[i]) * k + 0.5).rounded(.down)) }
+        return "#" + mix.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Numbers lerp, hex colours lerp per channel, equal-length arrays and
+    /// objects recurse (over the TARGET's keys), anything else steps to the
+    /// target at k > 0. `count` rounds (≥ 1); a field's `octaves`/`quantize` round.
+    static func lerpValue(_ from: JSONValue?, _ to: JSONValue, _ k: Double, rootKey: String? = nil) -> JSONValue {
+        var (a, b) = (from, Optional(to))
+        if rootKey == "transform" { (a, b) = alignTransform(a, b) }
+        let kk = Swift.max(0, Swift.min(1, k))
+        return walk(a, b ?? to, kk, key: rootKey)
+    }
+
+    private static func walk(_ a: JSONValue?, _ b: JSONValue, _ kk: Double, key: String?) -> JSONValue {
+        if let x = a?.number, let y = b.number, a?.isNumber == true, b.isNumber {
+            let v = x + (y - x) * kk
+            if key == "count" { return .int(Swift.max(1, Int(jsRound(v)))) }
+            if key == "octaves" { return .int(Int(jsRound(v))) }
+            if key == "quantize" { let q = Int(jsRound(v)); return .int(q < 2 ? 0 : q) }
+            return .double(v)
+        }
+        if case .string(let sa)? = a, case .string(let sb) = b, isHex(sa), isHex(sb) {
+            return .string(lerpHex(sa, sb, kk))
+        }
+        if case .array(let xa)? = a, case .array(let xb) = b, xa.count == xb.count {
+            return .array(xb.indices.map { walk(xa[$0], xb[$0], kk, key: String($0)) })
+        }
+        if case .object(let oa)? = a, case .object(let ob) = b {
+            var out: [String: JSONValue] = [:]
+            for (name, bv) in ob {
+                if name == "transform" {
+                    let (fa, fb) = alignTransform(oa[name], bv)
+                    out[name] = walk(fa, fb ?? bv, kk, key: name)
+                } else {
+                    out[name] = walk(oa[name], bv, kk, key: name)
+                }
+            }
+            return .object(out)
+        }
+        return kk > 0 ? b : (a ?? .null)
+    }
+
+    /// JavaScript's Math.round (halves toward +∞).
+    private static func jsRound(_ v: Double) -> Double { (v + 0.5).rounded(.down) }
+}
+
+extension JSONValue {
+    /// True for `.int` / `.double` (JS `typeof v === 'number'`).
+    var isNumber: Bool {
+        switch self {
+        case .int, .double: return true
+        default: return false
+        }
+    }
+}

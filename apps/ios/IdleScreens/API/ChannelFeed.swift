@@ -123,6 +123,9 @@ struct RecordedScene: Decodable, Equatable, Sendable {
     let track: RecordedControlTrack?
     /// What the native renderer would drop from this scene (see NativeSupport).
     let nativeGaps: [NativeSupport.Gap]
+    /// The spec as published, untouched — the lossy `SpecSubset` view has no
+    /// `timeline`, so a player that animates keyframes needs the raw form.
+    let rawSpec: JSONValue?
 
     /// Classic savers whose native port is only a stand-in: the aquarium is a
     /// 2D sketch of a three.js tank, built for the Apple TV (no WebKit there).
@@ -178,7 +181,8 @@ struct RecordedScene: Decodable, Equatable, Sendable {
             classicSaverId = nil
         }
         label = topLabel ?? scene?.label ?? classicSaverId
-        nativeGaps = NativeSupport.gaps(in: try? c.decodeIfPresent(JSONValue.self, forKey: .spec))
+        rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .spec)) ?? nil
+        nativeGaps = NativeSupport.gaps(in: rawSpec)
     }
 }
 

@@ -70,6 +70,9 @@ struct SpriteSceneView: UIViewRepresentable {
         }
         let scene = CompiledSpriteScene(layers: layers, background: background,
                                         transparentGround: transparentGround)
+        // A recompile of the same channel (keyframes, a steer) keeps the clock:
+        // restarting it would snap every entity back to where it was at t=0.
+        scene.startTime = (view.scene as? CompiledSpriteScene)?.startTime
         scene.scaleMode = .resizeFill
         view.presentScene(scene)
     }
@@ -86,7 +89,7 @@ final class CompiledSpriteScene: SKScene {
     /// the entity that drives it.
     private var driven: [(node: SKSpriteNode, entity: CompiledEntity, layer: Int)] = []
     private var textures: [String: SKTexture] = [:]
-    private var startTime: TimeInterval?
+    fileprivate(set) var startTime: TimeInterval?
     private var builtForSize: CGSize = .zero
 
     private let transparentGround: Bool

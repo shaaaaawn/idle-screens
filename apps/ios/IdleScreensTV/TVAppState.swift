@@ -236,6 +236,7 @@ final class TVAppState {
         watchdogDowngraded = false
         complexityCap = nil
         stopSequence()
+        stopKeyframes()
         resetTimeline()
         scheduleRotation()
         UserDefaults.standard.set(channelId, forKey: Self.lastChannelKey)
@@ -372,13 +373,17 @@ final class TVAppState {
 
     private func show(_ scene: RecordedScene) {
         stopSequence()
+        stopKeyframes()
         if let spec = scene.spec {
             isClassicSpec = false
             classicSaverId = nil
-            compiledScene = spec.compile(seed: scene.seed ?? spec.seed ?? 0, budget: sceneBudget)
+            let seed = scene.seed ?? spec.seed ?? 0
+            compiledScene = spec.compile(seed: seed, budget: sceneBudget)
             specBackground = spec.background
             specGhosting = spec.ghosting ?? 0
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+            // A timed piece in the past plays its keyframes too, not its base.
+            if let raw = scene.rawSpec { startKeyframes(raw, seed: seed) }
         } else {
             isClassicSpec = true
             classicSaverId = scene.classicSaverId
@@ -448,6 +453,7 @@ final class TVAppState {
     func exitChannel() {
         selectedChannelId = nil
         overlayText = nil
+        stopKeyframes()
         resetTimeline()
         rotationTask?.cancel()
         // Stay reachable: keep a socket on the last channel so a paired phone
@@ -588,6 +594,7 @@ final class TVAppState {
 
     private func render(_ json: JSONValue, fallbackSeed: Int?) {
         currentSpecJSON = json
+        stopKeyframes()
         guard let data = try? JSONEncoder().encode(json) else { return }
         // Sequence envelope? Route to the timeline player — it carries no
         // top-level layers, so without this check it would misroute to the
@@ -621,6 +628,7 @@ final class TVAppState {
         specBackground = spec.background
         specGhosting = spec.ghosting ?? 0
         complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
+        startKeyframes(json, seed: seed)
     }
 
     // MARK: Sequence playback
@@ -680,6 +688,7 @@ final class TVAppState {
     }
 
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
+        stopKeyframes()
         let resolved = seq.resolve(at: T)
         let segment = seq.segments[resolved.index]
         sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
@@ -692,6 +701,12 @@ final class TVAppState {
         specBackground = hasBed ? nil : scene.background
         specGhosting = hasBed ? 0 : (scene.ghosting ?? 0)
         complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
+        // A segment's own keyframes run on its local clock (from 0 at entry).
+        if case .object(let root)? = currentSpecJSON,
+           case .array(let segs)? = root["segments"], segs.indices.contains(resolved.index),
+           case .object(let seg) = segs[resolved.index], let raw = seg["scene"] {
+            startKeyframes(raw, seed: seed)
+        }
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {
@@ -708,6 +723,65 @@ final class TVAppState {
                                   fallbackSeed: fallbackSeed)
             }
         }
+    }
+
+    // MARK: Keyframes (`timeline`)
+
+    /// Drives a scene's `timeline`: re-resolves the authored JSON on the
+    /// scene's own clock and recompiles when the resolved scene changes.
+    /// Compiling is deterministic per seed, so every entity keeps its place
+    /// across recompiles — the web's rebuild-on-structural-change, in effect.
+    /// Ticks at the tier's rate only while a glide is in flight, and sleeps
+    /// through holds until the next key.
+    private var keyframeTask: Task<Void, Never>?
+
+    /// How often a glide is re-resolved: smooth on Canvas; on the sprite tier
+    /// every recompile rebuilds textures, so a glide steps a few times a second.
+    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 30 : 0.25 }
+
+    private func stopKeyframes() {
+        keyframeTask?.cancel()
+        keyframeTask = nil
+    }
+
+    private func startKeyframes(_ source: JSONValue, seed: Int) {
+        stopKeyframes()
+        guard SpecTimeline.hasTimeline(source) else { return }
+        let epoch = Date()
+        keyframeTask = Task { [weak self] in
+            var last: JSONValue?
+            var slow = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                let interval = self.keyframeInterval
+                let t = Date().timeIntervalSince(epoch) * 1000
+                let resolved = SpecTimeline.resolve(source, at: t)
+                if resolved != last {
+                    let began = Date()
+                    guard self.applyKeyframe(resolved, seed: seed) else { return }
+                    last = resolved
+                    // A box that can't recompile inside one tick holds the
+                    // scene where it is rather than falling behind its clock.
+                    slow = Date().timeIntervalSince(began) > interval ? slow + 1 : 0
+                    if slow >= 3 { return }
+                }
+                guard let next = SpecTimeline.nextChange(source, after: t) else { return }
+                let wait = next <= t ? interval : Swift.max(interval, (next - t) / 1000)
+                try? await Task.sleep(for: .seconds(wait))
+            }
+        }
+    }
+
+    /// One resolved keyframe state on screen. False when it no longer decodes.
+    private func applyKeyframe(_ json: JSONValue, seed: Int) -> Bool {
+        guard let data = try? JSONEncoder().encode(json),
+              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return false }
+        compiledScene = spec.compile(seed: seed, budget: sceneBudget)
+        if !hasBed {
+            specBackground = spec.background
+            specGhosting = spec.ghosting ?? 0
+        }
+        return true
     }
 
     // MARK: Tier reporting
