@@ -475,7 +475,7 @@ export type SpriteSpec =
    * Picasso shard, a Kandinsky triangle, a Mondrian plane. `soft` feathers
    * the fill from the centre like a soft circle. Rotates with `spin`.
    */
-  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; soft?: boolean; colors?: string[]; colorWeights?: number[] }
+  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; path?: string; soft?: boolean; colors?: string[]; colorWeights?: number[] }
   /**
    * A freehand mark: a path through `points` (2..24 unit coordinates in
    * −1..1, scaled by the seeded `length`) stroked `width` wide with round

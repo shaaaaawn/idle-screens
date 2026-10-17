@@ -47,6 +47,10 @@ export const STROKE_SAMPLES = 24;
 
 /** Polygon vertices centred on (0,0), unrotated, circumradius `radius` px. Regular n-gons point up. */
 export function polygonPoints(s: PolygonSprite, radius: number): Array<{ x: number; y: number }> {
+  if (typeof s.path === 'string') {
+    const unit = flattenPath(s.path);
+    if (unit.points.length >= 3) return unit.points.map(([x, y]) => ({ x: x * radius, y: y * radius }));
+  }
   if (s.points && s.points.length >= 3) {
     return s.points.map(([x, y]) => ({ x: x * radius, y: y * radius }));
   }
@@ -245,4 +249,221 @@ export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, 
     ...right.reverse(),
     ...cap(pts[0]!, half(0), startA),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// polygon.path — an SVG path `d` string in the −1..1 unit box, flattened once
+// into the polygon's outline. Every consumer (canvas, perception, advise,
+// cohesion) reads polygonPoints(), so a path sprite is a polygon everywhere.
+// ---------------------------------------------------------------------------
+
+/** Most outline points a flattened path may produce (the canvas fills one path either way). */
+export const MAX_PATH_POINTS = 512;
+/** Flattening tolerance, unit-box units: a chord never strays further than this from its curve (≈0.27 px for a full-box glyph at radius 0.5 on 1080p, ≈0.5 px on 4K). */
+const PATH_TOLERANCE = 0.0005;
+
+export interface FlattenedPath {
+  /** One closed ring: subpaths joined by zero-width bridges, inner ones wound as holes. */
+  points: Array<[number, number]>;
+  subpaths: number;
+  /** Parse error, if the string is not a usable path. */
+  error?: string;
+}
+
+const pathCache = new Map<string, FlattenedPath>();
+
+export function flattenPath(d: string): FlattenedPath {
+  const hit = pathCache.get(d);
+  if (hit) return hit;
+  let out: FlattenedPath;
+  try {
+    const rings = parseAndFlatten(d);
+    out = { points: joinRings(rings), subpaths: rings.length };
+  } catch (e) {
+    out = { points: [], subpaths: 0, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (pathCache.size > 256) pathCache.clear();
+  pathCache.set(d, out);
+  return out;
+}
+
+type Pt = [number, number];
+
+function segmentsFor(chord: number, curvature: number): number {
+  // Error of a chord on a curve with control-polygon deviation `curvature` ~ curvature / (4 n²).
+  const n = Math.ceil(Math.sqrt(Math.max(curvature, chord * 0.05) / (4 * PATH_TOLERANCE)));
+  return Math.max(2, Math.min(64, n));
+}
+
+function parseAndFlatten(d: string): Pt[][] {
+  const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
+  let i = 0;
+  const num = (): number => {
+    const t = tokens[i++];
+    if (t === undefined || /[a-zA-Z]/.test(t)) throw new Error('expected a number');
+    return Number(t);
+  };
+  const flag = (): number => {
+    // Arc flags may be written without separators ("a1 1 0 011 1"); the tokenizer keeps "011" whole.
+    const t = tokens[i];
+    if (t !== undefined && /^[01]{2,}/.test(t)) {
+      tokens[i] = t.slice(1);
+      return Number(t[0]);
+    }
+    return num();
+  };
+  const rings: Pt[][] = [];
+  let ring: Pt[] = [];
+  let cx = 0, cy = 0, sx = 0, sy = 0;
+  let lastCtrl: Pt | null = null; // reflected by S/T
+  let lastCmd = '';
+  const push = (x: number, y: number): void => { ring.push([x, y]); cx = x; cy = y; };
+  const close = (): void => {
+    if (ring.length >= 3) rings.push(ring);
+    ring = [];
+  };
+  const cubic = (x1: number, y1: number, x2: number, y2: number, x: number, y: number): void => {
+    const dev = Math.hypot(x1 - cx, y1 - cy) + Math.hypot(x2 - x1, y2 - y1) + Math.hypot(x - x2, y - y2) - Math.hypot(x - cx, y - cy);
+    const n = segmentsFor(Math.hypot(x - cx, y - cy), dev * 4);
+    const x0 = cx, y0 = cy;
+    for (let k = 1; k <= n; k++) {
+      const t = k / n, u = 1 - t;
+      push(u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x,
+        u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y);
+    }
+    lastCtrl = [x2, y2];
+  };
+  const quad = (x1: number, y1: number, x: number, y: number): void => {
+    const dev = Math.hypot(x1 - cx, y1 - cy) + Math.hypot(x - x1, y - y1) - Math.hypot(x - cx, y - cy);
+    const n = segmentsFor(Math.hypot(x - cx, y - cy), dev * 4);
+    const x0 = cx, y0 = cy;
+    for (let k = 1; k <= n; k++) {
+      const t = k / n, u = 1 - t;
+      push(u * u * x0 + 2 * u * t * x1 + t * t * x, u * u * y0 + 2 * u * t * y1 + t * t * y);
+    }
+    lastCtrl = [x1, y1];
+  };
+  const arc = (rx: number, ry: number, phiDeg: number, large: number, sweep: number, x: number, y: number): void => {
+    // SVG endpoint → centre parameterisation (SVG 1.1 F.6.5).
+    const x0 = cx, y0 = cy;
+    if (rx === 0 || ry === 0 || (x0 === x && y0 === y)) { push(x, y); return; }
+    rx = Math.abs(rx); ry = Math.abs(ry);
+    const phi = (phiDeg * Math.PI) / 180, cp = Math.cos(phi), sp = Math.sin(phi);
+    const dx = (x0 - x) / 2, dy = (y0 - y) / 2;
+    const x1p = cp * dx + sp * dy, y1p = -sp * dx + cp * dy;
+    const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+    const num2 = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    let co = Math.sqrt(Math.max(0, num2 / den));
+    if (large === sweep) co = -co;
+    const cxp = (co * rx * y1p) / ry, cyp = (-co * ry * x1p) / rx;
+    const ccx = cp * cxp - sp * cyp + (x0 + x) / 2, ccy = sp * cxp + cp * cyp + (y0 + y) / 2;
+    const ang = (ux: number, uy: number, vx: number, vy: number): number => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!sweep && dt > 0) dt -= 2 * Math.PI;
+    if (sweep && dt < 0) dt += 2 * Math.PI;
+    const r = Math.max(rx, ry);
+    const n = Math.max(2, Math.min(96, Math.ceil(Math.abs(dt) / (2 * Math.acos(Math.max(0, 1 - PATH_TOLERANCE / r))))));
+    for (let k = 1; k <= n; k++) {
+      const t = t1 + (dt * k) / n;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      push(cp * ex - sp * ey + ccx, sp * ex + cp * ey + ccy);
+    }
+  };
+  while (i < tokens.length) {
+    let cmd = tokens[i]!;
+    if (/[a-zA-Z]/.test(cmd)) i++;
+    else if (lastCmd) cmd = lastCmd === 'M' ? 'L' : lastCmd === 'm' ? 'l' : lastCmd; // implicit repeat
+    else throw new Error('path must start with M');
+    const rel = cmd === cmd.toLowerCase() && cmd !== 'z' ? true : false;
+    const ox = rel ? cx : 0, oy = rel ? cy : 0;
+    const C = cmd.toUpperCase();
+    const prevCmd = lastCmd.toUpperCase();
+    if (C !== 'S' && C !== 'T') lastCtrl = null;
+    switch (C) {
+      case 'M': {
+        close();
+        const x = num() + ox, y = num() + oy;
+        push(x, y); sx = x; sy = y;
+        break;
+      }
+      case 'L': push(num() + ox, num() + oy); break;
+      case 'H': push(num() + ox, cy); break;
+      case 'V': push(cx, num() + oy); break;
+      case 'C': { const a = num() + ox, b = num() + oy, c = num() + ox, e = num() + oy; cubic(a, b, c, e, num() + ox, num() + oy); break; }
+      case 'S': {
+        const r: Pt = lastCtrl && (prevCmd === 'C' || prevCmd === 'S') ? [2 * cx - lastCtrl[0], 2 * cy - lastCtrl[1]] : [cx, cy];
+        const c = num() + ox, e = num() + oy;
+        cubic(r[0], r[1], c, e, num() + ox, num() + oy);
+        break;
+      }
+      case 'Q': { const a = num() + ox, b = num() + oy; quad(a, b, num() + ox, num() + oy); break; }
+      case 'T': {
+        const r: Pt = lastCtrl && (prevCmd === 'Q' || prevCmd === 'T') ? [2 * cx - lastCtrl[0], 2 * cy - lastCtrl[1]] : [cx, cy];
+        quad(r[0], r[1], num() + ox, num() + oy);
+        break;
+      }
+      case 'A': { const rx = num(), ry = num(), ph = num(), la = flag(), sw = flag(); arc(rx, ry, ph, la, sw, num() + ox, num() + oy); break; }
+      case 'Z': cx = sx; cy = sy; close(); break;
+      default: throw new Error(`unsupported path command '${cmd}'`);
+    }
+    lastCmd = cmd;
+  }
+  close();
+  for (const r of rings) {
+    // Drop a closing point that repeats the start.
+    const a = r[0]!, b = r[r.length - 1]!;
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-9) r.pop();
+  }
+  return rings;
+}
+
+function signedArea(r: Pt[]): number {
+  let a = 0;
+  for (let k = 0; k < r.length; k++) {
+    const p = r[k]!, q = r[(k + 1) % r.length]!;
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+}
+
+function inside(pt: Pt, r: Pt[]): boolean {
+  let c = false;
+  for (let k = 0, j = r.length - 1; k < r.length; j = k++) {
+    const a = r[k]!, b = r[j]!;
+    if ((a[1] > pt[1]) !== (b[1] > pt[1]) && pt[0] < ((b[0] - a[0]) * (pt[1] - a[1])) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
+}
+
+/**
+ * Subpaths → one ring the nonzero fill paints as the author meant: a subpath
+ * inside an earlier one is wound opposite (a hole), any other the same way
+ * (a separate piece), each joined to the ring so far by a zero-width bridge
+ * at the closest vertex pair. This is the "retrace the hole" trick FORMAT.md
+ * teaches by hand, done by the compiler so the winding is always right.
+ */
+function joinRings(rings: Pt[][]): Pt[] {
+  if (rings.length === 0) return [];
+  const outer = rings[0]!;
+  const sign = Math.sign(signedArea(outer)) || 1;
+  let ring = outer.slice();
+  for (let n = 1; n < rings.length; n++) {
+    let sub = rings[n]!;
+    const isHole = rings.slice(0, n).some((r) => inside(sub[0]!, r));
+    const want = isHole ? -sign : sign;
+    if (Math.sign(signedArea(sub)) !== want) sub = sub.slice().reverse();
+    let bi = 0, bj = 0, best = Infinity;
+    for (let a = 0; a < ring.length; a++) {
+      for (let b = 0; b < sub.length; b++) {
+        const dd = (ring[a]![0] - sub[b]![0]) ** 2 + (ring[a]![1] - sub[b]![1]) ** 2;
+        if (dd < best) { best = dd; bi = a; bj = b; }
+      }
+    }
+    const rot = sub.slice(bj).concat(sub.slice(0, bj));
+    ring = ring.slice(0, bi + 1).concat(rot, [rot[0]!, ring[bi]!], ring.slice(bi + 1));
+  }
+  return ring;
 }
