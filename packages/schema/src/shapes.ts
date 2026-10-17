@@ -686,6 +686,19 @@ export function pathPointCount(s: PolygonSprite): number {
 }
 
 /**
+ * Per-frame drawing cost of a path in "flat fill point" units: a gradient
+ * fill costs about twice a flat one, a stroked point about three times. The
+ * render-once cache decides by cost, so a lightly-pointed but shaded and
+ * inked drawing still earns its bitmap.
+ */
+export function pathDrawCost(s: PolygonSprite): number {
+  const f = flattenSprite(s);
+  let c = s.fill === false ? 0 : f.points.length * (s.gradient ? 2 : 1);
+  if (s.stroke) for (const l of f.lines) c += l.points.length * 3;
+  return c;
+}
+
+/**
  * A path's stroke as thin quads (one per segment, `width` unit-box units
  * wide), scaled by `radius` px and centred on (0,0): what perception
  * rasterises for a stroke. Joints overlap a little; perception clamps.

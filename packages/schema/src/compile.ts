@@ -28,7 +28,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isShapedSprite, pathPointCount, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isShapedSprite, pathDrawCost, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -919,7 +919,7 @@ class SpecInstance implements SaverInstance {
       const w = Math.ceil(fx + x1) - bx + pad;
       const h = Math.ceil(fy + y1) - by + pad;
       if (!(w > 0 && h > 0) || !Number.isFinite(w + h)) return false;
-      if (pathPointCount(sprite) / ((w * h) / 1e6) < PATH_BLIT_MIN_DENSITY) { slot.off = true; return false; }
+      if (pathDrawCost(sprite) / ((w * h) / 1e6) < PATH_BLIT_MIN_DENSITY) { slot.off = true; return false; }
       if (this.pathBlitPixels + w * h > PATH_BLIT_MAX_PIXELS) return false;
       const made = this.makeCanvas(1);
       if (!made) return false;
@@ -1185,7 +1185,7 @@ class SpecInstance implements SaverInstance {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
       if (typeof sprite.path === 'string') {
-        if (pathPointCount(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor)) return;
+        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor)) return;
         ctx.save();
         ctx.translate(p.x, p.y);
         if (rot) ctx.rotate(rot);
@@ -1608,7 +1608,7 @@ class SpecInstance implements SaverInstance {
     for (let li = a; li <= b; li++) {
       const built = this.layers[li]!;
       const sp = built.layer.sprite;
-      if (sp.kind === 'polygon' && typeof sp.path === 'string') n += pathPointCount(sp) * built.entities.length;
+      if (sp.kind === 'polygon' && typeof sp.path === 'string') n += pathDrawCost(sp) * built.entities.length;
     }
     return n;
   }
