@@ -4,6 +4,8 @@ import { spriteLuma } from './luma';
 import { luminanceGrid } from './perceive';
 import { lerpPathD, lerpSpec, steerablePaths } from './steer';
 import { validateSpecPaths } from './validate';
+import { Ajv } from 'ajv';
+import jsonSchema from '../saver-spec.schema.json';
 import { validateSpec } from './validate';
 
 const spec = (path: string) => ({
@@ -276,5 +278,25 @@ describe('polygon.path', () => {
       c.parts[0].color = '#00ff00';
       expect(pathPaintSig(a)).not.toBe(pathPaintSig(c));
     });
+  });
+
+  it('the published JSON Schema accepts path drawings and rejects what the validator rejects', () => {
+    const check = new Ajv({ allErrors: true, strict: false }).compile(jsonSchema);
+    const good = {
+      schemaVersion: 1, id: 'j', label: 'j', background: { type: 'solid', color: '#000000' },
+      layers: [
+        { count: 1, position: { x: 0.5, y: 1 }, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#335533', span: 'width', origin: [0, 1], parts: [
+          { path: 'M -1 1 L -1 0 L 1 0 L 1 1 Z', gradient: { type: 'linear', from: [0, 0], to: [0, 1], units: 'part', stops: [{ at: 0, color: '#88aa66' }, { at: 1, color: '#224422', opacity: 0.8 }] } },
+          { path: 'M -0.5 0.2 L 0.5 0.2', fill: false, stroke: { color: '#112211', width: 0.01, cap: 'round' } },
+        ] }, motion: { type: 'static' } },
+        { count: 1, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: 'M -1 0 A 1 1 0 1 1 1 0 A 1 1 0 1 1 -1 0 Z', fillRule: 'evenodd', gradient: { type: 'radial', center: [0, 0], radius: 1, focus: [-0.3, -0.3], stops: [{ at: 0, color: '#ffffff' }, { at: 1, color: '#888888' }] } }, motion: { type: 'static' } },
+      ],
+    };
+    expect(validateSpec(good).valid).toBe(true);
+    expect(check(good)).toBe(true);
+    const bad = JSON.parse(JSON.stringify(good));
+    bad.layers[1].sprite.points = [[0, 0], [1, 0], [0, 1]]; // path and points together
+    expect(validateSpec(bad).valid).toBe(false);
+    expect(check(bad)).toBe(false);
   });
 });
