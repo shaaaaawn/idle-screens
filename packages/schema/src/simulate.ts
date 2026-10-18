@@ -800,13 +800,24 @@ function wrapDist(
 }
 
 /**
+ * `links.maxDist` in px at `scale` (px per spec unit), or `Infinity` when it is
+ * absent — a chain needs no cutoff. Callers apply `falloff` only to a finite
+ * value, so an absent `maxDist` can never put NaN into an alpha.
+ */
+export function linkMaxDistPx(links: { maxDist?: number }, scale: number): number {
+  return links.maxDist === undefined ? Infinity : links.maxDist * scale;
+}
+
+/**
  * Edge list for a layer's `links`, dispatching on mode:
  * 'nearest' (default) k-nearest within maxDist; 'chain' sequential order
  * (Mystify — ignores k/maxDist, `closed` joins last to first); 'random' a fixed
  * golden-ratio-stride wiring filtered by maxDist (deterministic, no RNG draws).
+ * An absent `k` reads as 1 and an absent `maxDist` (`Infinity` from
+ * `linkMaxDistPx`) as no cutoff; the validator requires both outside chain mode.
  */
 export function linkEdges(
-  links: { k: number; maxDist: number; mode?: 'nearest' | 'chain' | 'random'; closed?: boolean },
+  links: { k?: number; maxDist?: number; mode?: 'nearest' | 'chain' | 'random'; closed?: boolean },
   positions: Array<{ x: number; y: number }>,
   maxDistPx: number,
   doWrap: boolean,
@@ -815,6 +826,7 @@ export function linkEdges(
 ): LinkEdge[] {
   const n = positions.length;
   const mode = links.mode ?? 'nearest';
+  const k = links.k ?? 1;
   if (mode === 'chain') {
     const out: LinkEdge[] = [];
     for (let i = 0; i < n - 1; i++) {
@@ -828,7 +840,7 @@ export function linkEdges(
     const edges = new Set<string>();
     const out: LinkEdge[] = [];
     for (let i = 0; i < n; i++) {
-      for (let mIdx = 1; mIdx <= links.k; mIdx++) {
+      for (let mIdx = 1; mIdx <= k; mIdx++) {
         const j = (i + mIdx * stride) % n;
         if (j === i) continue;
         const dist = wrapDist(positions[i]!, positions[j]!, doWrap, w, h);
@@ -842,7 +854,7 @@ export function linkEdges(
     }
     return out;
   }
-  return linkPairs(positions, links.k, maxDistPx, doWrap, w, h).map(([i, j]) => ({
+  return linkPairs(positions, k, maxDistPx, doWrap, w, h).map(([i, j]) => ({
     i,
     j,
     dist: wrapDist(positions[i]!, positions[j]!, doWrap, w, h),

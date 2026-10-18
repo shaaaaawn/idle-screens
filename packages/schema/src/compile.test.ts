@@ -204,6 +204,26 @@ describe('compileSaver', () => {
     expect(mockCtx.lineWidth).toBe(1);
     inst.dispose();
   });
+
+  it('draws a chain that omits k and maxDist with finite alpha (X541)', () => {
+    const spec: SaverSpec = {
+      schemaVersion: 1,
+      id: 'bare-chain',
+      label: 'Bare chain',
+      layers: [{
+        count: 4,
+        sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#fff' },
+        motion: { type: 'static' },
+        links: { mode: 'chain', closed: true, alpha: 0.8 },
+      }],
+    };
+    const alphas: number[] = [];
+    mockCtx.stroke = vi.fn(() => { alphas.push(mockCtx.globalAlpha); });
+    const inst = mountSync(compileSaver(spec), saverCtx({ width: 1080, height: 1080, reducedMotion: true }));
+    expect(alphas.length).toBeGreaterThanOrEqual(4);
+    expect(alphas.every((a) => Number.isFinite(a) && a > 0)).toBe(true);
+    inst.dispose();
+  });
 });
 
 // ---------------------------------------------------------------------------

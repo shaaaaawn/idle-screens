@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { polygonArea, polygonPoints } from './shapes';
-import { buildEntities, entityScales, linkPairs, positionAt } from './simulate';
+import { buildEntities, entityScales, linkEdges, linkMaxDistPx, positionAt } from './simulate';
 import type { FinishSpec, SaverSpec } from './types';
 
 export interface LayerSnapshot {
@@ -79,10 +79,15 @@ export function describeScene(
       let connectedComponents: number | null = null;
       let isolatedNodes: number | null = null;
       if (layer.links) {
-        const maxDist = layer.links.maxDist * scale;
-        const pairs = linkPairs(positions, layer.links.k, maxDist, layer.wrap !== false, w, h);
+        const n = entities.length;
+        const pairs = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false, w, h)
+          .map(({ i, j }) => [i, j] as const);
         linksDrawn = pairs.length;
-        linksExpected = Math.min(entities.length * layer.links.k, entities.length * (entities.length - 1) / 2);
+        // A chain wires every entity to the next whatever the distance, so its
+        // expectation is the chain itself, not k-nearest.
+        linksExpected = layer.links.mode === 'chain'
+          ? Math.max(0, n - 1) + (layer.links.closed && n > 2 ? 1 : 0)
+          : Math.min(n * (layer.links.k ?? 1), n * (n - 1) / 2);
         // Connected components via union-find
         const parent = Array.from({ length: entities.length }, (_, i) => i);
         const find = (x: number): number => {

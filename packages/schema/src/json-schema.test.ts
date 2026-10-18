@@ -70,6 +70,29 @@ describe('saver-spec.schema.json', () => {
     }
   });
 
+  it('agrees with the runtime on chain links without k/maxDist (X541)', () => {
+    const spec = (links: Record<string, unknown>) => ({
+      schemaVersion: 1, id: 'x', label: 'X',
+      layers: [{ count: 6, sprite: { kind: 'circle', radius: [0.004, 0.008], color: '#ffffff' }, motion: { type: 'drift', speed: [0.01, 0.02] }, links }],
+    });
+    const cases: Array<[Record<string, unknown>, boolean]> = [
+      [{ mode: 'chain' }, true],
+      [{ mode: 'chain', closed: true }, true],
+      [{ mode: 'chain', falloff: false }, true],
+      [{ mode: 'chain', falloff: true, maxDist: 0.3 }, true],
+      [{ mode: 'chain', falloff: true }, false],
+      [{ mode: 'chain', k: 10 }, false],
+      [{ maxDist: 0.3 }, false],
+      [{ k: 2 }, false],
+      [{ mode: 'random', k: 2 }, false],
+      [{ mode: 'nearest', k: 2, maxDist: 0.3 }, true],
+    ];
+    for (const [links, valid] of cases) {
+      expect(check(spec(links)), JSON.stringify(links)).toBe(valid);
+      expect(validateSpec(spec(links)).valid, JSON.stringify(links)).toBe(valid);
+    }
+  });
+
   it('rejects position with count > 1 (if/then rule)', () => {
     const spec = {
       schemaVersion: 1, id: 'x', label: 'X',

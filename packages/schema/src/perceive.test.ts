@@ -732,3 +732,32 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     expect(p.centroid!.x).toBeCloseTo(atChainRootSeed.centroid!.x, 9);
   });
 });
+
+describe('chain links without k/maxDist (X541)', () => {
+  // A chain ignores both, so dropping them from the shipped Mystify example
+  // must not move a single perception number — and none may go NaN.
+  const bare: SaverSpec = {
+    ...POLYGONS_SPEC,
+    layers: POLYGONS_SPEC.layers.map((l) => {
+      if (!l.links) return l;
+      const { k: _k, maxDist: _maxDist, ...rest } = l.links;
+      return { ...l, links: rest };
+    }),
+  };
+
+  it('perceives the same scene as the spec that sets them', () => {
+    expect(POLYGONS_SPEC.layers.some((l) => l.links?.mode === 'chain' && !l.links.falloff)).toBe(true);
+    expect(bare.layers.every((l) => !l.links || (l.links.k === undefined && l.links.maxDist === undefined))).toBe(true);
+    const a = perceiveScene(POLYGONS_SPEC, { t: 2000 });
+    const b = perceiveScene(bare, { t: 2000 });
+    expect(b.braille).toBe(a.braille);
+    expect(b.coverage).toBe(a.coverage);
+    expect(b.dominance).toEqual(a.dominance);
+    expect(Number.isFinite(b.coverage)).toBe(true);
+    expect(b.dominance.every((d) => Number.isFinite(d.share) && Number.isFinite(d.factors.area))).toBe(true);
+  });
+
+  it('advises the same as the spec that sets them', () => {
+    expect(adviseSpec(bare)).toEqual(adviseSpec(POLYGONS_SPEC));
+  });
+});

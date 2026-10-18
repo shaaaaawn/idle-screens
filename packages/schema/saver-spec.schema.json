@@ -518,22 +518,51 @@
         },
         "links": {
           "type": "object",
-          "required": [
-            "k",
-            "maxDist"
-          ],
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "chain"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "if": {
+              "properties": {
+                "falloff": {
+                  "const": true
+                }
+              },
+              "required": [
+                "falloff"
+              ]
+            },
+            "then": {
+              "required": [
+                "maxDist"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "k",
+              "maxDist"
+            ]
+          },
           "additionalProperties": false,
           "properties": {
             "k": {
               "type": "integer",
               "minimum": 1,
               "maximum": 8,
-              "description": "Connect to the k nearest neighbors."
+              "description": "Partners per entity (nearest/random modes; required there). Chain mode ignores it."
             },
             "maxDist": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "description": "Maximum link distance (px or viewport-units)."
+              "description": "Maximum link distance (px or viewport-units). Required for nearest/random; chain mode ignores it as a cutoff and needs it only with falloff: true, as the fade distance."
             },
             "color": {
               "$ref": "#/definitions/hexColor",

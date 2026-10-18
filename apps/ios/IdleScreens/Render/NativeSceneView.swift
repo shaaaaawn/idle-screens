@@ -393,7 +393,10 @@ struct NativeSceneView: View {
                            lifeAlpha: Double, parent: CompiledEntity?,
                            ctx: inout GraphicsContext) {
         let entities = layer.entities
-        guard entities.count > 1, links.k > 0 else { return }
+        guard entities.count > 1 else { return }
+        let chain = links.mode == "chain"
+        let k = links.k ?? 1
+        guard chain || k > 0 else { return }
         // O(n²) neighbour search: bounded so a large layer cannot stall a frame.
         guard entities.count <= 220 else { return }
         let wraps = ["drift", "rise", "wander"].contains(entities[0].motionType) && layer.wrap
@@ -401,7 +404,10 @@ struct NativeSceneView: View {
             SceneMotion.position(of: $0, at: t, in: space, dim: dim,
                                  wrap: layer.wrap, parent: parent)
         }
-        let maxDist = links.maxDist * dim
+        // An absent maxDist is no cutoff; a chain ignores it as a cutoff either
+        // way (simulate.ts linkEdges) and reads it only as the falloff distance.
+        let maxDist: CGFloat = links.maxDist.map { CGFloat($0) * dim } ?? .infinity
+        let cutoff: CGFloat = chain ? .infinity : maxDist
         let width = max(0.5, (links.width ?? (layer.units == .px ? 1 : 1.0 / 1080)) * dim)
 
         func delta(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
@@ -420,10 +426,10 @@ struct NativeSceneView: View {
             guard !seen.contains(key) else { return }
             let d = delta(positions[lo], positions[hi])
             let dist = hypot(d.x, d.y)
-            guard dist <= maxDist else { return }
+            guard dist <= cutoff else { return }
             seen.insert(key)
             var a = links.alpha ?? SceneMotion.pulsedAlpha(of: entities[lo], layer: layer, at: t)
-            if links.falloff == true { a *= max(0, 1 - dist / maxDist) }
+            if links.falloff == true, maxDist.isFinite { a *= max(0, 1 - dist / maxDist) }
             a *= lifeAlpha
             guard a > 0.004 else { return }
             let color = links.color.map { Color(hex: $0) }
@@ -445,7 +451,7 @@ struct NativeSceneView: View {
             let n = entities.count
             let strideBy = max(1, Int((Double(n) * 0.381_966).rounded()))
             for i in 0..<n {
-                for m in 1...links.k {
+                for m in 1...k {
                     let j = (i + m * strideBy) % n
                     if j != i { emit(i, j) }
                 }
@@ -459,7 +465,7 @@ struct NativeSceneView: View {
                     if dist <= maxDist { neighbours.append((dist, j)) }
                 }
                 neighbours.sort { $0.dist != $1.dist ? $0.dist < $1.dist : $0.j < $1.j }
-                for n in neighbours.prefix(links.k) { emit(i, n.j) }
+                for n in neighbours.prefix(k) { emit(i, n.j) }
             }
         }
     }

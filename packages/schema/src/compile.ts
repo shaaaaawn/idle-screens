@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
@@ -1303,9 +1303,9 @@ class SpecInstance implements SaverInstance {
     const motionWraps = ['drift', 'rise', 'wander'].includes(built.layer.motion.type);
     const wrap = built.layer.wrap !== false && motionWraps;
     const positions = built.entities.map((e) => this.entityPos(e, t, parentE));
-    const maxDistPx = links.maxDist * (this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h));
-    const edges = linkEdges(links, positions, maxDistPx, wrap, this.w, this.h);
     const unitScale = this.effSpec.units === 'px' ? 1 : Math.min(this.w, this.h);
+    const maxDistPx = linkMaxDistPx(links, unitScale);
+    const edges = linkEdges(links, positions, maxDistPx, wrap, this.w, this.h);
     const defaultWidth = unitScale === 1 ? 1 : 1 / LIMITS.referenceViewport;
     const lw = (links.width ?? defaultWidth) * unitScale;
     ctx.lineWidth = lw;
@@ -1323,7 +1323,7 @@ class SpecInstance implements SaverInstance {
         } else resolvedColor = '#e6e8ef';
       }
       let a = links.alpha ?? alphaAt(ei, t);
-      if (links.falloff) a *= Math.max(0, 1 - dist / maxDistPx);
+      if (links.falloff && Number.isFinite(maxDistPx)) a *= Math.max(0, 1 - dist / maxDistPx);
       ctx.globalAlpha = a * lifeA;
       ctx.strokeStyle = resolvedColor;
       // Draw toward nearest image of pj (avoids full-canvas streaks at wrap seams)
