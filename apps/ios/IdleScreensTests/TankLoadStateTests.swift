@@ -45,4 +45,65 @@ final class TankLoadStateTests: XCTestCase {
         XCTAssertEqual(tank.pending, 0)
         XCTAssertFalse(tank.downloadsFinished)   // it never saw a download
     }
+
+    // MARK: The tank's own fish count
+
+    func testTheCastIsInOnceTheFishCountHoldsStill() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(3, at: t0)
+        tank.reportFish(8, at: t0.addingTimeInterval(0.2))
+        // Still arriving: loading, even though no download was ever seen.
+        XCTAssertTrue(tank.isLoading(elapsed: 0.5, now: t0.addingTimeInterval(0.5)))
+        // Held for the quiet window: in, well before the 4 s grace.
+        let settledAt = t0.addingTimeInterval(0.2 + TankLoadState.castQuiet + 0.01)
+        XCTAssertFalse(tank.isLoading(elapsed: 1, now: settledAt))
+    }
+
+    func testARepeatedCountDoesNotRestartTheQuietWindow() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(5, at: t0)
+        tank.reportFish(5, at: t0.addingTimeInterval(0.6))
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet + 0.01)))
+    }
+
+    func testFishStillArrivingOutwaitTheGrace() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(2, at: t0.addingTimeInterval(4.8))
+        XCTAssertTrue(tank.isLoading(elapsed: 5, now: t0.addingTimeInterval(5)))
+        XCTAssertFalse(tank.isLoading(elapsed: TankLoadState.ceiling, now: t0.addingTimeInterval(5)))
+    }
+
+    func testAnEmptyTankFallsBackToTheGrace() {
+        var tank = TankLoadState()
+        tank.reportFish(0)
+        XCTAssertTrue(tank.isLoading(elapsed: 1))
+        XCTAssertFalse(tank.isLoading(elapsed: TankLoadState.quietGrace))
+    }
+
+    func testAFullCastIsInAtOnceWhenTheTankSaysWhatItWants() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(3, want: 8, at: t0)
+        XCTAssertFalse(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet + 0.01)),
+                       "short of the cast it wants, a quiet beat is not enough")
+        tank.reportFish(8, want: 8, at: t0.addingTimeInterval(1.5))
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(1.5)), "no quiet window once all are in")
+    }
+
+    func testAFishThatNeverArrivesDoesNotHoldTheTankToTheCeiling() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(5, want: 6, at: t0)
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet * 3 + 0.01)))
+    }
+
+    func testAnOlderSiteThatSaysNothingKeepsTheQuietRule() {
+        var tank = TankLoadState()
+        let t0 = Date()
+        tank.reportFish(4, want: 0, at: t0)
+        XCTAssertTrue(tank.castIsIn(at: t0.addingTimeInterval(TankLoadState.castQuiet + 0.01)))
+    }
 }

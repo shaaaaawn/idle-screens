@@ -14,11 +14,18 @@ private let skLog = Logger(subsystem: "com.hermosalabs.idlescreens", category: "
 struct SpriteSceneView: UIViewRepresentable {
     let layers: [CompiledLayer]
     let background: SpecSubset.Background?
+    /// Paint no ground (a sequence segment over its bed).
+    var transparentGround: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> SKView {
         let view = SKView()
+        if transparentGround {
+            view.allowsTransparency = true
+            view.isOpaque = false
+            view.backgroundColor = .clear
+        }
         view.ignoresSiblingOrder = true
         view.preferredFramesPerSecond = 30
         context.coordinator.watch(view)
@@ -61,7 +68,11 @@ struct SpriteSceneView: UIViewRepresentable {
         if let scene = view.scene as? CompiledSpriteScene, scene.matches(layers) {
             return  // same scene data — keep animating, no rebuild
         }
-        let scene = CompiledSpriteScene(layers: layers, background: background)
+        let scene = CompiledSpriteScene(layers: layers, background: background,
+                                        transparentGround: transparentGround)
+        // A recompile of the same channel (keyframes, a steer) keeps the clock:
+        // restarting it would snap every entity back to where it was at t=0.
+        scene.startTime = (view.scene as? CompiledSpriteScene)?.startTime
         scene.scaleMode = .resizeFill
         view.presentScene(scene)
     }
@@ -78,12 +89,15 @@ final class CompiledSpriteScene: SKScene {
     /// the entity that drives it.
     private var driven: [(node: SKSpriteNode, entity: CompiledEntity, layer: Int)] = []
     private var textures: [String: SKTexture] = [:]
-    private var startTime: TimeInterval?
+    fileprivate(set) var startTime: TimeInterval?
     private var builtForSize: CGSize = .zero
 
-    init(layers: [CompiledLayer], background: SpecSubset.Background?) {
+    private let transparentGround: Bool
+
+    init(layers: [CompiledLayer], background: SpecSubset.Background?, transparentGround: Bool = false) {
         self.layersData = layers
         self.bg = background
+        self.transparentGround = transparentGround
         super.init(size: .zero)
     }
 
@@ -93,7 +107,7 @@ final class CompiledSpriteScene: SKScene {
     func matches(_ layers: [CompiledLayer]) -> Bool { layersData == layers }
 
     override func didMove(to view: SKView) {
-        backgroundColor = .black
+        backgroundColor = transparentGround ? .clear : .black
         isPaused = false
         view.isPaused = false
         rebuildIfNeeded()
@@ -109,7 +123,7 @@ final class CompiledSpriteScene: SKScene {
         builtForSize = size
         removeAllChildren()
         driven.removeAll()
-        buildBackground()
+        if !transparentGround { buildBackground() }
         buildNodes()
         skLog.notice("built \(self.driven.count) nodes at \(self.size.width)x\(self.size.height) scene=\(ObjectIdentifier(self).debugDescription)")
     }
@@ -138,7 +152,10 @@ final class CompiledSpriteScene: SKScene {
                                           end: CGPoint(x: 0, y: h), options: [])
                 }
             } else {
-                UIColor(hexString: bg?.color ?? "000000").setFill()
+                // A solid ground, or a `field`'s key band (not rasterised
+                // natively) — the same stand-in the Canvas tier paints, never
+                // black for a scene that has a ground.
+                UIColor(hexString: bg?.primaryColor ?? "05050a").setFill()
                 cg.fill(CGRect(x: 0, y: 0, width: 1, height: h))
             }
         }
@@ -219,11 +236,44 @@ final class CompiledSpriteScene: SKScene {
                 text: text, maxWidth: maxWidth, fontSize: fontSize,
                 lineHeight: lineHeight, align: align, color: color, dim: dim))
             node.anchorPoint = CGPoint(x: 0, y: 1)
+            // `anchor` names a point of the INK (widest line × lines, as
+            // `align` placed it) for `position` — the Canvas tier's
+            // TextStyle.anchorOffset, expressed as the node's anchor point.
+            if let style = layer.textStyle, style.anchor != nil {
+                let fsPx = fontSize * dim
+                let lines = breakTextBlock(text: text, maxWidthEm: maxWidth * dim / fsPx)
+                let font = UIFont.systemFont(ofSize: fsPx)
+                let widest = lines.map { ($0.text as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+                let boxW = ceil(max(1, maxWidth * dim))
+                let boxH = ceil(max(1, CGFloat(lines.count) * lineHeight * fsPx))
+                let off = style.anchorOffset(align: align, maxWidthPx: maxWidth * dim, widestLinePx: widest,
+                                             totalHeightPx: CGFloat(lines.count) * lineHeight * fsPx)
+                node.anchorPoint = CGPoint(x: -off.dx / boxW, y: 1 + off.dy / boxH)
+            }
             return node
 
-        case .polygon(_, _, _, let sides, let points, let soft):
+        case .polygon(_, _, _, let sides, let points, let soft, let drawing):
             let r = entity.size * dim
             guard r > 0.25 else { return nil }
+            if let drawing {
+                // A path drawing: the shared raster (PathRaster) as a texture,
+                // anchored at the drawing's origin. SpriteKit is y-up, so the
+                // anchor's y flips. Grow/rotation then act on the node as usual.
+                guard let ras = PathRaster.raster(drawing, color: entity.color, r: r,
+                                                  width: size.width, height: size.height,
+                                                  scale: NativeSceneView.rasterScale) else { return nil }
+                let tex = texture(key: "path|\(drawing.key.hashValue)|\(entity.color)|\(ras.image.width)x\(ras.image.height)") {
+                    UIImage(cgImage: ras.image)
+                }
+                let uniform = drawing.span == "box"
+                let k = uniform ? r / pow(2, ceil(log2(max(r, 0.5)) * 8) / 8) : 1
+                let node = SKSpriteNode(texture: tex)
+                node.size = CGSize(width: CGFloat(ras.image.width) / ras.scale * k,
+                                   height: CGFloat(ras.image.height) / ras.scale * k)
+                node.anchorPoint = CGPoint(x: ras.anchor.x / CGFloat(ras.image.width),
+                                           y: 1 - ras.anchor.y / CGFloat(ras.image.height))
+                return node
+            }
             let node = SKSpriteNode(texture: polygonTexture(
                 color: entity.color, sides: sides, points: points, soft: soft))
             node.size = CGSize(width: r * 2, height: r * 2)
@@ -329,14 +379,13 @@ final class CompiledSpriteScene: SKScene {
                     CGPoint(x: samples[i].x + d / 2, y: samples[i].y + d / 2)
                 }
                 if taper {
-                    for i in 1..<samples.count {
-                        let u = (Double(i) - 0.5) / Double(samples.count - 1)
-                        cg.setLineWidth(max(0.5, lw * NativeSceneView.strokeTaper(u)))
-                        cg.beginPath()
-                        cg.move(to: p(i - 1))
-                        cg.addLine(to: p(i))
-                        cg.strokePath()
-                    }
+                    // One filled outline, as on the Canvas tier and the web.
+                    let outline = NativeSceneView.strokeOutline((0..<samples.count).map(p), lineWidth: lw)
+                    cg.setFillColor(UIColor(hexString: color).cgColor)
+                    cg.beginPath()
+                    cg.addLines(between: outline)
+                    cg.closePath()
+                    cg.fillPath()
                 } else {
                     cg.setLineWidth(lw)
                     cg.beginPath()
@@ -465,17 +514,27 @@ final class CompiledSpriteScene: SKScene {
             let parentEntity = layer.orbitParentKey.flatMap { key in
                 layersData.first { $0.key == key }?.entities.first
             }
-            let p = SceneMotion.position(of: entity, at: t, in: size,
+            var p = SceneMotion.position(of: entity, at: t, in: size,
                                          dim: dim, wrap: layer.wrap, parent: parentEntity)
+            // A paint transform moves the point through G·L; a node can't
+            // take a full affine, so it also takes the summed rotation and
+            // per-axis scale (exact unless a rotated layer is scaled unevenly).
+            if let paint = layer.paint { p = p.applying(paint.affine(in: size, unit: dim)) }
             // Compile space is top-left y-down; SpriteKit is bottom-left y-up.
             node.position = CGPoint(x: p.x, y: size.height - p.y)
-            // The layer's own lifecycle envelope multiplies every entity's
-            // alpha, so a layer enters and leaves as one thing.
+            // The layer's own lifecycle envelope and paint opacity multiply
+            // every entity's alpha, so a layer enters and leaves as one thing.
             node.alpha = SceneMotion.pulsedAlpha(of: entity, layer: layer, at: t)
-                * (layer.life?.alpha(at: t * 1000) ?? 1)
+                * (layer.life?.alpha(at: t * 1000) ?? 1) * layer.opacity
             let grow = SceneMotion.growScale(of: entity, at: t)
-            if grow != 1 { node.setScale(grow) }
-            let deg = SceneMotion.rotationDegrees(of: entity, at: t)
+            let deg = SceneMotion.rotationDegrees(of: entity, at: t) + (layer.paint?.rotationDegrees ?? 0)
+            if let paint = layer.paint {
+                let k = paint.scaleXY
+                node.xScale = grow * k.x
+                node.yScale = grow * k.y
+            } else if grow != 1 {
+                node.setScale(grow)
+            }
             if deg != 0 { node.zRotation = -deg * .pi / 180 }
         }
     }

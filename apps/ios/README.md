@@ -44,7 +44,7 @@ view (`t0`).
 Which renderer a box gets and how much work it may be asked to do are separate
 decisions (`IdleScreens/Render/CapabilityTier.swift`). `CapabilityTier` picks
 the renderer from `hw.machine`; `RenderClass` (`legacy` A8/A10X, `standard`
-A12–A15, `high` A17+) sizes the budgets that decide when a scene is too heavy
+A12–A15, `high` A17+, including the A19 Apple TV 4K) sizes the budgets that decide when a scene is too heavy
 for the Canvas tier. Left fused, the ceilings tuned on A12 silicon would kick a
 rich scene down to sprites on hardware that could drive it comfortably.
 
@@ -87,6 +87,32 @@ both targets on every `apps/ios/**` change — the targets share `API/`,
 `Render/` and `Theme/` wholesale, so an iPhone-only file dropped in one of them
 breaks the TV; list such files under the TV target's `excludes:` in
 `project.yml`. `make app tvos ship` runs the suite as a gate before archiving.
+
+**Parity with the web engine is tested, not eyeballed.** The native renderer
+re-implements the SaverSpec format, so each ported rule is pinned to the
+engine's own output: `SpecTimelineTests` (keyframes — `timeline.ts`, against
+live specs), `PaintTests` (`position.dx/dy`, layer `opacity`/`transform`,
+`groups` — `paint.ts`), `ShapeParityTests` (stroke outlines, trail echoes,
+feather — `shapes.ts`/`trail.ts`), `FishMixTests` (`parseFishMix`) and
+`TankParityTests` (the 2D aquarium against the metaquarium package's `lofi`
+backend, its browser mirror) and `PathDrawingTests` (`polygon.path` / `parts`:
+the path parser, flattening, hole and overlap rules — `shapes.ts` `flattenPath`,
+point for point; regenerate with `node scripts/paths-golden.mjs` after building
+the schema). The goldens live in `IdleScreensTVTests/Fixtures`
+or inline; regenerate them from the TypeScript when a rule changes on purpose.
+Path drawings (fills, gradients, strokes, span/origin) are rasterised once per
+drawing, colour and size by `PathRaster` and placed per entity on both native
+tiers, the web engine's render-once cache.
+The 2D aquarium's unminted-breed icons are rendered from the breed models by
+`packages/saver-metaquarium/breeds/icons/` and ship to both sides.
+
+**Platforms and deadlines.** Builds come from Xcode 27 (tvOS 27 SDK); from
+April 2027 App Store uploads require it. Keep the deployment target at tvOS
+17: tvOS 27 drops the Apple TV HD (A8) and 4K 1st gen (A10X), which stay on
+tvOS 26 — they are the `legacy` render class and the sprite tier, the lowest
+hardware we support. Test both ends: the tvOS 26.5 and 27 simulator runtimes.
+New Apple TV models need no code change — an unknown `hw.machine` defaults
+up to the `high` class.
 
 ## Architecture
 

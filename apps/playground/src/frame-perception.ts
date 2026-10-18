@@ -80,14 +80,24 @@ function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
+/** A grid whose background is known per cell (the scene's own, rendered), not estimated per row. */
+export type KnownBackgroundGrid = LuminanceGrid & { backgroundCells?: number[] };
+
 /**
  * Downsample an ImageData into the same LuminanceGrid the analytic path emits,
  * so `renderBrailleMap` / `renderDensityMap` can be reused verbatim.
  *
- * Background is inferred per row (see BG_QUANTILE) because, unlike the analytic
- * path, there is no declared background to read.
+ * Background is inferred per row (see BG_QUANTILE) unless `knownBackground` is
+ * given, because, unlike the analytic path, there is no declared background to read.
+ *
+ * `knownBackground`: the scene's background as a `cols × rows` cell grid (e.g.
+ * the same spec rendered with no visible layers). When given, coverage,
+ * centroid and profiles measure against it cell by cell. Without it the
+ * background is estimated as a low per-row quantile — which reads a full-width
+ * band or a frame-filling wash as background and reports coverage 0 for it
+ * (loops/perception-lab BUG-02).
  */
-export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): LuminanceGrid {
+export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS, knownBackground?: ArrayLike<number>): KnownBackgroundGrid {
   const cells = new Array<number>(cols * rows).fill(0);
   const cellW = img.width / cols;
   const cellH = img.height / rows;
@@ -139,10 +149,19 @@ export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): Lum
   const rowProfile = new Array<number>(rows).fill(0);
   const colProfile = new Array<number>(cols).fill(0);
 
+  const known = knownBackground && knownBackground.length === cols * rows ? Array.from(knownBackground) : null;
+  if (known) {
+    for (let ry = 0; ry < rows; ry++) {
+      let s = 0;
+      for (let cx = 0; cx < cols; cx++) s += known[ry * cols + cx]!;
+      background[ry] = s / cols;
+    }
+  }
   for (let ry = 0; ry < rows; ry++) {
-    const bg = background[ry]!;
+    const rowBg = background[ry]!;
     for (let cx = 0; cx < cols; cx++) {
       const v = cells[ry * cols + cx]!;
+      const bg = known ? known[ry * cols + cx]! : rowBg;
       const dev = Math.abs(v - bg);
       lumSum += v;
       if (dev > COVERAGE_EPS) covered++;
@@ -165,6 +184,7 @@ export function gridFromImageData(img: ImageData, cols = COLS, rows = ROWS): Lum
     centroid: wSum > 1e-6 ? { x: cxSum / wSum, y: cySum / wSum } : null,
     rowProfile,
     colProfile,
+    ...(known ? { backgroundCells: known } : {}),
   };
 }
 
@@ -334,6 +354,8 @@ export interface PerceiveFrameOptions {
   dpr?: number;
   /** Attach the full `LuminanceGrid` to the result (see FramePerception.grid). */
   includeGrid?: boolean;
+  /** The scene's background as an 80×48 cell grid — see `gridFromImageData`. */
+  knownBackground?: ArrayLike<number>;
 }
 
 /**
@@ -518,7 +540,7 @@ async function perceiveOnce(
       return empty('unsupported', `Pixel read blocked: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    const grid = gridFromImageData(img);
+    const grid = gridFromImageData(img, COLS, ROWS, opts.knownBackground);
 
     // Support marries the API (renderFrame's presence) with the manifest's
     // semantic claim. A saver that exposes renderFrame while declaring

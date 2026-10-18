@@ -77,6 +77,23 @@ final class PlayerViewSmokeTests: XCTestCase {
         render(app)
     }
 
+    func testABeddedSequenceOnBothGPUTiers() {
+        let key = TVAppState.tierOverrideKey
+        let saved = UserDefaults.standard.string(forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        for tier in [CapabilityTier.t3, .t2] {
+            let app = makeApp()
+            app.tierOverride = tier
+            app.selectChannel("tide")
+            app.handle(.scene(spec: json(BedTests.bedded), seed: 7))
+            XCTAssertTrue(app.hasBed)
+            render(app)
+        }
+    }
+
     func testThePastWithARelayedScene() async {
         let app = makeApp()
         app.selectChannel("tide")

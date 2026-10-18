@@ -8,7 +8,7 @@
  */
 
 import type { Entity } from './simulate';
-import { isShapedSprite } from './shapes';
+import { isPathPolygon, isShapedSprite, pathParts, polygonArea } from './shapes';
 import { fieldRgb, fieldRgbAt, fieldSampleTime, hexToRgb255, rgb255Luma } from './field';
 import type { FieldBackground, LayerSpec, SaverSpec } from './types';
 
@@ -42,6 +42,26 @@ export function hexLuma(hex: string): number {
 
 export function spriteLuma(layer: LayerSpec, e: Entity): number {
   const s = layer.sprite;
+  if (s.kind === 'polygon' && isPathPolygon(s)) {
+    // A path drawing reads as its parts' paint, weighted by each part's
+    // area: a gradient by its mean stop (opacity-weighted toward the part's
+    // colour), a stroke-only part by its stroke.
+    const base = s.colors?.[e.colorIndex] ?? s.color;
+    let sum = 0, wsum = 0;
+    for (const part of pathParts(s)) {
+      const pc = hexLuma(part.color ?? base);
+      let l: number;
+      if (!part.fill) l = part.stroke ? hexLuma(part.stroke.color) : pc;
+      else if (part.gradient) {
+        let g = 0;
+        for (const st of part.gradient.stops) { const o = st.opacity ?? 1; g += hexLuma(st.color) * o + pc * (1 - o); }
+        l = g / part.gradient.stops.length;
+      } else l = pc;
+      const w = Math.max(1e-4, part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x, y }))) : part.box.hw * part.box.hh * 0.1) * part.opacity;
+      sum += l * w; wsum += w;
+    }
+    if (wsum > 0) return sum / wsum;
+  }
   if (isShapedSprite(s)) {
     return hexLuma(s.colors?.[e.colorIndex] ?? s.color);
   }

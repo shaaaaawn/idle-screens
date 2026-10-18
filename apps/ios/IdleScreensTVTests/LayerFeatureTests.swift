@@ -119,6 +119,19 @@ final class LayerFeatureTests: XCTestCase {
         XCTAssertEqual(layers[0].links?.falloff, true)
     }
 
+    func testChainLinksWithoutKOrMaxDistStillDecode() throws {
+        // X541: a chain reads neither k nor maxDist, so the validator lets a
+        // spec omit both. The lenient `try?` decode must not drop its links.
+        let layers = try compile(##"""
+        {"seed":8,"layers":[{"count":4,"sprite":{"kind":"circle","radius":[0.01,0.01],"color":"#fff"},
+          "motion":{"type":"drift","speed":[0.01,0.02]},
+          "links":{"mode":"chain","closed":true,"alpha":0.8}}]}
+        """##)
+        XCTAssertEqual(layers[0].links?.mode, "chain")
+        XCTAssertNil(layers[0].links?.k)
+        XCTAssertNil(layers[0].links?.maxDist)
+    }
+
     func testUnknownLayerFieldsStillDecode() throws {
         // The custom Layer decoder must stay lenient: a field the renderer
         // does not know yet must never fail the layer (and with it the spec).

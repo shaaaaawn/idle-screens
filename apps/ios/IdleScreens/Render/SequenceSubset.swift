@@ -17,12 +17,53 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
         }?.element
     }
 
+    /// The poster as one still: the poster segment drawn over the bed, on
+    /// the bed's ground. Without a bed this is the poster segment's scene.
+    var posterScene: SpecSubset? {
+        guard var scene = posterSegment?.scene else { return bed }
+        guard let bed else { return scene }
+        scene.background = bed.background
+        scene.layers = bed.layers + scene.layers
+        return scene
+    }
+
     var format: String?
     var id: String?
     var label: String?
     var seed: Int?
     var loop: Bool?
     var segments: [Segment]
+    /// The ground under every segment, on the sequence's global clock — it
+    /// never resets at a boundary. While a bed exists, segments paint
+    /// transparently over it: their own `background` and `ghosting` are
+    /// ignored (FORMAT.md **Bed**).
+    var bed: SpecSubset?
+
+    /// The bed's seed: its own, else `seq.seed + 24` (past every segment's).
+    func bedSeed(fallback: Int) -> Int {
+        bed?.seed ?? ((seed ?? fallback) + 24)
+    }
+
+    private enum CodingKeys: String, CodingKey { case format, id, label, seed, loop, segments, bed }
+
+    init(format: String? = nil, id: String? = nil, label: String? = nil, seed: Int? = nil,
+         loop: Bool? = nil, segments: [Segment], bed: SpecSubset? = nil) {
+        self.format = format; self.id = id; self.label = label; self.seed = seed
+        self.loop = loop; self.segments = segments; self.bed = bed
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        format = try c.decodeIfPresent(String.self, forKey: .format)
+        id = try? c.decodeIfPresent(String.self, forKey: .id)
+        label = try? c.decodeIfPresent(String.self, forKey: .label)
+        seed = try? c.decodeIfPresent(Int.self, forKey: .seed)
+        loop = try? c.decodeIfPresent(Bool.self, forKey: .loop)
+        segments = try c.decode([Segment].self, forKey: .segments)
+        // A bed the native decoder can't read is no bed — the segments still
+        // play — rather than a sequence dropped to the thumbnail path.
+        bed = (try? c.decodeIfPresent(SpecSubset.self, forKey: .bed)) ?? nil
+    }
 
     struct Segment: Decodable, Equatable, Sendable {
         var key: String?

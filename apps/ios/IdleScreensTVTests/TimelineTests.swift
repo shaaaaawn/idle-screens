@@ -8,7 +8,11 @@ struct StubTransport: HTTPTransport {
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let path = request.url?.path ?? ""
-        let body = routes[path]
+        // A route may pin a query (`/c/x/history?before=7`); the bare path
+        // answers everything else.
+        let before = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "before" }?.value
+        let body = before.flatMap { routes["\(path)?before=\($0)"] } ?? routes[path]
         let response = HTTPURLResponse(url: request.url!, statusCode: body == nil ? 404 : 200,
                                        httpVersion: nil, headerFields: nil)!
         return (Data((body ?? "{}").utf8), response)
@@ -104,6 +108,37 @@ final class TimelineTests: XCTestCase {
 
     private func settle(_ app: TVAppState, until done: @escaping () -> Bool) async {
         for _ in 0..<200 where !done() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    func testTheHistoryPagesOnInsteadOfHittingAWall() async {
+        let base = URL(string: "https://paged.test")!
+        func scene(_ id: Int) -> String {
+            ##"{"id":"## + "\(id)" + ##","label":"S"## + "\(id)" + ##"","seed":1,"spec":{"seed":1,"layers":[{"count":"## + "\(id)" + ##","sprite":{"kind":"circle","radius":[0.01,0.02],"color":"#fff"},"motion":{"type":"static"}}]}}"##
+        }
+        var routes: [String: String] = [
+            // Page one: live scene 9, then 8 and 7. More to come.
+            "/c/deep/history": ##"{"events":[{"id":30,"at":3000,"kind":"publish","actor":"spin","sceneId":9},{"id":29,"at":2900,"kind":"publish","actor":"spin","sceneId":8},{"id":28,"at":2800,"kind":"publish","actor":"spin","sceneId":7}],"hasMore":true}"##,
+            // Page two, strictly older than event 28: scenes 6 and 5, the end.
+            "/c/deep/history?before=28": ##"{"events":[{"id":20,"at":2000,"kind":"publish","actor":"spin","sceneId":6},{"id":19,"at":1900,"kind":"publish","actor":"spin","sceneId":5}],"hasMore":false}"##,
+        ]
+        for id in 5...8 { routes["/c/deep/scene/\(id)"] = scene(id) }
+        let transport = StubTransport(routes: routes)
+        let app = TVAppState(gallery: GalleryClient(baseURL: base, transport: transport),
+                             mcp: MCPClient(baseURL: base, transport: transport),
+                             ws: ChannelWSClient(), pair: PairClient(baseURL: base, transport: transport),
+                             baseURL: base)
+        app.selectChannel("deep")
+        for want in 0..<4 {
+            app.stepTimeline(older: true)
+            await settle(app) { app.timeline == .past(want) }
+            XCTAssertEqual(app.timeline, .past(want), "step \(want)")
+        }
+        XCTAssertEqual(app.historyStops.map(\.sceneId), [8, 7, 6, 5], "the second page joined the first")
+        XCTAssertEqual(app.compiledScene.first?.entities.count, 5)
+        // The oldest scene is still a wall once the server says there is no more.
+        app.stepTimeline(older: true)
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(app.timeline, .past(3))
     }
 
     func testSteppingLeftRendersThePastSceneAndRightReturnsToLive() async {

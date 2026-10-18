@@ -46,7 +46,9 @@ sequence-level) (2026-09-10 — the print look); `timeline` (keyframes on the
 scene's own clock), paint-level layer `opacity` and `transform`,
 `position.dx` / `dy`, `wrapMorph` on the sequence envelope and
 `text: 'dip'` on `morph` (2026-09-25 — timed scenes); layer `groups` and
-`transform.origin` (2026-09-26 — groups and origin).
+`transform.origin` (2026-09-26 — groups and origin); path drawings on
+`polygon` — `path`, `fillRule`, `fill`, `gradient`, `stroke`, `parts`,
+`span`, `origin` (2026-10-17 — vector drawings).
 
 ## Safety invariants
 
@@ -302,7 +304,9 @@ own `finish` is not steerable; steer a segment's, or republish.
 `maxDist`; `"chain"` wires entities in order (Mystify polygons — ignores
 `k`/`maxDist`, `closed: true` closes the loop); `"random"` uses a fixed
 deterministic wiring filtered by `maxDist`. `falloff: true` fades link alpha
-with distance, removing pop-in at the cutoff.
+with distance, removing pop-in at the cutoff. `k` and `maxDist` are required
+for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
+`falloff: true` needs `maxDist` (the distance at which a link has faded out).
 
 ### `sprite` (one of)
 
@@ -349,7 +353,68 @@ with distance, removing pop-in at the cutoff.
   or `morph` target for `sprite.points` is in the **same unit coordinates**,
   scaled by each entity's seeded radius (not by the keyed shape's own extent):
   keep every keyed point inside −1..1 (the validator rejects one outside), and
-  shrink a target shape by scaling its points, not by exceeding the box
+  shrink a target shape by scaling its points, not by exceeding the box.
+  For anything more detailed than a 24-point facet, give the polygon a
+  **path** instead (next entry)
+- **Path drawings** — `{ "kind": "polygon", "radius": [0.3, 0.3], "color": "#2f6a3e", "path": "M 0 -0.9 C 0.5 -0.9 0.7 -0.3 0.5 0.1 … Z" }`:
+  an SVG path `d` string in the same −1..1 unit box (`M L H V C S Q T A Z`,
+  absolute or relative, curves and arcs included), flattened once to a smooth
+  outline. Use it for illustration: leaves, creatures, lettering-like marks,
+  architecture. Everything below is **only** for polygons with a `path` (or
+  `parts`).
+  - **Holes and pieces.** Several subpaths in one `path` are one drawing.
+    `fillRule: "auto"` (default) decides by containment: a subpath lying
+    entirely inside another is a hole; one inside a hole is solid again (a
+    pupil in an eye-spot ring); pieces that merely overlap merge (branches,
+    veins, leaflets on a stem), and a hole cuts through every overlapping
+    piece of the layer (a window across two walls). `"nonzero"` /
+    `"evenodd"` are SVG's own rules — use them for pasted SVG, for overlap
+    patterns (a rosette of overlapping circles wants `evenodd`), and when a
+    same-colour shape sits inside another on purpose (`auto` would cut it).
+  - **`gradient`** replaces the flat colour of the fill:
+    `{ "type": "linear", "from": [0, -1], "to": [0, 1], "stops": [{ "at": 0, "color": "#2c6a3a" }, { "at": 1, "color": "#7ab070", "opacity": 0.6 }] }`
+    or `{ "type": "radial", "center": [0, 0], "radius": 1, "focus": [-0.3, -0.4], "stops": [...] }`
+    (2..8 stops, `at` 0..1 non-decreasing, optional per-stop `opacity`).
+    Coordinates are in the drawing's unit box, so the shading scales and
+    rotates with it; `"units": "part"` reads them in the part's own bounding
+    box (−1..1), so one gradient lights every piece on its own (a radial
+    there is the piece's ellipse). A `focus` off-centre gives a lit sphere.
+  - **`stroke`** — `{ "color": "#1f2a1c", "width": 0.006, "opacity": 0.8, "join": "round", "cap": "round" }`
+    — an outline along every subpath **as drawn** (holes included; open
+    subpaths too). `width` is in unit-box units (0.01 = 1% of the drawing's
+    half-size). Overlapping pieces show their inner edges, as in SVG.
+  - **`fill: false`** draws the stroke only — line art. Then open paths
+    (no `Z`) are fine: veins, hatching, antennae, rigging.
+  - **`parts`** — a multi-colour drawing in one layer:
+    `"parts": [{ "path": "…", "color": "#c8501e" }, { "path": "…", "gradient": {…}, "stroke": {…}, "opacity": 0.85 }, …]`
+    (1..256), drawn back to front, each with its own `path`, `color`
+    (default: the entity's colour, so `colors` palettes still pick per
+    entity), `fillRule`, `fill`, `gradient`, `stroke` and `opacity`. With
+    `parts`, put that paint on the parts, never on the sprite. One layer
+    holds a whole illustration, and a counted layer reuses it: a balloon with
+    gores, shading, ropes and basket × 7 drifting entities, all parts moving
+    as one.
+  - **`span`** — how the unit box lands on screen: `"box"` (default, the
+    square sized by `radius`), `"width"` (x spans the full screen width; y
+    keeps `radius`), `"height"`, `"screen"` (both). **`origin`** `[x, y]` is
+    the unit-box point placed at `position`: hills and ground bands are
+    `span: "width", origin: [0, 1]` at `position: { x: 0.5, y: 1 }` — their
+    base sits on the bottom edge, edge to edge, on 16:9, 9:16 and 1:1 alike.
+    Strokes keep one width when a drawing stretches. Anything meant to sit
+    at a screen position (a moon beside its glow) is its own layer, not a
+    part of a big centred drawing — positions are screen fractions, a
+    drawing's interior is not.
+  - **Budget.** A path flattens to at most 4096 points; a scene's path
+    outlines total at most 16384 (flattened points, strokes included, ×
+    `count`). Curves cost points; straight segments and gentle curves are
+    nearly free (flattening drops points within 0.0005 of the line).
+  - **Steering and morphs.** Part colours, gradient stops, stroke widths
+    and opacities glide like any paint. Two paths with the **same commands**
+    (same letters, same count of numbers — draw both from one template)
+    morph number by number; any other path change steps.
+  - Drawings are rendered once and reused while they look the same (moving
+    copies are resampled), so a detailed still drawing costs about what a
+    flat one does per frame.
 - `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
   a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
   unit box spans the seeded `length`, stroked `width` wide with round joins.

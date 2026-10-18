@@ -14,6 +14,8 @@ struct ScenePreviewView: View {
     /// budget and the system silently drops one — a black tile. Keep live
     /// surfaces to one or two per screen (hero, backdrop).
     var live: Bool = true
+    /// Entity ceiling for the compiled preview (gallery default).
+    var entityBudget: Int = SpecSubset.Budget.preview.entities
 
     @State private var layers: [CompiledLayer]?
 
@@ -59,7 +61,7 @@ struct ScenePreviewView: View {
         .clipped()
         .task(id: spec) {
             layers = spec.compile(seed: spec.seed ?? Self.stableSeed(fallbackSeed),
-                                  budget: SpecSubset.Budget.preview)
+                                  budget: (SpecSubset.Budget.preview.layers, entityBudget))
         }
         #if DEBUG
         // Proves the @Observable read in `animates` actually re-invokes body

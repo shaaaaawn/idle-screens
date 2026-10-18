@@ -105,51 +105,43 @@ struct AquariumField: Sendable {
     static let castIds: [Int] = [12, 100, 180, 257, 300, 340, 380, 420, 450, 457, 470, 488, 497, 505, 512]
     static let cast: [String] = castIds.map { "mqfish\($0)" }
 
-    /// A scene's `fishMix` ("id[:count],breed[:count],…") interpreted against
-    /// the bundled cast: exact id when bundled, else the nearest bundled fish
-    /// of the SAME breed — the scene's species balance survives even when its
-    /// exact mints aren't on disk. Returns cast indices, one per fish.
+    /// A scene's `fishMix` interpreted against the bundled cast, one index
+    /// per fish. The mix is read with the engine's own grammar (`FishMix`:
+    /// `@style` / `*size` suffixes, uniqueness, breed aliases); each minted
+    /// fish then maps to its exact bundled icon, else the nearest bundled
+    /// fish of the SAME breed — the scene's species balance survives even
+    /// when its exact mints aren't on disk. Unminted breeds have no icon
+    /// here and drop out, as in `lofi.ts` `lofiCast`.
     static func castIndices(fishMix: String?, cap: Int) -> [Int]? {
-        guard let mix = fishMix, !mix.isEmpty else { return nil }
+        guard let mix = fishMix, !mix.isEmpty, cap > 0 else { return nil }
         var out: [Int] = []
-        for token in mix.split(separator: ",") {
-            let parts = token.split(separator: ":")
-            guard let head = parts.first?.trimmingCharacters(in: .whitespaces), !head.isEmpty else { continue }
-            let count = parts.count > 1 ? min(24, max(1, Int(parts[1]) ?? 1)) : 1
-            let wantBreed: Breed?
-            let wantId: Int?
-            if let id = Int(head), (1...512).contains(id) {
-                wantId = id; wantBreed = Breed.of(id: id)
-            } else {
-                wantId = nil
-                switch head.lowercased() {
-                case "betafish": wantBreed = .beta
-                case "angelfish": wantBreed = .angel
-                case "seahorse": wantBreed = .seahorse
-                case "seaturtle": wantBreed = .turtle
-                default: wantBreed = nil
-                }
-            }
-            guard let breed = wantBreed else { continue }
-            // Exact bundled id, else nearest bundled id in the same breed.
-            let idx: Int
-            if let id = wantId, let exact = castIds.firstIndex(of: id) {
-                idx = exact
-            } else {
-                let sameBreed = castIds.enumerated().filter { Breed.of(id: $0.element) == breed }
-                guard !sameBreed.isEmpty else { continue }
-                let target = wantId ?? sameBreed[0].element
-                idx = sameBreed.min(by: { abs($0.element - target) < abs($1.element - target) })!.offset
-            }
-            for _ in 0..<count where out.count < cap { out.append(idx) }
+        for entry in FishMix.parse(mix) where entry.id <= FishMix.totalSupply {
+            guard out.count < cap, let idx = bundledIndex(nearest: entry.id) else { continue }
+            out.append(idx)
         }
         return out.isEmpty ? nil : out
+    }
+
+    /// The bundled icon for minted `id`: exact, else nearest of its breed.
+    static func bundledIndex(nearest id: Int) -> Int? {
+        if let exact = castIds.firstIndex(of: id) { return exact }
+        let breed = Breed.of(id: id)
+        return castIds.enumerated()
+            .filter { Breed.of(id: $0.element) == breed }
+            .min { abs($0.element - id) < abs($1.element - id) }?
+            .offset
     }
 
     let fish: [Fish]
     let kelp: [Kelp]
     let bubbles: [BubbleColumn]
     let palette: Palette
+    /// Room, atmosphere and critters (AquariumExtras.swift).
+    let extras: AquariumExtras
+    /// `floraDensity`: the share of kelp drawn (nil = all of it).
+    let flora: Double?
+    let shoalKind: String
+    let shoalSpeed: Double
 
     static func fishCount(for tier: CapabilityTier) -> Int { tier == .t3 ? 13 : 8 }
     static func kelpCount(for tier: CapabilityTier) -> Int { tier == .t3 ? 5 : 3 }
@@ -160,25 +152,35 @@ struct AquariumField: Sendable {
 
     static func shared(
         seed: UInt32, tier: CapabilityTier, environment: String? = nil, fishMix: String? = nil,
+        params: AquariumParams = .init(),
     ) -> AquariumField {
-        let key = "\(seed)-\(tier.rawValue)-\(environment ?? "")-\(fishMix ?? "")"
+        let key = "\(seed)-\(tier.rawValue)-\(environment ?? "")-\(fishMix ?? "")-\(params.cacheKey)"
         return cache.withLock { store in
             if let hit = store[key] { return hit }
             if store.count > 6 { store.removeAll() }
-            let field = AquariumField(seed: seed, tier: tier, environment: environment, fishMix: fishMix)
+            let field = AquariumField(seed: seed, tier: tier, environment: environment, fishMix: fishMix,
+                                      params: params)
             store[key] = field
             return field
         }
     }
 
-    init(seed: UInt32, tier: CapabilityTier, environment: String? = nil, fishMix: String? = nil) {
-        self.palette = Palette.of(environment)
+    init(seed: UInt32, tier: CapabilityTier, environment: String? = nil, fishMix: String? = nil,
+         params: AquariumParams = .init()) {
+        self.palette = Palette.of(environment).applying(params)
+        self.flora = params.floraDensity
+        self.shoalKind = params.shoalKind
+        self.shoalSpeed = params.shoalSpeed
+        self.extras = AquariumExtras.build(seed: seed, rich: tier == .t3, fishMix: fishMix, params: params)
         var rng = Mulberry32(seed: seed)
-        let n = Self.fishCount(for: tier)
+        // A scene's fishMix picks the cast; otherwise the seed does. A mix of
+        // only unminted breeds casts no minted fish at all — those breeds
+        // swim as critters — rather than a random minted cast it never named.
+        let sceneCast = Self.castIndices(fishMix: fishMix, cap: Self.fishCount(for: tier))
+        let onlyUnminted = sceneCast == nil && !FishMix.parse(fishMix ?? "").isEmpty
+        let n = onlyUnminted ? 0 : Self.fishCount(for: tier)
         var fish: [Fish] = []
         fish.reserveCapacity(n)
-        // A scene's fishMix picks the cast; otherwise the seed does.
-        let sceneCast = Self.castIndices(fishMix: fishMix, cap: n)
         for i in 0..<n {
             // Depth stratified, not random: every third of the tank gets
             // its share of near/mid/far so the parallax always reads.
@@ -246,6 +248,18 @@ struct AquariumField: Sendable {
 
     // MARK: draw
 
+    private func drawCritter(_ c: Critter, in ctx: inout GraphicsContext, w: Double, h: Double, t: Double) {
+        guard let b = CritterBreed.all[c.breed], let img = UIImage(named: b.asset) else { return }
+        let p = AquariumExtras.pose(c, t: t, w: w, h: h)
+        var cctx = ctx
+        cctx.opacity = p.alpha
+        cctx.translateBy(x: p.x, y: p.y)
+        if c.dir < 0, !b.facing { cctx.scaleBy(x: -1, y: 1) }
+        if !b.floor { cctx.rotate(by: .radians(sin(t * 0.0011 + c.bobPhase) * 0.05)) }
+        cctx.draw(ctx.resolve(Image(uiImage: img)),
+                  in: CGRect(x: -p.side / 2, y: -p.side / 2, width: p.side, height: p.side))
+    }
+
     func draw(in ctx: inout GraphicsContext, size: CGSize, t: Double, tier: CapabilityTier) {
         let w = size.width, h = size.height
 
@@ -262,7 +276,8 @@ struct AquariumField: Sendable {
 
         // Light shafts: two slow additive wedges. Faint — light through
         // water, not stage spots (the tank learned this the hard way).
-        for i in 0..<2 {
+        // A cave (geode interior) has none.
+        for i in 0..<(palette.shaftAlpha > 0 ? 2 : 0) {
             let phase = t * 0.000021 + Double(i) * 2.4
             let cx = w * (0.3 + 0.4 * Double(i)) + sin(phase) * w * 0.05
             var shaft = Path()
@@ -277,6 +292,22 @@ struct AquariumField: Sendable {
                     .init(color: palette.shaft.opacity(0.0), location: 0.85),
                 ]),
                 startPoint: CGPoint(x: cx, y: 0), endPoint: CGPoint(x: cx, y: h)))
+        }
+
+        // Sky lanterns: warm glows high in the water, drifting.
+        let px = h / 1080
+        for l in extras.lanterns {
+            let p = AquariumExtras.lanternPos(l, t: t, w: w, h: h)
+            let r = l.r * px
+            let warm = Color(red: 1.0, green: 0.72, blue: 0.35)
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                     with: .radialGradient(Gradient(stops: [
+                        .init(color: warm.opacity(0.55 * p.glow), location: 0),
+                        .init(color: warm.opacity(0), location: 1)]),
+                        center: CGPoint(x: p.x, y: p.y), startRadius: 0, endRadius: r))
+            let c = r * 0.22
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - c, y: p.y - c, width: c * 2, height: c * 2)),
+                     with: .color(warm.opacity(0.9 * p.glow)))
         }
 
         // Seabed: two soft dune bands in the room's own ground color.
@@ -296,8 +327,11 @@ struct AquariumField: Sendable {
             ctx.fill(dune, with: .color(palette.dune.opacity(tone)))
         }
 
-        // Kelp: swaying closed-form strands rooted in the seabed.
-        for strand in kelp {
+        // Kelp: swaying closed-form strands rooted in the seabed — the first
+        // `floraDensity` share of them (every strand is still laid out, so
+        // the rest of the tank never moves when the density changes).
+        let kelpShown = flora.map { Int((Double(kelp.count) * $0).rounded()) } ?? kelp.count
+        for strand in kelp.prefix(kelpShown) {
             let rootX = strand.x * w
             let rootY = h * 0.94
             let top = rootY - strand.height * h
@@ -312,6 +346,28 @@ struct AquariumField: Sendable {
             }
             ctx.stroke(path, with: .color(palette.kelp.opacity(0.85)),
                        style: StrokeStyle(lineWidth: strand.width * (h / 1080), lineCap: .round, lineJoin: .round))
+        }
+
+        // Floor critters crawl the front dune.
+        for c in extras.critters where CritterBreed.all[c.breed]?.floor == true {
+            drawCritter(c, in: &ctx, w: w, h: h, t: t)
+        }
+
+        // The shoal: a small school crossing mid-water, each fish a dash
+        // with its kind's mark.
+        if !extras.shoal.isEmpty {
+            let centre = AquariumExtras.shoalCentre(lane: extras.shoalLane, speed: shoalSpeed, t: t, w: w, h: h)
+            let col = AquariumExtras.shoalColors(shoalKind)
+            let body = Color(red: col.body.0, green: col.body.1, blue: col.body.2).opacity(0.85)
+            let mark = Color(red: col.mark.0, green: col.mark.1, blue: col.mark.2).opacity(0.9)
+            for f in extras.shoal {
+                let x = centre.x + f.dx * w
+                let y = centre.y + f.dy * h + sin(t * 0.004 + f.wiggle) * 3 * px
+                ctx.fill(Path(ellipseIn: CGRect(x: x - 7 * px, y: y - 1.3 * px, width: 14 * px, height: 2.6 * px)),
+                         with: .color(body))
+                ctx.fill(Path(ellipseIn: CGRect(x: x + 3 * px, y: y - 0.8 * px, width: 3.2 * px, height: 1.6 * px)),
+                         with: .color(mark))
+            }
         }
 
         // Fish: the cast, far to near. Icons face right; leftward swimmers
@@ -353,6 +409,11 @@ struct AquariumField: Sendable {
             fctx.draw(resolved, in: CGRect(x: -side / 2, y: -side / 2, width: side, height: side))
         }
 
+        // Swimming critters, over the cast.
+        for c in extras.critters where CritterBreed.all[c.breed]?.floor == false {
+            drawCritter(c, in: &ctx, w: w, h: h, t: t)
+        }
+
         // Bubbles: columns of rising circles, spawn cadence and rise both
         // closed-form; each bubble is addressed by its emission index.
         for col in bubbles {
@@ -371,6 +432,14 @@ struct AquariumField: Sendable {
                            with: .color(.white.opacity(0.28 * (1 - f * 0.6))),
                            style: StrokeStyle(lineWidth: 1.4))
             }
+        }
+
+        // Marine snow: motes sinking through everything, in front.
+        for m in extras.snow {
+            let p = AquariumExtras.motePos(m, t: t, w: w, h: h)
+            let r = m.r * px
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                     with: .color(.white.opacity(0.45)))
         }
     }
 }

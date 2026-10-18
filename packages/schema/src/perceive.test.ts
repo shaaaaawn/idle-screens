@@ -222,18 +222,16 @@ describe('polygon outline rasterization', () => {
     expect(at(6)).toBeGreaterThan(at(3));
   });
 
-  it('a soft additive polygon blooms past its outline by its thickness, not its circumradius', () => {
+  it('a soft additive polygon lights nothing past its outline (the canvas gradient is clipped to it)', () => {
+    // Pixel truth: a soft `lighter` polygon blooms nowhere past its outline on
+    // the canvas; the old GLOW_SPREAD halo read 0.72 F on large soft additive
+    // polygons, the gradient-only model 0.996 (perception-lab S1-07).
     const glow = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND, soft: true }, { blend: 'lighter' }, '#101010'), GRID);
     const hard = luminanceGrid(one({ kind: 'polygon', radius: [0.6, 0.6], color: '#ffffff', points: BAND }, {}, '#101010'), GRID);
-    expect(glow.coverage).toBeGreaterThan(hard.coverage); // the halo shows
-    expect(glow.coverage).toBeLessThan(0.4); // but a flat band is not a screen-filling dome
+    expect(glow.coverage).toBeGreaterThan(0);
+    expect(glow.coverage).toBeLessThanOrEqual(hard.coverage);
     expect(glow.rowProfile[0]).toBe(0);
     expect(glow.rowProfile[9]).toBe(0);
-    // A soft additive hexagon still blooms about as far as the disc model had it.
-    const hex = luminanceGrid(one({ kind: 'polygon', radius: [0.1, 0.1], sides: 6, color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
-    const disc = luminanceGrid(one({ kind: 'circle', radius: [0.1, 0.1], color: '#ffffff', soft: true }, { blend: 'lighter' }, '#000000'), { ...GRID, cols: 48, rows: 20 });
-    expect(hex.coverage).toBeGreaterThan(disc.coverage * 0.6);
-    expect(hex.coverage).toBeLessThanOrEqual(disc.coverage);
   });
 
   it('fills with the canvas nonzero rule: a pentagram lights its centre', () => {
@@ -257,14 +255,17 @@ describe('polygon outline rasterization', () => {
 });
 
 describe('additive-glow calibration (G1)', () => {
-  it('a soft additive circle covers more than the same hard opaque circle', () => {
+  it('a soft additive circle lights no more than the same hard circle: the gradient ends at the radius', () => {
+    // The G1 halo (GLOW_SPREAD) was removed when pixel truth showed the canvas
+    // draws none (perception-lab S1-03b: E1 train F 0.772 → 0.836).
     const hard = luminanceGrid(spec([
       { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff' }, motion: { type: 'static' } },
     ]));
     const glow = luminanceGrid(spec([
       { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [30, 30], color: '#66ccff', soft: true }, blend: 'lighter', motion: { type: 'static' } },
     ]));
-    expect(glow.coverage).toBeGreaterThan(hard.coverage);
+    expect(glow.coverage).toBeGreaterThan(0);
+    expect(glow.coverage).toBeLessThanOrEqual(hard.coverage);
   });
 
   it('leaves hard non-additive circles unchanged (no runaway coverage)', () => {
@@ -354,9 +355,14 @@ describe('persistence-aware perception (ghosting + trail)', () => {
     const off = luminanceGrid(still);
     const on = luminanceGrid({ ...still, ghosting: 0.9 });
     // Same footprint: ghost taps land on the same cells for static entities.
-    expect(on.coverage).toBeCloseTo(off.coverage, 4);
-    expect(on.centroid!.x).toBeCloseTo(off.centroid!.x, 4);
-    expect(on.centroid!.y).toBeCloseTo(off.centroid!.y, 4);
+    // Cells are lit by covered area (perception-lab S1-01), so brightening
+    // saturates the discs' interiors while partly-covered rim cells keep
+    // brightening: coverage and the deviation-weighted centroid move by a few
+    // thousandths (the canvas saturates the same way). What must hold is that
+    // nothing SMEARS — the footprint stays where it was, to 2 decimals.
+    expect(on.coverage).toBeCloseTo(off.coverage, 2);
+    expect(on.centroid!.x).toBeCloseTo(off.centroid!.x, 2);
+    expect(on.centroid!.y).toBeCloseTo(off.centroid!.y, 2);
   });
 
   it('diffScenes can now measure a ghosting change (the §10 misdiagnosis trap)', () => {
@@ -551,7 +557,14 @@ describe('perceiveScene across all shipped examples', () => {
   it('every example is perceivable: dots on the map, non-zero coverage, sane bundle', () => {
     for (const s of EXAMPLE_SPECS) {
       const p = perceiveScene(s);
-      expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0.001);
+      // sparse-night's stars are sub-cell points, and rendered pixels put NO
+      // 80×48 cell over the coverage step (max deviation 0.026). Its coverage
+      // is therefore 0 on canvas, and since discs lay their true ink
+      // (perception-lab S1-09) the readout agrees. The old floors (> 0.001,
+      // then > 0) held only because the grid over-lit sub-cell dots. Every
+      // other example must still show coverage, and every one shows dots.
+      if (s.id === 'sparse-night') expect(p.coverage, `${s.id} coverage`).toBeGreaterThanOrEqual(0);
+      else expect(p.coverage, `${s.id} coverage`).toBeGreaterThan(0);
       expect([...p.braille].some((ch) => ch !== BLANK_BRAILLE && ch !== '\n'), `${s.id} braille has dots`).toBe(true);
       expect(p.dominance.length).toBe(s.layers.length);
       expect(p.motion.length).toBe(s.layers.length);
@@ -717,5 +730,34 @@ describe('perceiveSequenceFrame (1d — bed + segment)', () => {
     // Sanity: the two candidate seeds actually render differently here.
     expect(atOwnIndexSeed.centroid!.x).not.toBeCloseTo(atChainRootSeed.centroid!.x, 2);
     expect(p.centroid!.x).toBeCloseTo(atChainRootSeed.centroid!.x, 9);
+  });
+});
+
+describe('chain links without k/maxDist (X541)', () => {
+  // A chain ignores both, so dropping them from the shipped Mystify example
+  // must not move a single perception number — and none may go NaN.
+  const bare: SaverSpec = {
+    ...POLYGONS_SPEC,
+    layers: POLYGONS_SPEC.layers.map((l) => {
+      if (!l.links) return l;
+      const { k: _k, maxDist: _maxDist, ...rest } = l.links;
+      return { ...l, links: rest };
+    }),
+  };
+
+  it('perceives the same scene as the spec that sets them', () => {
+    expect(POLYGONS_SPEC.layers.some((l) => l.links?.mode === 'chain' && !l.links.falloff)).toBe(true);
+    expect(bare.layers.every((l) => !l.links || (l.links.k === undefined && l.links.maxDist === undefined))).toBe(true);
+    const a = perceiveScene(POLYGONS_SPEC, { t: 2000 });
+    const b = perceiveScene(bare, { t: 2000 });
+    expect(b.braille).toBe(a.braille);
+    expect(b.coverage).toBe(a.coverage);
+    expect(b.dominance).toEqual(a.dominance);
+    expect(Number.isFinite(b.coverage)).toBe(true);
+    expect(b.dominance.every((d) => Number.isFinite(d.share) && Number.isFinite(d.factors.area))).toBe(true);
+  });
+
+  it('advises the same as the spec that sets them', () => {
+    expect(adviseSpec(bare)).toEqual(adviseSpec(POLYGONS_SPEC));
   });
 });

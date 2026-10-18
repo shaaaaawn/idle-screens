@@ -327,11 +327,13 @@ export interface LayerSpec {
    * - 'random': a fixed golden-ratio-stride wiring (k partners per entity,
    *   deterministic, no RNG draws) — breaks the crystalline k-nearest look.
    * `falloff` fades link alpha with distance/maxDist, killing pop-in at the cutoff.
+   * `k` and `maxDist` are required for 'nearest' and 'random'; 'chain' needs
+   * neither, except `maxDist` when `falloff` is set (it is the fade distance).
    * Capped at LIMITS.maxLinksK. Layer count must be <= LIMITS.maxLinkLayerCount when set.
    */
   links?: {
-    k: number;
-    maxDist: number;
+    k?: number;
+    maxDist?: number;
     color?: string;
     alpha?: number;
     width?: number;
@@ -475,7 +477,7 @@ export type SpriteSpec =
    * Picasso shard, a Kandinsky triangle, a Mondrian plane. `soft` feathers
    * the fill from the centre like a soft circle. Rotates with `spin`.
    */
-  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; soft?: boolean; colors?: string[]; colorWeights?: number[] }
+  | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; path?: string; fillRule?: 'auto' | 'nonzero' | 'evenodd'; fill?: boolean; gradient?: PathGradient; stroke?: PathStroke; parts?: PathPart[]; span?: 'box' | 'width' | 'height' | 'screen'; origin?: [number, number]; soft?: boolean; colors?: string[]; colorWeights?: number[] }
   /**
    * A freehand mark: a path through `points` (2..24 unit coordinates in
    * −1..1, scaled by the seeded `length`) stroked `width` wide with round
@@ -850,4 +852,34 @@ export interface IdleSequence {
    */
   finish?: FinishSpec;
   segments: SequenceSegment[];
+}
+
+/**
+ * A gradient fill for a path polygon, in the path's own −1..1 unit box (so it
+ * scales and rotates with the drawing). Overrides `color` for the fill;
+ * `color` stays what perception and palettes read when no gradient is known.
+ */
+export type PathGradient =
+  | { type: 'linear'; from: [number, number]; to: [number, number]; stops: PathGradientStop[]; units?: 'box' | 'part' }
+  | { type: 'radial'; center: [number, number]; radius: number; focus?: [number, number]; stops: PathGradientStop[]; units?: 'box' | 'part' };
+export interface PathGradientStop { at: number; color: string; opacity?: number }
+
+/** An outline drawn along every subpath of a path polygon (open ones too). `width` is in unit-box units. */
+export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square' }
+
+/**
+ * One piece of a multi-colour path drawing (`polygon.parts`), drawn back to
+ * front in the drawing's unit box: its own outline, colour (default: the
+ * sprite's), gradient, stroke and opacity. A gradient with `units: 'part'`
+ * reads its coordinates in this part's own bounding box mapped to −1..1, so
+ * one gradient spec shades each piece on its own.
+ */
+export interface PathPart {
+  path: string;
+  color?: string;
+  fillRule?: 'auto' | 'nonzero' | 'evenodd';
+  fill?: boolean;
+  gradient?: PathGradient;
+  stroke?: PathStroke;
+  opacity?: number;
 }

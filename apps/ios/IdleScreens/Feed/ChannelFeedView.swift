@@ -127,6 +127,10 @@ struct ChannelFeedView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            // Backgrounded: no warm page keeps a socket or a web process.
+            if phase != .active { WebScenePool.shared.drain() }
+        }
         .statusBarHidden(chromeHidden)
         // Tap-to-hide is "just the scene": the tab bar goes with the rest of
         // the chrome, on the same animation (the tap wraps it in withAnimation).
@@ -144,6 +148,7 @@ struct ChannelFeedView: View {
         }
         .onDisappear {
             isOnScreen = false
+            WebScenePool.shared.drain()
             PreviewBudget.shared.exitFullscreen()
         }
     }

@@ -829,55 +829,55 @@ exports[`timed-scenes baseline > ambient-tidepool.json: animated values and enti
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1080x1920 t=0 1`] = `
 {
-  "braille": "⠇⠇⠇⠇⠇⡅⡅⡄⡄⡀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀
-⠅⠅⠇⠇⠏⠟⠿⠿⠿⠿⠿⠏⠇⠇⡇⠅⡅⠅⠅⠅
-⠏⠇⠇⠇⠇⠇⠇⠇⡇⡇⡇⡇⡇⡇⡇⠇⠇⠇⠇⠇",
-  "coverage": 0.2708,
+  "braille": "⠇⠇⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠀⠄⠀⠀
+⡇⡇⡇⡇⡇⡏⡏⡟⡟⡟⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇
+⡟⡗⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇",
+  "coverage": 0.0458,
 }
 `;
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1080x1920 t=3000 1`] = `
 {
-  "braille": "⠇⠇⠇⠇⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠁⠁⠁⠅⠇⢟⠟⠟⠿⠟⠟⠇⠇⠁⡁⠁⠁⠁⠁⠁
-⠇⠇⠇⠅⠅⠅⠅⠅⠅⡅⡅⡅⡅⡅⠅⠅⠅⠅⠅⠅",
-  "coverage": 0.2833,
+  "braille": "⠇⠇⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠀⠀⠀
+⠅⠅⠅⠅⠇⠅⡏⠟⠟⠟⠇⠅⡅⠅⠅⠅⠅⠅⠅⠅
+⡗⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇",
+  "coverage": 0.0958,
 }
 `;
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
-  "braille": "⠇⠇⠃⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠂⠀
-⠁⠁⠅⠇⠇⠟⠟⠿⠿⠿⠿⠟⠇⠇⡁⠁⠁⠁⠁⠁
-⠇⠇⠇⠇⠅⠅⠅⠅⡅⡅⡅⡅⡅⡅⠅⠅⠅⠅⠅⠅",
-  "coverage": 0.3521,
+  "braille": "⠇⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠅⠅⠅⠅⠇⠇⠷⠿⠿⠟⠏⠇⠅⠅⠅⠅⠅⠅⠇⠅
+⡗⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇",
+  "coverage": 0.0833,
 }
 `;
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1920x1080 t=0 1`] = `
 {
-  "braille": "⠇⠇⠇⠅⠀⠄⡄⡅⡥⡅⡤⠄⠀⠀⠀⠀⠀⠀⠀⠀
-⡅⡅⠅⠅⠅⠏⣿⡿⡿⡿⡏⠇⠅⡅⠅⠅⠅⠅⠅⠅
-⡏⡏⡇⠇⠇⠇⠇⠇⠗⠇⡗⡇⡏⡇⠇⠇⠇⠇⠇⠇",
-  "coverage": 0.2646,
+  "braille": "⠇⠇⠀⠀⠀⠀⠀⡀⡄⡀⠀⠀⠀⠀⠀⠀⠄⠄⠀⠀
+⡇⡇⡇⡇⡇⡇⡏⡿⡿⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇
+⡿⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⣇⡇⡇⡇⡇⡇⡇⡇⡇",
+  "coverage": 0.0458,
 }
 `;
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1920x1080 t=3000 1`] = `
 {
-  "braille": "⠅⠅⠅⠅⠀⠀⠀⡄⡤⡄⠠⠄⢀⠀⠀⠀⠀⠀⠀⠀
-⠁⠁⠁⠁⠁⠁⢏⠯⡯⡏⠇⠅⠁⡁⠁⠁⠁⠁⠁⠁
-⠇⠏⠁⠅⠁⠁⠁⠅⠑⠃⠕⠇⠍⠁⠁⠁⠁⠁⠁⠁",
-  "coverage": 0.2875,
+  "braille": "⠇⠇⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄
+⠅⠅⠅⠅⠅⠅⠅⠿⠿⠇⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅
+⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⡇⡇⡇⠇⠇⠇⠇⠇⠇⠇",
+  "coverage": 0.0625,
 }
 `;
 
 exports[`timed-scenes baseline > ambient-tidepool.json: perception matches the snapshot on both aspects > 1920x1080 t=8000 1`] = `
 {
-  "braille": "⠇⠇⠁⠀⠀⠀⠀⡄⡤⡄⡄⠄⠀⠀⢁⠀⠀⠀⠀⠀
-⠅⠁⠁⠁⠁⠅⣿⡿⡿⡿⡏⠇⠁⡁⠁⠁⠁⠁⠁⠁
-⡇⠇⠇⠅⠡⠁⠁⠥⠅⠇⡇⡇⡍⠅⠅⠁⠁⠁⠁⠁",
-  "coverage": 0.3354,
+  "braille": "⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠀⠀⠀⠀⠀
+⠅⠅⠅⠅⠅⠅⠅⡿⡿⠏⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅
+⡇⠇⠇⠇⠇⠇⠇⠇⠇⠇⡇⡇⡇⠇⠇⠇⠇⠇⠇⠇",
+  "coverage": 0.075,
 }
 `;
 
@@ -1051,8 +1051,8 @@ exports[`timed-scenes baseline > dx-mark.json: animated values and entity placem
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=0 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
+⠀⠀⠀⠀⠀⠽⡿⡿⡿⡿⡯⡯⡿⡿⡇⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
 `;
@@ -1060,8 +1060,8 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=3000 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
+⠀⠀⠀⠀⠀⠽⡿⡿⡿⡿⡯⡯⡿⡿⡇⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
 `;
@@ -1069,35 +1069,35 @@ exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot o
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢽⣿⡿⡿⡿⡯⡯⣿⣿⡇⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀",
+⠀⠀⠀⠀⠀⠽⡿⡿⡿⡿⡯⡯⡿⡿⡇⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1792,
 }
 `;
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=0 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡀⣀⡀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣯⣿⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠉⠉⠍⠍⠉⠁⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
 `;
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=3000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡀⣀⡀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣯⣿⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠉⠉⠍⠍⠉⠁⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
 `;
 
 exports[`timed-scenes baseline > dx-mark.json: perception matches the snapshot on both aspects > 1920x1080 t=8000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⣀⡀⡀⡀⣀⣀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣏⣯⡇⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠉⠉⠏⠏⠉⠉⠀⠀⠀⠀⠀⠀⠀",
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡀⣀⡀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢽⣿⣿⣯⣿⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠉⠉⠍⠍⠉⠁⠀⠀⠀⠀⠀⠀⠀",
   "coverage": 0.1667,
 }
 `;
@@ -2199,55 +2199,55 @@ exports[`timed-scenes baseline > timed-sunrise.json: animated values and entity 
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=0 1`] = `
 {
-  "braille": "⠔⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⡄⠄⠄⠄⠆⠆⠄⠄
-⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠧⠇
+  "braille": "⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
+⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.2708,
+  "coverage": 0.25,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=3000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠂⠀⠀⠀
-⠇⠇⠇⠇⠧⠧⠧⠧⣧⣧⣧⣧⡧⠧⠧⠯⠇⠇⠧⠇
+  "braille": "⠀⠀⠄⠀⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠇⠇⠇⠇⠇⠇⠇⢇⣧⣧⣧⣧⡇⠇⠇⠇⠇⠇⠇⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.4271,
+  "coverage": 0.2917,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
-  "braille": "⠀⠀⠄⠄⠄⠄⢄⣄⣄⣄⣄⣄⣄⡄⠄⠄⠄⠄⠀⠀
-⠇⠇⠇⠇⠇⠇⠏⡯⡯⡯⡯⡯⡏⠇⠇⠇⠇⠇⠇⠇
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠇⠇⠇⠇⠇⠇⡯⣯⣯⣯⣯⣯⡯⡇⠇⠇⠇⠇⠇⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.7917,
+  "coverage": 0.4667,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1920x1080 t=0 1`] = `
 {
-  "braille": "⠔⠄⠦⠄⠼⠄⠄⡅⠄⠌⠄⠄⡄⠆⠄⠆⠖⠆⡄⠌
-⡇⡇⡇⡇⡧⡇⡇⡇⡇⡇⡇⡇⡏⡗⡇⡇⡗⡇⡯⡇
+  "braille": "⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄⠄
+⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇⡇
 ⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁⠁",
-  "coverage": 0.325,
+  "coverage": 0.25,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1920x1080 t=3000 1`] = `
 {
-  "braille": "⠄⠄⠆⠄⠄⠄⠄⡅⡅⡅⡅⡅⡄⠄⠄⠄⠆⠄⡄⠄
-⡇⡇⡧⡇⡇⡇⡧⡿⡿⡿⡿⡿⡯⡧⡇⡏⡇⡇⡧⡇
-⠁⠁⠁⠁⠁⠁⠉⠉⠉⠉⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁",
-  "coverage": 0.4479,
+  "braille": "⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅⠅
+⡇⡇⡇⡇⡇⡇⡇⡇⣧⣧⣧⡧⡇⡇⡇⡇⡇⡇⡇⡇
+⠁⠁⠁⠁⠁⠁⠁⠁⠉⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁⠁",
+  "coverage": 0.2792,
 }
 `;
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1920x1080 t=8000 1`] = `
 {
-  "braille": "⠀⠀⠅⠅⠅⠅⠅⡅⣥⣥⣧⣥⡇⠅⠅⠅⠅⠅⠀⠀
-⠅⠅⠇⡇⡇⡇⡇⡇⣇⣧⣇⡇⡇⡇⡇⡇⡇⡇⠇⠅
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡤⡤⡤⡄⠀⠀⠀⠀⠀⠀⠀⠀
+⠅⠅⠅⠅⠅⠅⡇⡇⣇⣧⣧⡇⡇⡇⡅⠅⠅⠅⠅⠅
 ⠁⠁⠁⠁⠁⠁⠁⠁⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁⠁⠁",
-  "coverage": 0.8792,
+  "coverage": 0.4667,
 }
 `;
 
@@ -2255,27 +2255,27 @@ exports[`timed-scenes baseline > wrap-ident.sequence.json > segment resolution a
 [
   {
     "T": 0,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 0,
   },
   {
     "T": 3999,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 3999,
   },
   {
     "T": 4000,
     "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⡿⡿⡿⡯⠁⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠆⠆⠆⠀⠀⠀⠀⠀⠀⠀⠀",
+⠀⠀⠀⠀⠀⠀⠀⠀⡿⡿⡿⡿⠁⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄⠄⠄⠀⠀⠀⠀⠀⠀⠀⠀",
     "coverage": 0.1208,
     "index": 1,
     "localT": 0,
@@ -2283,63 +2283,63 @@ exports[`timed-scenes baseline > wrap-ident.sequence.json > segment resolution a
   {
     "T": 4800,
     "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⡿⡿⡿⡯⠁⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠆⠆⠆⠀⠀⠀⠀⠀⠀⠀⠀",
+⠀⠀⠀⠀⠀⠀⠀⠀⡿⡿⡿⡿⠁⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄⠄⠄⠀⠀⠀⠀⠀⠀⠀⠀",
     "coverage": 0.1208,
     "index": 1,
     "localT": 800,
   },
   {
     "T": 8000,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡠⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠨⠀⠁⠿⠿⠇⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠶⠶⠀⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.0917,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠿⠿⠇⠀⠁⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠆⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.1042,
     "index": 2,
     "localT": 0,
   },
   {
     "T": 11999,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡠⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠨⠀⠁⠿⠿⠇⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠶⠶⠀⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.0917,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠿⠿⠇⠀⠁⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠆⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.1042,
     "index": 2,
     "localT": 3999,
   },
   {
     "T": 12000,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 0,
   },
   {
     "T": 12800,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 800,
   },
   {
     "T": 14000,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 2000,
   },
   {
     "T": 24800,
-    "braille": "⠀⠀⠀⠀⠀⠀⠀⡀⠀⡀⡀⠀⠄⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠀⠿⡿⡿⠟⠀⠅⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠈⠀⠆⠆⠆⠁⠀⠀⠀⠀⠀⠀⠀",
-    "coverage": 0.1208,
+    "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠿⡿⡿⠟⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠁⠄⠄⠁⠁⠀⠀⠀⠀⠀⠀⠀",
+    "coverage": 0.125,
     "index": 0,
     "localT": 800,
   },
