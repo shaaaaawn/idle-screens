@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, isShapedSprite, pathLength, polygonArea, polygonFill, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -40,7 +40,7 @@ import {
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
 import { paintMap, paintOpacity, paintSize, type Pt } from './paint';
 import { resolveTimelineAt } from './timeline';
-import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec } from './types';
+import { LIMITS, type IdleSequence, type LayerSpec, type PathGradient, type SaverSpec } from './types';
 
 // ---------------------------------------------------------------------------
 // Calibration constants
@@ -259,6 +259,25 @@ function textBlockRevealFraction(
  * coverage is exact horizontally and POLYGON_SCANLINES-sampled vertically, and
  * a self-intersecting outline fills both lobes, as `ctx.fill()` does.
  */
+/** A path gradient at unit-box point (u, v): luma and opacity of the interpolated stop. */
+function gradientAt(gr: PathGradient, u: number, v: number): { luma: number; opacity: number } {
+  let t: number;
+  if (gr.type === 'linear') {
+    const dx = gr.to[0] - gr.from[0], dy = gr.to[1] - gr.from[1];
+    const len2 = dx * dx + dy * dy || 1;
+    t = ((u - gr.from[0]) * dx + (v - gr.from[1]) * dy) / len2;
+  } else {
+    t = Math.hypot(u - gr.center[0], v - gr.center[1]) / gr.radius;
+  }
+  const st = gr.stops;
+  t = Math.max(st[0]!.at, Math.min(st[st.length - 1]!.at, t));
+  let k = 0;
+  while (k < st.length - 2 && t > st[k + 1]!.at) k++;
+  const A = st[k]!, B = st[Math.min(k + 1, st.length - 1)]!;
+  const w = B.at > A.at ? (t - A.at) / (B.at - A.at) : 0;
+  return { luma: hexLuma(A.color) * (1 - w) + hexLuma(B.color) * w, opacity: (A.opacity ?? 1) * (1 - w) + (B.opacity ?? 1) * w };
+}
+
 function polygonCellCoverage(
   pts: Array<{ x: number; y: number }>,
   cellW: number,
@@ -267,6 +286,7 @@ function polygonCellCoverage(
   c1: number,
   r0: number,
   r1: number,
+  evenodd = false,
 ): Float64Array {
   const nc = c1 - c0 + 1;
   const cov = new Float64Array(nc * (r1 - r0 + 1));
@@ -300,11 +320,13 @@ function polygonCellCoverage(
       hits.sort((m, n) => m.x - n.x);
       let wind = 0;
       let start = 0;
+      const filled = (w: number): boolean => (evenodd ? (w & 1) !== 0 : w !== 0);
       for (const hit of hits) {
-        const before = wind;
+        const before = filled(wind);
         wind += hit.dir;
-        if (before === 0 && wind !== 0) start = hit.x;
-        else if (before !== 0 && wind === 0) addSpan(r - r0, start, hit.x);
+        const after = filled(wind);
+        if (!before && after) start = hit.x;
+        else if (before && !after) addSpan(r - r0, start, hit.x);
       }
     }
   }
@@ -527,7 +549,16 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const rot = rotationAt(e, tPass);
     const cr = Math.cos(rot);
     const sr = Math.sin(rot);
-    const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
+    // A path drawing lands through its frame (span stretches, origin anchors);
+    // everything below maps unit-box points with `mapUnit` and back with `unitAt`.
+    const fr = isPathPolygon(s) ? pathFrame(s, radius, w, h) : { sx: radius, sy: radius, ox: 0, oy: 0, uniform: true };
+    const mapUnit = (u: number, v: number): { x: number; y: number } => {
+      const qx = (u - fr.ox) * fr.sx, qy = (v - fr.oy) * fr.sy;
+      return { x: p.x + qx * cr - qy * sr, y: p.y + qx * sr + qy * cr };
+    };
+    const pts = isPathPolygon(s)
+      ? flattenSprite(s).points.map(([u, v]) => mapUnit(u, v))
+      : polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -536,20 +567,92 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
       minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
     }
+    // A part's stroke as px quads along its mapped lines, half-width from the uniform radius.
+    const strokeQuadsPx = (part: ResolvedPart): Array<Array<{ x: number; y: number }>> => {
+      if (!part.stroke) return [];
+      const hw = (part.stroke.width * radius) / 2;
+      const out: Array<Array<{ x: number; y: number }>> = [];
+      for (const l of part.flat.lines) {
+        const m = l.points.map(([u, v]) => mapUnit(u, v));
+        const n = l.closed ? m.length : m.length - 1;
+        for (let i = 0; i < n; i++) {
+          const A = m[i]!, B = m[(i + 1) % m.length]!;
+          const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+          const nx = (-dy / len) * hw, ny = (dx / len) * hw;
+          out.push([{ x: A.x + nx, y: A.y + ny }, { x: B.x + nx, y: B.y + ny }, { x: B.x - nx, y: B.y - ny }, { x: A.x - nx, y: A.y - ny }]);
+        }
+      }
+      return out;
+    };
+    if (isPathPolygon(s)) {
+      // Strokes reach past the fill (and are all there is with fill: false).
+      for (const part of pathParts(s)) for (const quad of strokeQuadsPx(part)) for (const q of quad) {
+        minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+      }
+    }
     const c0 = Math.max(0, Math.floor(minX / cellW));
     const c1 = Math.min(cols - 1, Math.floor(maxX / cellW));
     const r0 = Math.max(0, Math.floor(minY / cellH));
     const r1 = Math.min(rows - 1, Math.floor(maxY / cellH));
     if (c0 > c1 || r0 > r1) return;
-    const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1);
     const nc = c1 - c0 + 1;
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        const f = cov[(r - r0) * nc + (c - c0)]!;
-        const x = (c + 0.5) * cellW;
-        const y = (r + 0.5) * cellH;
-        const wgt = s.soft ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
-        if (wgt > 0) compose(r * cols + c, lum, a * Math.min(1, wgt), layer.blend);
+    const unitAt = (x: number, y: number): [number, number] => {
+      const dx = x - p.x, dy = y - p.y;
+      return [(dx * cr + dy * sr) / Math.max(fr.sx, 1e-6) + fr.ox, (-dx * sr + dy * cr) / Math.max(fr.sy, 1e-6) + fr.oy];
+    };
+    // Plain polygons (sides/points) keep the single-fill path below; path
+    // polygons composite part by part, back to front, as the canvas paints them.
+    const parts = isPathPolygon(s) ? pathParts(s) : null;
+    const fillPass = (ring: Array<{ x: number; y: number }>, rule: boolean, partLum: number, partA: number, part: ResolvedPart | null): void => {
+      const cov = polygonCellCoverage(ring, cellW, cellH, c0, c1, r0, r1, rule);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const f = cov[(r - r0) * nc + (c - c0)]!;
+          if (!(f > 0)) continue;
+          const x = (c + 0.5) * cellW;
+          const y = (r + 0.5) * cellH;
+          let cl = partLum, ca = 1;
+          if (part?.gradient) {
+            const [u, v] = unitAt(x, y);
+            const [gu, gv] = gradientSpace(part, u, v);
+            const g = gradientAt(part.gradient, gu, gv);
+            cl = g.luma; ca = g.opacity;
+          }
+          const wgt = s.soft && !parts ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
+          if (wgt > 0) compose(r * cols + c, cl, a * partA * ca * Math.min(1, wgt), layer.blend);
+        }
+      }
+    };
+    if (!parts) {
+      fillPass(pts, polygonFillRule(s) === 'evenodd', lum, 1, null);
+      return;
+    }
+    for (const part of parts) {
+      const partLum = part.color ? hexLuma(part.color) : lum;
+      if (part.fill && part.flat.points.length >= 3) {
+        fillPass(part.flat.points.map(([u, v]) => mapUnit(u, v)), part.rule === 'evenodd', partLum, part.opacity, part);
+      }
+      if (part.stroke) {
+        const sa = (part.stroke.opacity ?? 1) * part.opacity;
+        const sl = hexLuma(part.stroke.color);
+        const scov = new Float64Array(nc * (r1 - r0 + 1));
+        for (const qp of strokeQuadsPx(part)) {
+          let qx0 = Infinity, qx1 = -Infinity, qy0 = Infinity, qy1 = -Infinity;
+          for (const q of qp) { qx0 = Math.min(qx0, q.x); qx1 = Math.max(qx1, q.x); qy0 = Math.min(qy0, q.y); qy1 = Math.max(qy1, q.y); }
+          const a0 = Math.max(c0, Math.floor(qx0 / cellW)), a1 = Math.min(c1, Math.floor(qx1 / cellW));
+          const b0 = Math.max(r0, Math.floor(qy0 / cellH)), b1 = Math.min(r1, Math.floor(qy1 / cellH));
+          if (a0 > a1 || b0 > b1) continue;
+          const qc = polygonCellCoverage(qp, cellW, cellH, a0, a1, b0, b1);
+          const qn = a1 - a0 + 1;
+          for (let r = b0; r <= b1; r++) for (let c = a0; c <= a1; c++) {
+            const i = (r - r0) * nc + (c - c0);
+            scov[i] = Math.min(1, scov[i]! + qc[(r - b0) * qn + (c - a0)]!);
+          }
+        }
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+          const f = scov[(r - r0) * nc + (c - c0)]!;
+          if (f > 0) compose(r * cols + c, sl, a * sa * f, layer.blend);
+        }
       }
     }
   };
@@ -571,7 +674,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const sz = layer.transform || layer.group !== undefined ? sizeAt(e, tPass) * paintSize(spec, layer) : sizeAt(e, tPass);
       const s = layer.sprite;
 
-      if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+      if (s.kind === 'polygon' && (sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH) || (isPathPolygon(s) && ((s.span ?? 'box') !== 'box' || s.origin !== undefined)))) {
         splatPolygonOutline(layer, s, e, p, sz, a, lum, tPass);
         continue;
       }

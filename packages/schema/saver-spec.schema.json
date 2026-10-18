@@ -12,6 +12,60 @@
     }
   ],
   "definitions": {
+    "pathD": { "type": "string", "minLength": 1, "maxLength": 65536, "description": "An SVG path d string (M L H V C S Q T A Z, absolute or relative) in the -1..1 unit box; flattens to at most 4096 points." },
+    "pathFillRule": { "enum": ["auto", "nonzero", "evenodd"], "description": "auto (default): a subpath entirely inside another is a hole, overlaps merge; nonzero / evenodd: SVG's rules." },
+    "pathPoint": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -2, "maximum": 2 } },
+    "pathStop": {
+      "type": "object",
+      "required": ["at", "color"],
+      "additionalProperties": false,
+      "properties": { "at": { "type": "number", "minimum": 0, "maximum": 1 }, "color": { "$ref": "#/definitions/hexColor" }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "pathGradient": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "from", "to", "stops"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "linear" }, "from": { "$ref": "#/definitions/pathPoint" }, "to": { "$ref": "#/definitions/pathPoint" }, "units": { "enum": ["box", "part"] }, "stops": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/definitions/pathStop" } } }
+        },
+        {
+          "type": "object",
+          "required": ["type", "center", "radius", "stops"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "radial" }, "center": { "$ref": "#/definitions/pathPoint" }, "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 }, "focus": { "$ref": "#/definitions/pathPoint" }, "units": { "enum": ["box", "part"] }, "stops": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/definitions/pathStop" } } }
+        }
+      ],
+      "description": "A gradient fill in unit-box coordinates (units: part = the part's own box as -1..1)."
+    },
+    "pathStroke": {
+      "type": "object",
+      "required": ["color", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "color": { "$ref": "#/definitions/hexColor" },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Unit-box units (0.01 = 1% of the drawing's half-size)." },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "join": { "enum": ["round", "miter", "bevel"] },
+        "cap": { "enum": ["round", "butt", "square"] }
+      },
+      "description": "An outline along every subpath as drawn."
+    },
+    "pathPart": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/pathD" },
+        "color": { "$ref": "#/definitions/hexColor" },
+        "fillRule": { "$ref": "#/definitions/pathFillRule" },
+        "fill": { "type": "boolean" },
+        "gradient": { "$ref": "#/definitions/pathGradient" },
+        "stroke": { "$ref": "#/definitions/pathStroke" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "description": "One piece of a multi-colour path drawing."
+    },
     "hexColor": {
       "type": "string",
       "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$",
@@ -1055,10 +1109,23 @@
             },
             "soft": { "type": "boolean", "description": "Feather the fill from the centre, like a soft circle." },
             "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
-            "colorWeights": { "$ref": "#/definitions/colorWeights" }
+            "colorWeights": { "$ref": "#/definitions/colorWeights" },
+            "path": { "$ref": "#/definitions/pathD" },
+            "fillRule": { "$ref": "#/definitions/pathFillRule" },
+            "fill": { "type": "boolean", "description": "false draws the stroke only (line art; open paths allowed). Path drawings only." },
+            "gradient": { "$ref": "#/definitions/pathGradient" },
+            "stroke": { "$ref": "#/definitions/pathStroke" },
+            "parts": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/definitions/pathPart" }, "description": "A multi-colour drawing: parts drawn back to front, each with its own path and paint. Not with path/points/sides/gradient/stroke/fill/fillRule on the sprite." },
+            "span": { "enum": ["box", "width", "height", "screen"], "description": "How the unit box lands on screen: box (default, radius-sized square), width (x spans the screen width), height, screen (both). Path drawings only." },
+            "origin": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 }, "description": "The unit-box point placed at the position, e.g. [0, 1] puts the drawing's base at position.y. Path drawings only." }
           },
-          "not": { "required": ["sides", "points"] },
-          "description": "Regular or custom polygon (rotates with spin) \u2014 a facet, a triangle, a plane, a mosaic tile."
+          "allOf": [
+            { "not": { "required": ["sides", "points"] } },
+            { "not": { "required": ["path", "points"] } },
+            { "not": { "required": ["path", "sides"] } },
+            { "not": { "required": ["parts", "path"] } }
+          ],
+          "description": "Regular or custom polygon (rotates with spin) \u2014 a facet, a triangle, a plane, a mosaic tile \u2014 or, with path / parts, a vector drawing (SVG path d strings, gradients, strokes)."
         },
         {
           "type": "object",

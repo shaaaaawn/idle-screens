@@ -23,12 +23,12 @@ import {
 } from './steer';
 import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
-import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, SaverSpec, SpriteSpec } from './types';
+import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec } from './types';
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isShapedSprite, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -305,6 +305,66 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
   return true;
 }
 
+type PathFrameT = { sx: number; sy: number; ox: number; oy: number; uniform: boolean };
+
+/** Path polygons with at least this many outline points draw from a render-once bitmap. */
+const PATH_BLIT_MIN_POINTS = 128;
+/** A run of static path layers earns a full-frame plate only past this many outline points — below it, the plate copy costs more than the fills it saves. */
+const PLATE_MIN_POINTS = 2500;
+/** Distinct bitmaps one path sprite may hold before it is judged "changing" and flushed. */
+const PATH_BLIT_PER_SPRITE = 8;
+/** Distinct drawings (by content) the path caches remember at once. */
+const PATH_SLOT_MAX = 96;
+/** Colour × size-step bitmaps one drawing may hold in the moving-sprite cache. */
+const PATH_SPRITE_PER_SPRITE = 96;
+/** Largest moving-sprite bitmap (device px): beyond it a resampled (and maybe rotated) copy costs more than the fills — big moving drawings draw directly. */
+const PATH_SPRITE_MAX_PIXELS = 512 * 512;
+/** Outline points per million device pixels a bitmap must carry to beat a direct fill: big simple shapes (a skyline wall) fill faster than they blit. */
+const PATH_BLIT_MIN_DENSITY = 1500;
+/** Device pixels all path bitmaps together may hold (~64 MB of RGBA). */
+const PATH_BLIT_MAX_PIXELS = 16_000_000;
+
+/** A Path2D of polylines (unit coordinates), closing the closed ones. */
+function ringPath2D(lines: Array<{ points: Array<[number, number]>; closed: boolean }>): Path2D {
+  const p2 = new Path2D();
+  for (const l of lines) {
+    if (l.points.length < 2) continue;
+    p2.moveTo(l.points[0]![0], l.points[0]![1]);
+    for (let i = 1; i < l.points.length; i++) p2.lineTo(l.points[i]![0], l.points[i]![1]);
+    if (l.closed) p2.closePath();
+  }
+  return p2;
+}
+
+/** The same polylines traced on the context's current path (no Path2D). */
+function traceLines(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, lines: Array<{ points: Array<[number, number]>; closed: boolean }>): void {
+  g.beginPath();
+  for (const l of lines) {
+    if (l.points.length < 2) continue;
+    g.moveTo(l.points[0]![0], l.points[0]![1]);
+    for (let i = 1; i < l.points.length; i++) g.lineTo(l.points[i]![0], l.points[i]![1]);
+    if (l.closed) g.closePath();
+  }
+}
+
+/** A path gradient as a canvas gradient in unit-box coordinates (the caller has scaled by the radius). */
+function pathGradientFill(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, gr: PathGradient): CanvasGradient {
+  const grad = gr.type === 'linear'
+    ? g.createLinearGradient(gr.from[0], gr.from[1], gr.to[0], gr.to[1])
+    : g.createRadialGradient((gr.focus ?? gr.center)[0], (gr.focus ?? gr.center)[1], 0, gr.center[0], gr.center[1], gr.radius);
+  for (const st of gr.stops) grad.addColorStop(st.at, st.opacity === undefined ? st.color : hexToRgba(st.color, st.opacity));
+  return grad;
+}
+
+/** The soft-sprite radial gradient (1 → 0.75 at 0.35 r → 0 at r), centred on the entity. */
+function softFill(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, color: string, r: number): CanvasGradient {
+  const grad = g.createRadialGradient(0, 0, 0, 0, 0, r);
+  grad.addColorStop(0, color);
+  grad.addColorStop(0.35, hexToRgba(color, 0.75));
+  grad.addColorStop(1, hexToRgba(color, 0));
+  return grad;
+}
+
 type Canvas2D = { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D };
 /** One entity's pre-rendered feathered rect: the rotated white mask, and its tint. */
 interface FeatherBlit {
@@ -384,6 +444,20 @@ class SpecInstance implements SaverInstance {
   private paintSeq = 0;
   /** Per layer: ribbon area painted this frame (px²), and whether its trails ribbon (see ribbonAllowed). */
   private readonly ribbonBudget = new WeakMap<Built, { seq: number; area: number; ribbon: boolean }>();
+  /**
+   * Render-once cache for path polygons (polygon.path). A detailed drawing is
+   * rasterised once per (colour, device size, rotation, sub-pixel offset)
+   * into its own bitmap and copied 1:1 at a whole-pixel offset every frame
+   * after — so a static 7,000-point drawing costs a blit, not a re-fill.
+   * Keyed by the sprite object, so a steer or republish (a new spec object)
+   * starts clean. A drawing whose key keeps changing (spinning, trailing,
+   * growing) stops being cached and draws from a reused Path2D instead.
+   */
+  private readonly pathBlits = new Map<string, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }>; sprite?: boolean }>();
+  /** Test/bench switch: `globalThis.__idleNoPathCache = true` before compiling draws every path directly. */
+  private readonly noPathCache = (globalThis as { __idleNoPathCache?: boolean }).__idleNoPathCache === true;
+  /** Device pixels held by every pathBlits bitmap — capped so a TV never pays more than PATH_BLIT_MAX_PIXELS of memory. */
+  private pathBlitPixels = 0;
   private readonly featherTints = new Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D }>();
   /**
    * The presentation pass when this instance applies a `finish`: the
@@ -766,6 +840,257 @@ class SpecInstance implements SaverInstance {
   }
 
   /** A fresh 2D canvas (DOM or Offscreen), or null where none can be made. */
+  /**
+   * A drawing's cache slot, keyed by what it draws (pathPaintSig), not by the
+   * sprite object — glides and timelines replace that object every frame.
+   * Least-recently-used slots are evicted past PATH_SLOT_MAX, and their
+   * bitmaps' pixels returned to the budget.
+   */
+  private pathSlot(sprite: PolygonSprite) {
+    const sig = pathPaintSig(sprite);
+    let slot = this.pathBlits.get(sig);
+    if (slot) {
+      this.pathBlits.delete(sig);
+      this.pathBlits.set(sig, slot);
+      return slot;
+    }
+    if (this.pathBlits.size >= PATH_SLOT_MAX) {
+      const [oldSig, old] = this.pathBlits.entries().next().value!;
+      for (const ent of old.entries.values()) this.pathBlitPixels -= ent.px;
+      this.pathBlits.delete(oldSig);
+    }
+    slot = { entries: new Map(), flushes: 0, off: false };
+    this.pathBlits.set(sig, slot);
+    return slot;
+  }
+
+  /**
+   * Whether a layer's path drawing looks the same as last frame — the caches
+   * serve only steady drawings; one that is gliding (colour, gradient, shape)
+   * draws directly until it settles, instead of rasterising a bitmap a frame.
+   */
+  // Keyed by the layer's place in the scene, never the per-layer record: a
+  // scene that animates a baked field (alpha, size) rebuilds every record
+  // every frame, and a drawing beside it is still steady.
+  private readonly pathSteady = new Map<number, { sig: string; seq: number; steady: boolean }>();
+  private drawingSteady(built: Built, sprite: PolygonSprite): boolean {
+    const sig = pathPaintSig(sprite);
+    const li = this.layers.indexOf(built);
+    const prev = this.pathSteady.get(li);
+    if (prev && prev.seq === this.paintSeq && prev.sig === sig) return prev.steady;
+    const steady = prev !== undefined && prev.sig === sig;
+    this.pathSteady.set(li, { sig, seq: this.paintSeq, steady });
+    return steady;
+  }
+
+  /**
+   * Draw a path polygon in its own unit box: the caller has moved to the
+   * entity and rotated; this scales by r. Parts paint back to front (a single
+   * `path` is one part). Each fill is its gradient (drawing-box coordinates,
+   * or with units 'part' the part's own box, filled under that box's
+   * transform so a radial reads as the part's ellipse), the soft radial
+   * falloff, or flat colour; each stroke traces the part's subpaths as drawn,
+   * width in unit-box units. Outlines are Path2Ds built once per sprite.
+   */
+  private drawPathUnit(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, sprite: PolygonSprite, color: string, fr: PathFrameT, r: number): void {
+    const slot = this.pathSlot(sprite);
+    const parts = pathParts(sprite);
+    if (!slot.parts2d) slot.parts2d = parts.map(() => ({}));
+    // The frame: origin to the entity position, then per-axis scale (span).
+    if (fr.ox || fr.oy) g.translate(-fr.ox * fr.sx, -fr.oy * fr.sy);
+    g.scale(fr.sx, fr.sy);
+    const a0 = g.globalAlpha;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!;
+      const cache = slot.parts2d[i]!;
+      const pc = part.color ?? color;
+      if (part.fill && part.flat.points.length >= 3) {
+        g.globalAlpha = a0 * part.opacity;
+        if (part.gradient?.units === 'part') {
+          // Fill in part space: the gradient's −1..1 is the part's box.
+          const { cx, cy, hw, hh } = part.box;
+          if (cache.fillPart === undefined) {
+            cache.fillPart = typeof Path2D === 'undefined' ? null : ringPath2D([{ points: part.flat.points.map(([x, y]) => [(x - cx) / hw, (y - cy) / hh] as [number, number]), closed: true }]);
+          }
+          g.save();
+          g.transform(hw, 0, 0, hh, cx, cy);
+          g.fillStyle = pathGradientFill(g, part.gradient);
+          if (cache.fillPart) g.fill(cache.fillPart, part.rule);
+          else { traceLines(g, [{ points: part.flat.points.map(([x, y]) => [(x - cx) / hw, (y - cy) / hh] as [number, number]), closed: true }]); g.fill(part.rule); }
+          g.restore();
+        } else {
+          g.fillStyle = part.gradient ? pathGradientFill(g, part.gradient) : sprite.soft && !sprite.parts ? softFill(g, pc, 1) : pc;
+          if (cache.fill === undefined) cache.fill = typeof Path2D === 'undefined' ? null : ringPath2D([{ points: part.flat.points, closed: true }]);
+          if (cache.fill) g.fill(cache.fill, part.rule);
+          else { traceLines(g, [{ points: part.flat.points, closed: true }]); g.fill(part.rule); }
+        }
+      }
+      const st = part.stroke;
+      if (st && part.flat.lines.length) {
+        g.globalAlpha = a0 * part.opacity * (st.opacity ?? 1);
+        g.strokeStyle = st.color;
+        g.lineJoin = st.join ?? 'round';
+        g.lineCap = st.cap ?? 'round';
+        if (fr.uniform) {
+          // Width is in unit-box units of the uniform scale r.
+          g.lineWidth = (st.width * r) / fr.sx;
+          if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
+          if (cache.stroke) g.stroke(cache.stroke);
+          else { traceLines(g, part.flat.lines); g.stroke(); }
+        } else {
+          // A stretched drawing: stroke the stretched outline in unscaled space,
+          // so the line keeps one width instead of fattening along the long axis.
+          const scaled = part.flat.lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
+          g.save();
+          g.scale(1 / fr.sx, 1 / fr.sy);
+          g.lineWidth = st.width * r;
+          traceLines(g, scaled);
+          g.stroke();
+          g.restore();
+        }
+      }
+    }
+    g.globalAlpha = a0;
+  }
+
+  /**
+   * Draw a path polygon from its render-once bitmap. False when it cannot be
+   * blitted exactly — a rotated or skewed layer transform, a bitmap past the
+   * memory cap, a drawing too sparse for its area, or one that keeps
+   * changing — and the caller draws it directly.
+   */
+  private blitPath(sprite: PolygonSprite, p: { x: number; y: number }, r: number, rot: number, color: string, fr: PathFrameT): boolean {
+    const ctx = this.ctx;
+    const slot = this.pathSlot(sprite);
+    if (slot.off) return false;
+    if (slot.sprite) return this.spriteBlit(sprite, slot, p, r, rot, color, fr);
+    const m = ctx.getTransform();
+    // 1:1 copies need an axis-aligned, uniform transform (dpr, layer translate/scale);
+    // anything else (a rotated or skewed layer) goes straight to the sprite cache.
+    if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || Math.abs(m.a - m.d) > 1e-9 || !(m.a > 0)) {
+      slot.sprite = true;
+      return this.spriteBlit(sprite, slot, p, r, rot, color, fr);
+    }
+    const k = m.a;
+    const dx = k * p.x + m.e;
+    const dy = k * p.y + m.f;
+    const ix = Math.floor(dx);
+    const iy = Math.floor(dy);
+    const fx = Math.round((dx - ix) * 8) / 8;
+    const fy = Math.round((dy - iy) * 8) / 8;
+    const key = `${color}|${(r * k).toFixed(3)}|${(fr.sx * k).toFixed(3)}|${(fr.sy * k).toFixed(3)}|${fr.ox},${fr.oy}|${rot.toFixed(5)}|${fx}|${fy}`;
+    let hit = slot.entries.get(key);
+    if (!hit) {
+      if (slot.entries.size >= PATH_BLIT_PER_SPRITE) {
+        for (const old of slot.entries.values()) this.pathBlitPixels -= old.px;
+        slot.entries.clear();
+        // The key keeps changing (moving, spinning, growing): exact copies cannot
+        // keep up, so this drawing switches to the moving-sprite cache.
+        if (++slot.flushes > 1) { slot.sprite = true; slot.flushes = 0; return this.spriteBlit(sprite, slot, p, r, rot, color, fr); }
+      }
+      const c = Math.cos(rot);
+      const sn = Math.sin(rot);
+      const s = r * k;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      const grow = (u: [number, number]): void => {
+        const ux = (u[0] - fr.ox) * fr.sx * k, uy = (u[1] - fr.oy) * fr.sy * k;
+        const x = ux * c - uy * sn;
+        const y = ux * sn + uy * c;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      };
+      let sw = 0;
+      for (const part of pathParts(sprite)) {
+        if (part.fill) for (const u of part.flat.points) grow(u);
+        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow(u); }
+      }
+      const pad = 2 + Math.ceil(sw * s);
+      const bx = Math.floor(fx + x0) - pad;
+      const by = Math.floor(fy + y0) - pad;
+      const w = Math.ceil(fx + x1) - bx + pad;
+      const h = Math.ceil(fy + y1) - by + pad;
+      if (!(w > 0 && h > 0) || !Number.isFinite(w + h)) return false;
+      if (pathDrawCost(sprite) / ((w * h) / 1e6) < PATH_BLIT_MIN_DENSITY) { slot.off = true; return false; }
+      if (this.pathBlitPixels + w * h > PATH_BLIT_MAX_PIXELS) return false;
+      const made = this.makeCanvas(1);
+      if (!made) return false;
+      made.canvas.width = w;
+      made.canvas.height = h;
+      const g = made.ctx;
+      g.setTransform(k, 0, 0, k, fx - bx, fy - by);
+      if (rot) g.rotate(rot);
+      this.drawPathUnit(g, sprite, color, fr, r);
+      hit = { canvas: made.canvas, x0: bx, y0: by, px: w * h };
+      this.pathBlitPixels += hit.px;
+      slot.entries.set(key, hit);
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(hit.canvas, ix + hit.x0, iy + hit.y0);
+    ctx.restore();
+    return true;
+  }
+
+  /**
+   * The moving-sprite cache: for a drawing whose exact key keeps changing. It
+   * is rasterised once per colour, UNROTATED, at a device radius rounded UP to
+   * the next 1/8-octave step (so it is only ever shrunk, never enlarged), then
+   * drawn every frame at its true sub-pixel position, rotation and size under
+   * the context's own transform, with smoothing. Not pixel-exact like the
+   * still cache (edges resample by well under a pixel), but a 7-part drifting
+   * balloon costs one image draw instead of seven fills and strokes.
+   */
+  private spriteBlit(sprite: PolygonSprite, slot: NonNullable<ReturnType<typeof this.pathBlits.get>>, p: { x: number; y: number }, r: number, rot: number, color: string, fr: PathFrameT): boolean {
+    const ctx = this.ctx;
+    // Sprites are for uniform, box-sized drawings (particles); a stretched one draws directly.
+    if (!fr.uniform || fr.sx !== r) return false;
+    const m = ctx.getTransform();
+    const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+    const s = r * k;
+    if (!(s >= 1)) return false;
+    const bucket = 2 ** (Math.ceil(Math.log2(s) * 8) / 8);
+    const key = `S|${color}|${bucket.toFixed(3)}`;
+    let hit = slot.entries.get(key);
+    if (!hit) {
+      if (slot.entries.size >= PATH_SPRITE_PER_SPRITE) {
+        for (const old of slot.entries.values()) this.pathBlitPixels -= old.px;
+        slot.entries.clear();
+        if (++slot.flushes > 2) { slot.off = true; return false; }
+      }
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, sw = 0;
+      const grow = (u: [number, number]): void => { if (u[0] < x0) x0 = u[0]; if (u[0] > x1) x1 = u[0]; if (u[1] < y0) y0 = u[1]; if (u[1] > y1) y1 = u[1]; };
+      for (const part of pathParts(sprite)) {
+        if (part.fill) for (const u of part.flat.points) grow([u[0] - fr.ox, u[1] - fr.oy]);
+        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow([u[0] - fr.ox, u[1] - fr.oy]); }
+      }
+      const pad = 2 + Math.ceil(sw * bucket);
+      const ox = Math.ceil(-x0 * bucket) + pad;
+      const oy = Math.ceil(-y0 * bucket) + pad;
+      const w = ox + Math.ceil(x1 * bucket) + pad;
+      const h = oy + Math.ceil(y1 * bucket) + pad;
+      if (!(w > 0 && h > 0) || !Number.isFinite(w + h)) return false;
+      if (w * h > PATH_SPRITE_MAX_PIXELS) { slot.off = true; return false; }
+      if (this.pathBlitPixels + w * h > PATH_BLIT_MAX_PIXELS) return false;
+      const made = this.makeCanvas(1);
+      if (!made) return false;
+      made.canvas.width = w;
+      made.canvas.height = h;
+      made.ctx.setTransform(1, 0, 0, 1, ox, oy);
+      this.drawPathUnit(made.ctx, sprite, color, { sx: bucket, sy: bucket, ox: fr.ox, oy: fr.oy, uniform: true }, bucket);
+      // x0/y0 hold the bitmap's origin offset (px from the drawing's centre) at `bucket` scale.
+      hit = { canvas: made.canvas, x0: ox, y0: oy, px: w * h };
+      this.pathBlitPixels += hit.px;
+      slot.entries.set(key, hit);
+    }
+    const u = r / bucket; // user units per bitmap pixel
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    if (rot) ctx.rotate(rot);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(hit.canvas, -hit.x0 * u, -hit.y0 * u, hit.canvas.width * u, hit.canvas.height * u);
+    ctx.restore();
+    return true;
+  }
+
   private makeCanvas(n: number): { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D } | null {
     try {
       const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : new OffscreenCanvas(n, n);
@@ -1010,24 +1335,26 @@ class SpecInstance implements SaverInstance {
     if (sprite.kind === 'polygon') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      const pts = polygonPoints(sprite, r);
+      if (isPathPolygon(sprite)) {
+        const fr = pathFrame(sprite, r, this.w, this.h);
+        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.drawingSteady(built, sprite) && this.blitPath(sprite, p, r, rot, resolvedColor, fr)) return;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        if (rot) ctx.rotate(rot);
+        if (r > 0 && fr.sx > 0 && fr.sy > 0) this.drawPathUnit(ctx, sprite, resolvedColor, fr, r);
+        ctx.restore();
+        return;
+      }
       ctx.save();
       ctx.translate(p.x, p.y);
       if (rot) ctx.rotate(rot);
-      if (sprite.soft) {
-        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-        g.addColorStop(0, resolvedColor);
-        g.addColorStop(0.35, hexToRgba(resolvedColor, 0.75));
-        g.addColorStop(1, hexToRgba(resolvedColor, 0));
-        ctx.fillStyle = g;
-      } else {
-        ctx.fillStyle = resolvedColor;
-      }
+      ctx.fillStyle = sprite.soft ? softFill(ctx, resolvedColor, r) : resolvedColor;
+      const pts = polygonPoints(sprite, r);
       ctx.beginPath();
       ctx.moveTo(pts[0]!.x, pts[0]!.y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
       ctx.closePath();
-      ctx.fill();
+      ctx.fill(polygonFillRule(sprite));
       ctx.restore();
       return;
     }
@@ -1352,46 +1679,222 @@ class SpecInstance implements SaverInstance {
       this.drawBackground(t);
     }
     ctx.globalAlpha = 1;
-    for (let li = 0; li < this.layers.length; li++) {
-      const built = this.layers[li]!;
-      const opacity = built.layer.opacity;
-      // A grouped layer paints through its group too (`groups`): opacity
-      // multiplies, the group's transform wraps the layer's own. Ungrouped
-      // layers take exactly the path they always have.
-      const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
-      let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
-      if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
-      if (lifeA <= 0) continue;
-      const parentE = this.parentEntityFor(built);
-      const tf = built.layer.transform;
-      const gtf = group?.transform;
-      if (tf || gtf) {
-        ctx.save();
-        if (gtf) this.applyLayerTransform(gtf, null);
-        if (tf) this.applyLayerTransform(tf, built.layer);
+    const n = this.layers.length;
+    for (let li = 0; li < n; li++) {
+      // A run of unchanging drawing layers paints from one composited plate.
+      if (!this.noPathCache && this.plateable(li, t)) {
+        let j = li;
+        while (j + 1 < n && this.plateable(j + 1, t)) j++;
+        if (j > li && this.runPoints(li, j) >= PLATE_MIN_POINTS && this.paintPlate(li, j, t)) { li = j; continue; }
       }
-      ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
-      this.drawLinks(built, t, lifeA, parentE);
-      const override = this.paintOverrides?.get(li) ?? null;
-      for (const e of built.entities) {
-        this.drawTrail(built, e, t, lifeA, parentE);
-        if (override === null) {
-          this.drawEntity(built, e, t, lifeA, parentE);
-          continue;
-        }
-        // A text cross-fade: the previous words fading out under the new
-        // ones fading in. Either pass at alpha 0 is skipped, so k = 0 and
-        // k = 1 each cost exactly one draw, like a plain frame.
-        const [aOut, aIn] = override.mode === 'dip'
-          ? [Math.max(0, 1 - 2 * override.k), Math.max(0, 2 * override.k - 1)]
-          : [1 - override.k, override.k];
-        if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
-        if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
-      }
-      if (tf || gtf) ctx.restore();
+      this.paintLayer(li, t);
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /** Paint layer `li` at time t onto this.ctx (the scene canvas, or a plate being rebuilt). */
+  private paintLayer(li: number, t: number): void {
+    const { ctx } = this;
+    const built = this.layers[li]!;
+    const opacity = built.layer.opacity;
+    // A grouped layer paints through its group too (`groups`): opacity
+    // multiplies, the group's transform wraps the layer's own. Ungrouped
+    // layers take exactly the path they always have.
+    const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
+    let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
+    if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
+    if (lifeA <= 0) return;
+    const parentE = this.parentEntityFor(built);
+    const tf = built.layer.transform;
+    const gtf = group?.transform;
+    if (tf || gtf) {
+      ctx.save();
+      if (gtf) this.applyLayerTransform(gtf, null);
+      if (tf) this.applyLayerTransform(tf, built.layer);
+    }
+    ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
+    this.drawLinks(built, t, lifeA, parentE);
+    const override = this.paintOverrides?.get(li) ?? null;
+    for (const e of built.entities) {
+      this.drawTrail(built, e, t, lifeA, parentE);
+      if (override === null) {
+        this.drawEntity(built, e, t, lifeA, parentE);
+        continue;
+      }
+      // A text cross-fade: the previous words fading out under the new
+      // ones fading in. Either pass at alpha 0 is skipped, so k = 0 and
+      // k = 1 each cost exactly one draw, like a plain frame.
+      const [aOut, aIn] = override.mode === 'dip'
+        ? [Math.max(0, 1 - 2 * override.k), Math.max(0, 2 * override.k - 1)]
+        : [1 - override.k, override.k];
+      if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
+      if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
+    }
+    if (tf || gtf) ctx.restore();
+  }
+
+  /**
+   * Static plates. Consecutive path-polygon layers painted source-over, with
+   * no trails, links or text overrides, are composited into ONE full-frame
+   * bitmap and copied once per frame while nothing they draw has changed —
+   * the change test is the drawn values themselves (each entity's position,
+   * size, rotation, alpha and colour, the layer's life alpha and transforms),
+   * so anything animated simply repaints its plate that frame. Source-over is
+   * associative, so the plate over the frame equals the layers over it.
+   */
+  private readonly plates = new Map<number, { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D; end: number; sig: string; box: { x: number; y: number; w: number; h: number }; frameW: number; frameH: number }>();
+
+  /** Outline points a run of path layers fills per frame (points × entities). */
+  private runPoints(a: number, b: number): number {
+    let n = 0;
+    for (let li = a; li <= b; li++) {
+      const built = this.layers[li]!;
+      const sp = built.layer.sprite;
+      if (sp.kind === 'polygon' && isPathPolygon(sp)) n += pathDrawCost(sp) * built.entities.length;
+    }
+    return n;
+  }
+
+  /** Last drawn-value signature per layer, for plate stability. */
+  private readonly layerSigs = new Map<number, string>();
+
+  /**
+   * A layer joins a plate only if it can (path polygon, source-over, no
+   * trails/links/text override) AND nothing it draws changed since the last
+   * frame — so a pulsing or moving layer splits the run and paints live, while
+   * the static layers around it keep their plates.
+   */
+  private plateable(li: number, t: number): boolean {
+    const built = this.layers[li]!;
+    const l = built.layer;
+    const sp = l.sprite;
+    if (!isPathPolygon(sp)) return false;
+    if ((l.blend ?? 'source-over') !== 'source-over') return false;
+    if (l.trail || l.links || this.paintOverrides?.has(li)) return false;
+    if (built.entities.length > 64) return false;
+    const sig = this.layerSig(li, t);
+    const prev = this.layerSigs.get(li);
+    this.layerSigs.set(li, sig);
+    return prev === sig;
+  }
+
+  private layerSig(li: number, t: number): string {
+    const built = this.layers[li]!;
+    const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
+    const opacity = built.layer.opacity;
+    let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
+    if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
+    let sig = `${pathPaintSig(built.layer.sprite as PolygonSprite)}:${lifeA.toFixed(4)}:${JSON.stringify(built.layer.transform ?? null)}:${JSON.stringify(group?.transform ?? null)}`;
+    const parentE = this.parentEntityFor(built);
+    for (const e of built.entities) {
+      const p = this.entityPos(e, t, parentE);
+      sig += `|${p.x.toFixed(2)},${p.y.toFixed(2)},${sizeAt(e, t).toFixed(3)},${rotationAt(e, t).toFixed(5)},${alphaAt(e, t).toFixed(4)},${e.colorIndex}`;
+    }
+    return sig;
+  }
+
+  private plateSig(a: number, b: number): string {
+    let sig = `${a}-${b}`;
+    for (let li = a; li <= b; li++) sig += `#${this.layerSigs.get(li)}`;
+    return sig;
+  }
+
+  /** Max |point| of a path polygon's unit outline (its reach as a fraction of the entity radius). */
+  private readonly pathReach = new WeakMap<object, number>();
+  private reachOf(sp: PolygonSprite): number {
+    let r = this.pathReach.get(sp);
+    if (r === undefined) {
+      r = 0;
+      let sw = 0;
+      for (const part of pathParts(sp)) {
+        for (const [x, y] of part.flat.points) r = Math.max(r, Math.hypot(x, y));
+        for (const l of part.flat.lines) for (const [x, y] of l.points) r = Math.max(r, Math.hypot(x, y));
+        if (part.stroke) sw = Math.max(sw, part.stroke.width);
+      }
+      r += sw;
+      this.pathReach.set(sp, r || 1);
+    }
+    return r || 1;
+  }
+
+  /**
+   * Device-pixel box a run of layers can paint into, or null for "the whole
+   * frame" (a layer/group transform moves things in ways this does not model).
+   */
+  private runBox(a: number, b: number, t: number): { x: number; y: number; w: number; h: number } | null {
+    const m = this.ctx.getTransform();
+    if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let li = a; li <= b; li++) {
+      const built = this.layers[li]!;
+      const group = built.layer.group === undefined ? undefined : this.effSpec.groups?.[built.layer.group];
+      if (built.layer.transform || group?.transform) return null;
+      const reach = this.reachOf(built.layer.sprite as PolygonSprite);
+      const parentE = this.parentEntityFor(built);
+      for (const e of built.entities) {
+        const p = this.entityPos(e, t, parentE);
+        const sp = built.layer.sprite as PolygonSprite;
+        const fr = pathFrame(sp, sizeAt(e, t) / 2, this.w, this.h);
+        const ext = Math.max(fr.sx, fr.sy) * (reach + Math.hypot(fr.ox, fr.oy));
+        x0 = Math.min(x0, p.x - ext); x1 = Math.max(x1, p.x + ext);
+        y0 = Math.min(y0, p.y - ext); y1 = Math.max(y1, p.y + ext);
+      }
+    }
+    const W = this.canvas.width, H = this.canvas.height;
+    const bx = Math.max(0, Math.floor(m.a * x0 + m.e) - 2);
+    const by = Math.max(0, Math.floor(m.d * y0 + m.f) - 2);
+    const bw = Math.min(W, Math.ceil(m.a * x1 + m.e) + 2) - bx;
+    const bh = Math.min(H, Math.ceil(m.d * y1 + m.f) + 2) - by;
+    return bw > 0 && bh > 0 ? { x: bx, y: by, w: bw, h: bh } : { x: 0, y: 0, w: 0, h: 0 };
+  }
+
+  /** Paint layers a..b from their plate, rebuilding it if anything drawn changed. False = paint them normally. */
+  private paintPlate(a: number, b: number, t: number): boolean {
+    const sig = this.plateSig(a, b);
+    let plate = this.plates.get(a);
+    if (!plate || plate.sig !== sig || plate.end !== b || plate.frameW !== this.canvas.width || plate.frameH !== this.canvas.height) {
+      const box = this.runBox(a, b, t) ?? { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
+      if (!plate) {
+        if (this.plates.size >= 4) this.plates.delete(this.plates.keys().next().value!);
+        const made = this.makeCanvas(1);
+        if (!made) return false;
+        plate = { ...made, end: b, sig: '', box, frameW: 0, frameH: 0 };
+        this.plates.set(a, plate);
+      }
+      plate.box = box;
+      plate.frameW = this.canvas.width;
+      plate.frameH = this.canvas.height;
+      if (box.w === 0 || box.h === 0) { plate.sig = sig; plate.end = b; return true; }
+      if (plate.canvas.width !== box.w) plate.canvas.width = box.w;
+      if (plate.canvas.height !== box.h) plate.canvas.height = box.h;
+      const pc = plate.ctx;
+      pc.setTransform(1, 0, 0, 1, 0, 0);
+      pc.globalAlpha = 1;
+      pc.globalCompositeOperation = 'source-over';
+      pc.clearRect(0, 0, box.w, box.h);
+      const m = this.ctx.getTransform();
+      pc.setTransform(m.a, m.b, m.c, m.d, m.e - box.x, m.f - box.y);
+      const self = this as unknown as { ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D };
+      const main = self.ctx;
+      self.ctx = pc;
+      try {
+        for (let li = a; li <= b; li++) this.paintLayer(li, t);
+      } finally {
+        self.ctx = main;
+      }
+      plate.sig = sig;
+      plate.end = b;
+    }
+    if (plate.box.w === 0 || plate.box.h === 0) return true;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(plate.canvas, plate.box.x, plate.box.y);
+    ctx.restore();
+    return true;
   }
 
   /**
