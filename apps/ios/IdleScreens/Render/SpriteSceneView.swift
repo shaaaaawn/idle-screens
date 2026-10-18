@@ -252,9 +252,28 @@ final class CompiledSpriteScene: SKScene {
             }
             return node
 
-        case .polygon(_, _, _, let sides, let points, let soft):
+        case .polygon(_, _, _, let sides, let points, let soft, let drawing):
             let r = entity.size * dim
             guard r > 0.25 else { return nil }
+            if let drawing {
+                // A path drawing: the shared raster (PathRaster) as a texture,
+                // anchored at the drawing's origin. SpriteKit is y-up, so the
+                // anchor's y flips. Grow/rotation then act on the node as usual.
+                guard let ras = PathRaster.raster(drawing, color: entity.color, r: r,
+                                                  width: size.width, height: size.height,
+                                                  scale: NativeSceneView.rasterScale) else { return nil }
+                let tex = texture(key: "path|\(drawing.key.hashValue)|\(entity.color)|\(ras.image.width)x\(ras.image.height)") {
+                    UIImage(cgImage: ras.image)
+                }
+                let uniform = drawing.span == "box"
+                let k = uniform ? r / pow(2, ceil(log2(max(r, 0.5)) * 8) / 8) : 1
+                let node = SKSpriteNode(texture: tex)
+                node.size = CGSize(width: CGFloat(ras.image.width) / ras.scale * k,
+                                   height: CGFloat(ras.image.height) / ras.scale * k)
+                node.anchorPoint = CGPoint(x: ras.anchor.x / CGFloat(ras.image.width),
+                                           y: 1 - ras.anchor.y / CGFloat(ras.image.height))
+                return node
+            }
             let node = SKSpriteNode(texture: polygonTexture(
                 color: entity.color, sides: sides, points: points, soft: soft))
             node.size = CGSize(width: r * 2, height: r * 2)

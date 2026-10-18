@@ -160,7 +160,7 @@ struct NativeSceneView: View {
                         let decay = pow(ghosting, Double(k))
                         draw(entity: entity,
                              size: entity.size * SceneMotion.growScale(of: entity, at: back),
-                             sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units, at: ghostPoint,
+                             sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units, space: space, at: ghostPoint,
                              dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &layerCtx)
                     }
                 }
@@ -171,7 +171,7 @@ struct NativeSceneView: View {
                 }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
                 draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather,
-                     units: layer.units, at: point,
+                     units: layer.units, space: space, at: point,
                      dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &layerCtx)
             }
         }
@@ -222,7 +222,7 @@ struct NativeSceneView: View {
             for ec in echoes {
                 draw(entity: entity, size: headSize * ec.r / max(0.0001, headSize * dim),
                      sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units,
-                     at: ec.point, dim: dim, alpha: ec.alpha, t: ec.t, ctx: &ctx)
+                     space: space, at: ec.point, dim: dim, alpha: ec.alpha, t: ec.t, ctx: &ctx)
             }
             return
         }
@@ -522,7 +522,7 @@ struct NativeSceneView: View {
 
     private func draw(entity: CompiledEntity, size: Double, sprite: SpecSubset.Sprite,
                       textStyle: SpecSubset.TextStyle? = nil, feather: Double = 0,
-                      units: SpecSubset.Units,
+                      units: SpecSubset.Units, space: CGSize = .zero,
                       at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
                       ctx: inout GraphicsContext) {
         // Pre-parsed components — no hex-string Scanner in the hot loop.
@@ -615,9 +615,28 @@ struct NativeSceneView: View {
                           reveal: reveal, at: point, dim: dim, alpha: alpha,
                           spin: spin, t: t, ctx: &ctx)
 
-        case .polygon(_, _, _, let sides, let points, let soft):
+        case .polygon(_, _, _, let sides, let points, let soft, let drawing):
             let r = size * dim
             guard r >= 0.25 else { return }
+            if let drawing {
+                // A path drawing: rasterised once per (drawing, colour, size step)
+                // and placed — the Canvas would otherwise refill every path, every
+                // frame. The raster is drawn at r / its snapped radius.
+                let w = space.width > 0 ? space.width : dim, h = space.height > 0 ? space.height : dim
+                guard let ras = PathRaster.raster(drawing, color: entity.color, r: r, width: w, height: h,
+                                                  scale: Self.rasterScale) else { return }
+                let uniform = drawing.span == "box"
+                let k = uniform ? r / pow(2, ceil(log2(max(r, 0.5)) * 8) / 8) : 1
+                var layer = ctx
+                layer.translateBy(x: point.x, y: point.y)
+                layer.rotate(by: .degrees(spin))
+                layer.opacity = alpha
+                let pt = 1 / ras.scale * k
+                layer.draw(Image(decorative: ras.image, scale: 1),
+                           in: CGRect(x: -ras.anchor.x * pt, y: -ras.anchor.y * pt,
+                                      width: CGFloat(ras.image.width) * pt, height: CGFloat(ras.image.height) * pt))
+                return
+            }
             let verts = Self.polygonPoints(sides: sides, points: points, radius: r)
             guard verts.count >= 3 else { return }
             var path = Path()
@@ -683,6 +702,9 @@ struct NativeSceneView: View {
             break
         }
     }
+
+    /// Path-drawing raster density, px per point (Apple TV renders at 1×–2×).
+    static let rasterScale: CGFloat = 2
 
     // MARK: - Shape geometry (port of packages/schema/src/shapes.ts)
 

@@ -500,7 +500,7 @@ extension SpecSubset {
         /// Regular n-gon (`sides`, point-up) or an arbitrary facet (`points`
         /// in a −1…1 box scaled by the circumradius).
         case polygon(radius: (Double, Double), color: String, colors: [String],
-                     sides: Int?, points: [[Double]]?, soft: Bool)
+                     sides: Int?, points: [[Double]]?, soft: Bool, drawing: PathDrawing? = nil)
         /// A freehand mark: a path through `points` stroked `width` wide.
         case stroke(length: (Double, Double), points: [[Double]], color: String,
                     colors: [String], width: Double?, smooth: Bool,
@@ -529,8 +529,8 @@ extension SpecSubset {
                       .textBlock(t2, mw2, fs2, lh2, a2, c2, r2)):
                 return t1 == t2 && mw1 == mw2 && fs1 == fs2 && lh1 == lh2
                     && a1 == a2 && c1 == c2 && r1 == r2
-            case let (.polygon(r1, c1, cs1, s1, p1, f1), .polygon(r2, c2, cs2, s2, p2, f2)):
-                return r1 == r2 && c1 == c2 && cs1 == cs2 && s1 == s2 && p1 == p2 && f1 == f2
+            case let (.polygon(r1, c1, cs1, s1, p1, f1, d1), .polygon(r2, c2, cs2, s2, p2, f2, d2)):
+                return r1 == r2 && c1 == c2 && cs1 == cs2 && s1 == s2 && p1 == p2 && f1 == f2 && d1 == d2
             case let (.stroke(l1, p1, c1, cs1, w1, sm1, t1, o1),
                       .stroke(l2, p2, c2, cs2, w2, sm2, t2, o2)):
                 return l1 == l2 && p1 == p2 && c1 == c2 && cs1 == cs2 && w1 == w2
@@ -552,6 +552,7 @@ extension SpecSubset.Sprite: Decodable {
         case kind, glyphs, strings, color, colors, radius, width, length, aspect, soft
         case text, maxWidth, fontSize, lineHeight, align, reveal
         case sides, points, curve, taper, orient, values, thickness, max, direction
+        case path, parts, fillRule, fill, gradient, stroke, span, origin
     }
 
     init(from decoder: Decoder) throws {
@@ -606,13 +607,32 @@ extension SpecSubset.Sprite: Decodable {
                 reveal: try c.decodeIfPresent(SpecSubset.TextRevealSpec.self, forKey: .reveal)
             )
         case "polygon":
+            let soft = try c.decodeIfPresent(Bool.self, forKey: .soft) ?? false
+            // A path drawing (`path` or `parts`): decoded leniently — a malformed
+            // paint field drops that field, never the drawing (or the layer).
+            var drawing: PathDrawing? = nil
+            let span = try? c.decodeIfPresent(String.self, forKey: .span)
+            let origin = try? c.decodeIfPresent([Double].self, forKey: .origin)
+            if let parts = try? c.decodeIfPresent([PathDrawing.PartSpec].self, forKey: .parts), !parts.isEmpty {
+                drawing = PathDrawing(specs: parts, ownColor: true, span: span ?? nil, origin: origin ?? nil, soft: false)
+            } else if let path = try? c.decodeIfPresent(String.self, forKey: .path) {
+                let one = PathDrawing.PartSpec(
+                    path: path, color: nil,
+                    fillRule: (try? c.decodeIfPresent(String.self, forKey: .fillRule)) ?? nil,
+                    fill: (try? c.decodeIfPresent(Bool.self, forKey: .fill)) ?? nil,
+                    gradient: (try? c.decodeIfPresent(PathDrawing.Gradient.self, forKey: .gradient)) ?? nil,
+                    stroke: (try? c.decodeIfPresent(PathDrawing.Stroke.self, forKey: .stroke)) ?? nil,
+                    opacity: nil)
+                drawing = PathDrawing(specs: [one], ownColor: false, span: span ?? nil, origin: origin ?? nil, soft: soft)
+            }
             self = .polygon(
                 radius: Self.range(try c.decodeIfPresent([Double].self, forKey: .radius), default: (0.01, 0.02)),
                 color: color,
                 colors: colors,
                 sides: try c.decodeIfPresent(Int.self, forKey: .sides),
                 points: try c.decodeIfPresent([[Double]].self, forKey: .points),
-                soft: try c.decodeIfPresent(Bool.self, forKey: .soft) ?? false
+                soft: soft,
+                drawing: drawing
             )
         case "stroke":
             self = .stroke(
@@ -1098,7 +1118,7 @@ extension SpecSubset.Layer {
                 size = w.0 + rng.next() * (w.1 - w.0)
             case .streak(let l, _, _, _):
                 size = l.0 + rng.next() * (l.1 - l.0)
-            case .polygon(let r, _, _, _, _, _):
+            case .polygon(let r, _, _, _, _, _, _):
                 // Circumradius, same convention as circle/ring here.
                 size = r.0 + rng.next() * (r.1 - r.0)
             case .stroke(let l, _, _, _, _, _, _, _):
@@ -1136,7 +1156,7 @@ extension SpecSubset.Layer {
             case .ring(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
             case .rect(_, _, let c, let cs): palette = cs.isEmpty ? [c] : cs
             case .streak(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
-            case .polygon(_, let c, let cs, _, _, _): palette = cs.isEmpty ? [c] : cs
+            case .polygon(_, let c, let cs, _, _, _, _): palette = cs.isEmpty ? [c] : cs
             case .stroke(_, _, let c, let cs, _, _, _, _): palette = cs.isEmpty ? [c] : cs
             case .bar(_, _, _, let c, let cs, _, _): palette = cs.isEmpty ? [c] : cs
             case .text(_, let c): palette = [c]
