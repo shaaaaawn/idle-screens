@@ -466,7 +466,7 @@ function parseAndFlatten(d: string): { rings: Pt[][]; lines: Array<{ points: Pt[
   let i = 0;
   const num = (): number => {
     const t = tokens[i++];
-    if (t === undefined || /[a-zA-Z]/.test(t)) throw new Error('expected a number');
+    if (t === undefined || /^[a-zA-Z]$/.test(t)) throw new Error('expected a number');
     return Number(t);
   };
   const flag = (): number => {
@@ -542,7 +542,7 @@ function parseAndFlatten(d: string): { rings: Pt[][]; lines: Array<{ points: Pt[
   };
   while (i < tokens.length) {
     let cmd = tokens[i]!;
-    if (/[a-zA-Z]/.test(cmd)) i++;
+    if (/^[a-zA-Z]$/.test(cmd)) i++;
     else if (lastCmd) cmd = lastCmd === 'M' ? 'L' : lastCmd === 'm' ? 'l' : lastCmd; // implicit repeat
     else throw new Error('path must start with M');
     const rel = cmd === cmd.toLowerCase() && cmd !== 'z' ? true : false;

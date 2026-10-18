@@ -290,7 +290,7 @@ export function lerpPathD(a: string, b: string, k: number): string | null {
   let argIndex = 0;
   for (let i = 0; i < ta.length; i++) {
     const x = ta[i]!, y = tb[i]!;
-    const isCmdA = /[a-zA-Z]/.test(x), isCmdB = /[a-zA-Z]/.test(y);
+    const isCmdA = /^[a-zA-Z]$/.test(x), isCmdB = /^[a-zA-Z]$/.test(y);
     if (isCmdA !== isCmdB) return null;
     if (isCmdA) {
       if (x !== y) return null;

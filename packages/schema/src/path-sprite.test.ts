@@ -97,6 +97,12 @@ describe('polygon.path', () => {
   it('keeps a separate subpath as its own piece', () => {
     expect(area('M -1 -1 H -0.5 V -0.5 H -1 Z M 0.5 0.5 H 1 V 1 H 0.5 Z')).toBeCloseTo(0.5, 6);
   });
+  it('reads numbers in exponent form (a computed 0 is often 3.67e-17)', () => {
+    const f = flattenPath('M -0.6 3.6739403974420595e-17 A 0.3 0.3 0 1 1 0 3.6739403974420595e-17 A 0.3 0.3 0 1 1 -0.6 3.6739403974420595e-17 Z');
+    expect(f.error).toBeUndefined();
+    expect(f.points.length).toBeGreaterThan(20);
+    expect(lerpPathD('M 0 1e-17 L 1 1', 'M 0 2e-17 L 2 2', 0.5)).toBe('M 0 0 L 1.5 1.5');
+  });
   it('handles relative, smooth and implicit commands', () => {
     const f = flattenPath('m0-.8c.4 0 .8.4.8.8s-.4.8-.8.8-.8-.4-.8-.8.4-.8.8-.8z');
     expect(f.error).toBeUndefined();
