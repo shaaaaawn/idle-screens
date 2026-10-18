@@ -306,11 +306,15 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
 }
 
 /** Path polygons with at least this many outline points draw from a render-once bitmap. */
-const PATH_BLIT_MIN_POINTS = 256;
+const PATH_BLIT_MIN_POINTS = 128;
 /** A run of static path layers earns a full-frame plate only past this many outline points — below it, the plate copy costs more than the fills it saves. */
 const PLATE_MIN_POINTS = 2500;
 /** Distinct bitmaps one path sprite may hold before it is judged "changing" and flushed. */
 const PATH_BLIT_PER_SPRITE = 8;
+/** Colour × size-step bitmaps one drawing may hold in the moving-sprite cache. */
+const PATH_SPRITE_PER_SPRITE = 96;
+/** Largest moving-sprite bitmap (device px): beyond it a resampled (and maybe rotated) copy costs more than the fills — big moving drawings draw directly. */
+const PATH_SPRITE_MAX_PIXELS = 512 * 512;
 /** Outline points per million device pixels a bitmap must carry to beat a direct fill: big simple shapes (a skyline wall) fill faster than they blit. */
 const PATH_BLIT_MIN_DENSITY = 1500;
 /** Device pixels all path bitmaps together may hold (~64 MB of RGBA). */
@@ -445,7 +449,7 @@ class SpecInstance implements SaverInstance {
    * starts clean. A drawing whose key keeps changing (spinning, trailing,
    * growing) stops being cached and draws from a reused Path2D instead.
    */
-  private readonly pathBlits = new WeakMap<object, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }> }>();
+  private readonly pathBlits = new WeakMap<object, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }>; sprite?: boolean }>();
   /** Test/bench switch: `globalThis.__idleNoPathCache = true` before compiling draws every path directly. */
   private readonly noPathCache = (globalThis as { __idleNoPathCache?: boolean }).__idleNoPathCache === true;
   /** Device pixels held by every pathBlits bitmap — capped so a TV never pays more than PATH_BLIT_MAX_PIXELS of memory. */
@@ -903,9 +907,14 @@ class SpecInstance implements SaverInstance {
     const ctx = this.ctx;
     const slot = this.pathSlot(sprite);
     if (slot.off) return false;
+    if (slot.sprite) return this.spriteBlit(sprite, slot, p, r, rot, color);
     const m = ctx.getTransform();
-    // 1:1 copies need an axis-aligned, uniform transform (dpr, layer translate/scale).
-    if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || Math.abs(m.a - m.d) > 1e-9 || !(m.a > 0)) return false;
+    // 1:1 copies need an axis-aligned, uniform transform (dpr, layer translate/scale);
+    // anything else (a rotated or skewed layer) goes straight to the sprite cache.
+    if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || Math.abs(m.a - m.d) > 1e-9 || !(m.a > 0)) {
+      slot.sprite = true;
+      return this.spriteBlit(sprite, slot, p, r, rot, color);
+    }
     const k = m.a;
     const dx = k * p.x + m.e;
     const dy = k * p.y + m.f;
@@ -919,7 +928,9 @@ class SpecInstance implements SaverInstance {
       if (slot.entries.size >= PATH_BLIT_PER_SPRITE) {
         for (const old of slot.entries.values()) this.pathBlitPixels -= old.px;
         slot.entries.clear();
-        if (++slot.flushes > 1) { slot.off = true; return false; }
+        // The key keeps changing (moving, spinning, growing): exact copies cannot
+        // keep up, so this drawing switches to the moving-sprite cache.
+        if (++slot.flushes > 1) { slot.sprite = true; slot.flushes = 0; return this.spriteBlit(sprite, slot, p, r, rot, color); }
       }
       const c = Math.cos(rot);
       const sn = Math.sin(rot);
@@ -958,6 +969,65 @@ class SpecInstance implements SaverInstance {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(hit.canvas, ix + hit.x0, iy + hit.y0);
+    ctx.restore();
+    return true;
+  }
+
+  /**
+   * The moving-sprite cache: for a drawing whose exact key keeps changing. It
+   * is rasterised once per colour, UNROTATED, at a device radius rounded UP to
+   * the next 1/8-octave step (so it is only ever shrunk, never enlarged), then
+   * drawn every frame at its true sub-pixel position, rotation and size under
+   * the context's own transform, with smoothing. Not pixel-exact like the
+   * still cache (edges resample by well under a pixel), but a 7-part drifting
+   * balloon costs one image draw instead of seven fills and strokes.
+   */
+  private spriteBlit(sprite: PolygonSprite, slot: NonNullable<ReturnType<typeof this.pathBlits.get>>, p: { x: number; y: number }, r: number, rot: number, color: string): boolean {
+    const ctx = this.ctx;
+    const m = ctx.getTransform();
+    const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+    const s = r * k;
+    if (!(s >= 1)) return false;
+    const bucket = 2 ** (Math.ceil(Math.log2(s) * 8) / 8);
+    const key = `S|${color}|${bucket.toFixed(3)}`;
+    let hit = slot.entries.get(key);
+    if (!hit) {
+      if (slot.entries.size >= PATH_SPRITE_PER_SPRITE) {
+        for (const old of slot.entries.values()) this.pathBlitPixels -= old.px;
+        slot.entries.clear();
+        if (++slot.flushes > 2) { slot.off = true; return false; }
+      }
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, sw = 0;
+      const grow = (u: [number, number]): void => { if (u[0] < x0) x0 = u[0]; if (u[0] > x1) x1 = u[0]; if (u[1] < y0) y0 = u[1]; if (u[1] > y1) y1 = u[1]; };
+      for (const part of pathParts(sprite)) {
+        if (part.fill) for (const u of part.flat.points) grow(u);
+        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow(u); }
+      }
+      const pad = 2 + Math.ceil(sw * bucket);
+      const ox = Math.ceil(-x0 * bucket) + pad;
+      const oy = Math.ceil(-y0 * bucket) + pad;
+      const w = ox + Math.ceil(x1 * bucket) + pad;
+      const h = oy + Math.ceil(y1 * bucket) + pad;
+      if (!(w > 0 && h > 0) || !Number.isFinite(w + h)) return false;
+      if (w * h > PATH_SPRITE_MAX_PIXELS) { slot.off = true; return false; }
+      if (this.pathBlitPixels + w * h > PATH_BLIT_MAX_PIXELS) return false;
+      const made = this.makeCanvas(1);
+      if (!made) return false;
+      made.canvas.width = w;
+      made.canvas.height = h;
+      made.ctx.setTransform(1, 0, 0, 1, ox, oy);
+      this.drawPathUnit(made.ctx, sprite, color, bucket);
+      // x0/y0 hold the bitmap's origin offset (px from the drawing's centre) at `bucket` scale.
+      hit = { canvas: made.canvas, x0: ox, y0: oy, px: w * h };
+      this.pathBlitPixels += hit.px;
+      slot.entries.set(key, hit);
+    }
+    const u = r / bucket; // user units per bitmap pixel
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    if (rot) ctx.rotate(rot);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(hit.canvas, -hit.x0 * u, -hit.y0 * u, hit.canvas.width * u, hit.canvas.height * u);
     ctx.restore();
     return true;
   }
