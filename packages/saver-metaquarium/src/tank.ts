@@ -1948,17 +1948,6 @@ class TankInstance implements SaverInstance {
    * Eye (below that): at the fish, looking where it goes; the fish is hidden.
    * Kept above the floor and any scenery, and inside the room.
    */
-  /** The sightline's height field: rebuilt when the world is (its key), not per frame. */
-  private sightHeight(): (x: number, z: number) => number {
-    const key = `${this.sceneryKey}|${this.str('environment')}|${this.str('floorKind')}`;
-    if (this.sightCanopy?.key !== key) {
-      const ground = this.floorHeightAt ?? (() => 0);
-      this.sightCanopy = { key, canopy: buildCanopy(ground, this.scenery?.canopyTips ?? [], 260, 96) };
-    }
-    const canopy = this.sightCanopy.canopy;
-    return (x, z) => canopy.at(x, z);
-  }
-
   private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH): void {
     if (slot < 0 || !this.followSeen) { this.followState = null; return; }
     const at = this.followAt, head = this.followHead, cam = this.camera.position;
@@ -2030,6 +2019,17 @@ class TankInstance implements SaverInstance {
       if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
       else raw(scene, camera);
     };
+  }
+
+  /** The sightline's height field: rebuilt when the world is (its key), not per frame. */
+  private sightHeight(): (x: number, z: number) => number {
+    const key = `${this.sceneryKey}|${this.str('environment')}|${this.str('floorKind')}`;
+    if (this.sightCanopy?.key !== key) {
+      const ground = this.floorHeightAt ?? (() => 0);
+      this.sightCanopy = { key, canopy: buildCanopy(ground, this.scenery?.canopyTips ?? [], 260, 96) };
+    }
+    const canopy = this.sightCanopy.canopy;
+    return (x, z) => canopy.at(x, z);
   }
 
   private installPools(): void {
