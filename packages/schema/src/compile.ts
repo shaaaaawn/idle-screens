@@ -28,7 +28,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isPathPolygon, isShapedSprite, pathDrawCost, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -304,6 +304,8 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
   }
   return true;
 }
+
+type PathFrameT = { sx: number; sy: number; ox: number; oy: number; uniform: boolean };
 
 /** Path polygons with at least this many outline points draw from a render-once bitmap. */
 const PATH_BLIT_MIN_POINTS = 128;
@@ -851,11 +853,13 @@ class SpecInstance implements SaverInstance {
    * falloff, or flat colour; each stroke traces the part's subpaths as drawn,
    * width in unit-box units. Outlines are Path2Ds built once per sprite.
    */
-  private drawPathUnit(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, sprite: PolygonSprite, color: string, r: number): void {
+  private drawPathUnit(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, sprite: PolygonSprite, color: string, fr: PathFrameT, r: number): void {
     const slot = this.pathSlot(sprite);
     const parts = pathParts(sprite);
     if (!slot.parts2d) slot.parts2d = parts.map(() => ({}));
-    g.scale(r, r);
+    // The frame: origin to the entity position, then per-axis scale (span).
+    if (fr.ox || fr.oy) g.translate(-fr.ox * fr.sx, -fr.oy * fr.sy);
+    g.scale(fr.sx, fr.sy);
     const a0 = g.globalAlpha;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!;
@@ -886,12 +890,25 @@ class SpecInstance implements SaverInstance {
       if (st && part.flat.lines.length) {
         g.globalAlpha = a0 * part.opacity * (st.opacity ?? 1);
         g.strokeStyle = st.color;
-        g.lineWidth = st.width;
         g.lineJoin = st.join ?? 'round';
         g.lineCap = st.cap ?? 'round';
-        if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
-        if (cache.stroke) g.stroke(cache.stroke);
-        else { traceLines(g, part.flat.lines); g.stroke(); }
+        if (fr.uniform) {
+          // Width is in unit-box units of the uniform scale r.
+          g.lineWidth = (st.width * r) / fr.sx;
+          if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
+          if (cache.stroke) g.stroke(cache.stroke);
+          else { traceLines(g, part.flat.lines); g.stroke(); }
+        } else {
+          // A stretched drawing: stroke the stretched outline in unscaled space,
+          // so the line keeps one width instead of fattening along the long axis.
+          const scaled = part.flat.lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
+          g.save();
+          g.scale(1 / fr.sx, 1 / fr.sy);
+          g.lineWidth = st.width * r;
+          traceLines(g, scaled);
+          g.stroke();
+          g.restore();
+        }
       }
     }
     g.globalAlpha = a0;
@@ -903,17 +920,17 @@ class SpecInstance implements SaverInstance {
    * memory cap, a drawing too sparse for its area, or one that keeps
    * changing — and the caller draws it directly.
    */
-  private blitPath(sprite: PolygonSprite, p: { x: number; y: number }, r: number, rot: number, color: string): boolean {
+  private blitPath(sprite: PolygonSprite, p: { x: number; y: number }, r: number, rot: number, color: string, fr: PathFrameT): boolean {
     const ctx = this.ctx;
     const slot = this.pathSlot(sprite);
     if (slot.off) return false;
-    if (slot.sprite) return this.spriteBlit(sprite, slot, p, r, rot, color);
+    if (slot.sprite) return this.spriteBlit(sprite, slot, p, r, rot, color, fr);
     const m = ctx.getTransform();
     // 1:1 copies need an axis-aligned, uniform transform (dpr, layer translate/scale);
     // anything else (a rotated or skewed layer) goes straight to the sprite cache.
     if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || Math.abs(m.a - m.d) > 1e-9 || !(m.a > 0)) {
       slot.sprite = true;
-      return this.spriteBlit(sprite, slot, p, r, rot, color);
+      return this.spriteBlit(sprite, slot, p, r, rot, color, fr);
     }
     const k = m.a;
     const dx = k * p.x + m.e;
@@ -922,7 +939,7 @@ class SpecInstance implements SaverInstance {
     const iy = Math.floor(dy);
     const fx = Math.round((dx - ix) * 8) / 8;
     const fy = Math.round((dy - iy) * 8) / 8;
-    const key = `${color}|${(r * k).toFixed(3)}|${rot.toFixed(5)}|${fx}|${fy}`;
+    const key = `${color}|${(r * k).toFixed(3)}|${(fr.sx * k).toFixed(3)}|${(fr.sy * k).toFixed(3)}|${fr.ox},${fr.oy}|${rot.toFixed(5)}|${fx}|${fy}`;
     let hit = slot.entries.get(key);
     if (!hit) {
       if (slot.entries.size >= PATH_BLIT_PER_SPRITE) {
@@ -930,15 +947,16 @@ class SpecInstance implements SaverInstance {
         slot.entries.clear();
         // The key keeps changing (moving, spinning, growing): exact copies cannot
         // keep up, so this drawing switches to the moving-sprite cache.
-        if (++slot.flushes > 1) { slot.sprite = true; slot.flushes = 0; return this.spriteBlit(sprite, slot, p, r, rot, color); }
+        if (++slot.flushes > 1) { slot.sprite = true; slot.flushes = 0; return this.spriteBlit(sprite, slot, p, r, rot, color, fr); }
       }
       const c = Math.cos(rot);
       const sn = Math.sin(rot);
       const s = r * k;
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       const grow = (u: [number, number]): void => {
-        const x = (u[0] * c - u[1] * sn) * s;
-        const y = (u[0] * sn + u[1] * c) * s;
+        const ux = (u[0] - fr.ox) * fr.sx * k, uy = (u[1] - fr.oy) * fr.sy * k;
+        const x = ux * c - uy * sn;
+        const y = ux * sn + uy * c;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
       };
       let sw = 0;
@@ -961,7 +979,7 @@ class SpecInstance implements SaverInstance {
       const g = made.ctx;
       g.setTransform(k, 0, 0, k, fx - bx, fy - by);
       if (rot) g.rotate(rot);
-      this.drawPathUnit(g, sprite, color, r);
+      this.drawPathUnit(g, sprite, color, fr, r);
       hit = { canvas: made.canvas, x0: bx, y0: by, px: w * h };
       this.pathBlitPixels += hit.px;
       slot.entries.set(key, hit);
@@ -982,8 +1000,10 @@ class SpecInstance implements SaverInstance {
    * still cache (edges resample by well under a pixel), but a 7-part drifting
    * balloon costs one image draw instead of seven fills and strokes.
    */
-  private spriteBlit(sprite: PolygonSprite, slot: NonNullable<ReturnType<typeof this.pathBlits.get>>, p: { x: number; y: number }, r: number, rot: number, color: string): boolean {
+  private spriteBlit(sprite: PolygonSprite, slot: NonNullable<ReturnType<typeof this.pathBlits.get>>, p: { x: number; y: number }, r: number, rot: number, color: string, fr: PathFrameT): boolean {
     const ctx = this.ctx;
+    // Sprites are for uniform, box-sized drawings (particles); a stretched one draws directly.
+    if (!fr.uniform || fr.sx !== r) return false;
     const m = ctx.getTransform();
     const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
     const s = r * k;
@@ -1000,8 +1020,8 @@ class SpecInstance implements SaverInstance {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, sw = 0;
       const grow = (u: [number, number]): void => { if (u[0] < x0) x0 = u[0]; if (u[0] > x1) x1 = u[0]; if (u[1] < y0) y0 = u[1]; if (u[1] > y1) y1 = u[1]; };
       for (const part of pathParts(sprite)) {
-        if (part.fill) for (const u of part.flat.points) grow(u);
-        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow(u); }
+        if (part.fill) for (const u of part.flat.points) grow([u[0] - fr.ox, u[1] - fr.oy]);
+        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow([u[0] - fr.ox, u[1] - fr.oy]); }
       }
       const pad = 2 + Math.ceil(sw * bucket);
       const ox = Math.ceil(-x0 * bucket) + pad;
@@ -1016,7 +1036,7 @@ class SpecInstance implements SaverInstance {
       made.canvas.width = w;
       made.canvas.height = h;
       made.ctx.setTransform(1, 0, 0, 1, ox, oy);
-      this.drawPathUnit(made.ctx, sprite, color, bucket);
+      this.drawPathUnit(made.ctx, sprite, color, { sx: bucket, sy: bucket, ox: fr.ox, oy: fr.oy, uniform: true }, bucket);
       // x0/y0 hold the bitmap's origin offset (px from the drawing's centre) at `bucket` scale.
       hit = { canvas: made.canvas, x0: ox, y0: oy, px: w * h };
       this.pathBlitPixels += hit.px;
@@ -1277,11 +1297,12 @@ class SpecInstance implements SaverInstance {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
       if (isPathPolygon(sprite)) {
-        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor)) return;
+        const fr = pathFrame(sprite, r, this.w, this.h);
+        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor, fr)) return;
         ctx.save();
         ctx.translate(p.x, p.y);
         if (rot) ctx.rotate(rot);
-        if (r > 0) this.drawPathUnit(ctx, sprite, resolvedColor, r);
+        if (r > 0 && fr.sx > 0 && fr.sy > 0) this.drawPathUnit(ctx, sprite, resolvedColor, fr, r);
         ctx.restore();
         return;
       }
@@ -1783,7 +1804,9 @@ class SpecInstance implements SaverInstance {
       const parentE = this.parentEntityFor(built);
       for (const e of built.entities) {
         const p = this.entityPos(e, t, parentE);
-        const ext = (sizeAt(e, t) / 2) * reach;
+        const sp = built.layer.sprite as PolygonSprite;
+        const fr = pathFrame(sp, sizeAt(e, t) / 2, this.w, this.h);
+        const ext = Math.max(fr.sx, fr.sy) * (reach + Math.hypot(fr.ox, fr.oy));
         x0 = Math.min(x0, p.x - ext); x1 = Math.max(x1, p.x + ext);
         y0 = Math.min(y0, p.y - ext); y1 = Math.max(y1, p.y + ext);
       }

@@ -31,7 +31,7 @@ const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'col
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
 const KNOWN_PATH_PART = new Set(['path', 'color', 'fillRule', 'fill', 'gradient', 'stroke', 'opacity']);
-const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'parts', 'soft', 'colors', 'colorWeights']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'parts', 'span', 'origin', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
@@ -966,6 +966,11 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     } else {
       for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path (or parts)`);
       if (sprite.fillRule !== undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
+    }
+    if (sprite.span !== undefined || sprite.origin !== undefined) {
+      if (sprite.path === undefined && sprite.parts === undefined) err(`${path}.span`, 'span and origin apply only to a polygon with a path (or parts)');
+      if (sprite.span !== undefined && !['box', 'width', 'height', 'screen'].includes(sprite.span as string)) err(`${path}.span`, "must be 'box' | 'width' | 'height' | 'screen'");
+      if (sprite.origin !== undefined && !(Array.isArray(sprite.origin) && sprite.origin.length === 2 && sprite.origin.every((v: unknown) => isNum(v) && Math.abs(v) <= 1))) err(`${path}.origin`, 'must be [x, y] in the unit box (-1..1): the point placed at the position');
     }
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);

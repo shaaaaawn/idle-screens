@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, gradientSpace, pathParts, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, gradientSpace, pathFrame, pathParts, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
 import { spriteLuma } from './luma';
+import { luminanceGrid } from './perceive';
 import { validateSpec } from './validate';
 
 const spec = (path: string) => ({
@@ -204,6 +205,36 @@ describe('polygon.path', () => {
       const layer = { count: 1, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#000000', parts: [{ path: sq(-0.5, 0, 0.4), color: '#ffffff' }, { path: sq(0.5, 0, 0.2) }] }, motion: { type: 'static' } };
       // white area 0.64 vs black 0.16 -> 0.8
       expect(spriteLuma(layer as never, { colorIndex: 0 } as never)).toBeCloseTo(0.8, 2);
+    });
+  });
+
+  describe('span and origin (screen-edge anchoring)', () => {
+    const rectPath = 'M -1 -1 L 1 -1 L 1 1 L -1 1 Z';
+    const band = (sprite: Record<string, unknown>, position: { x: number; y: number }) => ({
+      schemaVersion: 1, id: 'a', label: 'a', background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 1, position, sprite: { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', path: rectPath, ...sprite }, motion: { type: 'static' } }],
+    });
+    it('frames: box is uniform r; width/height/screen span the viewport; origin is the anchored point', () => {
+      const s = { kind: 'polygon' as const, radius: [1, 1] as [number, number], color: '#fff', path: rectPath };
+      expect(pathFrame(s, 50, 1920, 1080)).toEqual({ sx: 50, sy: 50, ox: 0, oy: 0, uniform: true });
+      expect(pathFrame({ ...s, span: 'width', origin: [0, 1] }, 50, 1920, 1080)).toEqual({ sx: 960, sy: 50, ox: 0, oy: 1, uniform: false });
+      expect(pathFrame({ ...s, span: 'screen' }, 50, 1920, 1080)).toMatchObject({ sx: 960, sy: 540 });
+    });
+    it('validates span and origin', () => {
+      expect(validateSpec(band({ span: 'width', origin: [0, 1] }, { x: 0.5, y: 1 })).valid).toBe(true);
+      expect(validateSpec(band({ span: 'wide' }, { x: 0.5, y: 0.5 })).valid).toBe(false);
+      expect(validateSpec(band({ origin: [0, 2] }, { x: 0.5, y: 0.5 })).valid).toBe(false);
+    });
+    it("span 'screen' covers the whole frame on any aspect; 'width' + origin [0,1] sits on the bottom edge", () => {
+      for (const [width, height] of [[1920, 1080], [1080, 1920]]) {
+        const full = luminanceGrid(band({ span: 'screen' }, { x: 0.5, y: 0.5 }) as never, { viewport: { width, height } });
+        expect(full.coverage).toBeGreaterThan(0.97);
+        const g = luminanceGrid(band({ span: 'width', origin: [0, 1] }, { x: 0.5, y: 1 }) as never, { viewport: { width, height } });
+        const row = (r: number) => g.cells.slice(r * g.cols, (r + 1) * g.cols);
+        const last = row(g.rows - 1), top = row(0);
+        expect(Math.min(...last)).toBeGreaterThan(0.9); // the bottom row is lit edge to edge
+        expect(Math.max(...top)).toBeLessThan(0.05); // nothing at the top
+      }
     });
   });
 });

@@ -385,6 +385,27 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
   return parts;
 }
 
+/**
+ * How a path drawing's −1..1 unit box lands on screen, in px: scale per axis
+ * (sx, sy) and the unit-box point (ox, oy) that sits at the entity position.
+ *   span 'box' (default): uniform, the entity radius r on both axes — the
+ *     classic square box sized by the short side;
+ *   'width': x spans the full screen width (sx = w/2), y keeps r — skylines,
+ *     hills and ground bands that must reach both side edges on any aspect;
+ *   'height': y spans the full height, x keeps r;
+ *   'screen': both — a frame or wash that hugs every edge.
+ * `origin` [ox, oy] picks the anchored point: [0, 1] with position y = 1 sets
+ * the drawing's bottom on the screen's bottom edge. Strokes keep the uniform
+ * r for their width, so stretching never fattens an outline sideways.
+ */
+export function pathFrame(s: PolygonSprite, r: number, w: number, h: number): { sx: number; sy: number; ox: number; oy: number; uniform: boolean } {
+  const span = s.span ?? 'box';
+  const sx = span === 'width' || span === 'screen' ? w / 2 : r;
+  const sy = span === 'height' || span === 'screen' ? h / 2 : r;
+  const [ox, oy] = s.origin ?? [0, 0];
+  return { sx, sy, ox, oy, uniform: sx === sy };
+}
+
 /** A unit-box point in a gradient's own space: the drawing box, or (units 'part') the part's box mapped to −1..1. */
 export function gradientSpace(part: ResolvedPart, u: number, v: number): [number, number] {
   if (part.gradient?.units !== 'part') return [u, v];

@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, gradientSpace, isPathPolygon, isShapedSprite, partStrokeQuads, pathLength, pathParts, pathStrokeQuads, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -548,7 +548,16 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const rot = rotationAt(e, tPass);
     const cr = Math.cos(rot);
     const sr = Math.sin(rot);
-    const pts = polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
+    // A path drawing lands through its frame (span stretches, origin anchors);
+    // everything below maps unit-box points with `mapUnit` and back with `unitAt`.
+    const fr = isPathPolygon(s) ? pathFrame(s, radius, w, h) : { sx: radius, sy: radius, ox: 0, oy: 0, uniform: true };
+    const mapUnit = (u: number, v: number): { x: number; y: number } => {
+      const qx = (u - fr.ox) * fr.sx, qy = (v - fr.oy) * fr.sy;
+      return { x: p.x + qx * cr - qy * sr, y: p.y + qx * sr + qy * cr };
+    };
+    const pts = isPathPolygon(s)
+      ? flattenSprite(s).points.map(([u, v]) => mapUnit(u, v))
+      : polygonPoints(s, radius).map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -557,11 +566,27 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
       minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
     }
+    // A part's stroke as px quads along its mapped lines, half-width from the uniform radius.
+    const strokeQuadsPx = (part: ResolvedPart): Array<Array<{ x: number; y: number }>> => {
+      if (!part.stroke) return [];
+      const hw = (part.stroke.width * radius) / 2;
+      const out: Array<Array<{ x: number; y: number }>> = [];
+      for (const l of part.flat.lines) {
+        const m = l.points.map(([u, v]) => mapUnit(u, v));
+        const n = l.closed ? m.length : m.length - 1;
+        for (let i = 0; i < n; i++) {
+          const A = m[i]!, B = m[(i + 1) % m.length]!;
+          const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+          const nx = (-dy / len) * hw, ny = (dx / len) * hw;
+          out.push([{ x: A.x + nx, y: A.y + ny }, { x: B.x + nx, y: B.y + ny }, { x: B.x - nx, y: B.y - ny }, { x: A.x - nx, y: A.y - ny }]);
+        }
+      }
+      return out;
+    };
     if (isPathPolygon(s)) {
       // Strokes reach past the fill (and are all there is with fill: false).
-      for (const quad of pathStrokeQuads(s, radius)) for (const q of quad) {
-        const x = p.x + q.x * cr - q.y * sr, y = p.y + q.x * sr + q.y * cr;
-        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      for (const part of pathParts(s)) for (const quad of strokeQuadsPx(part)) for (const q of quad) {
+        minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
       }
     }
     const c0 = Math.max(0, Math.floor(minX / cellW));
@@ -570,10 +595,9 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const r1 = Math.min(rows - 1, Math.floor(maxY / cellH));
     if (c0 > c1 || r0 > r1) return;
     const nc = c1 - c0 + 1;
-    const toPx = (q: { x: number; y: number }): { x: number; y: number } => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr });
     const unitAt = (x: number, y: number): [number, number] => {
-      const dx = x - p.x, dy = y - p.y, rr = Math.max(radius, 1e-6);
-      return [(dx * cr + dy * sr) / rr, (-dx * sr + dy * cr) / rr];
+      const dx = x - p.x, dy = y - p.y;
+      return [(dx * cr + dy * sr) / Math.max(fr.sx, 1e-6) + fr.ox, (-dx * sr + dy * cr) / Math.max(fr.sy, 1e-6) + fr.oy];
     };
     // Plain polygons (sides/points) keep the single-fill path below; path
     // polygons composite part by part, back to front, as the canvas paints them.
@@ -605,14 +629,13 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     for (const part of parts) {
       const partLum = part.color ? hexLuma(part.color) : lum;
       if (part.fill && part.flat.points.length >= 3) {
-        fillPass(part.flat.points.map(([x, y]) => toPx({ x: x * radius, y: y * radius })), part.rule === 'evenodd', partLum, part.opacity, part);
+        fillPass(part.flat.points.map(([u, v]) => mapUnit(u, v)), part.rule === 'evenodd', partLum, part.opacity, part);
       }
       if (part.stroke) {
         const sa = (part.stroke.opacity ?? 1) * part.opacity;
         const sl = hexLuma(part.stroke.color);
         const scov = new Float64Array(nc * (r1 - r0 + 1));
-        for (const quad of partStrokeQuads(part, radius)) {
-          const qp = quad.map(toPx);
+        for (const qp of strokeQuadsPx(part)) {
           let qx0 = Infinity, qx1 = -Infinity, qy0 = Infinity, qy1 = -Infinity;
           for (const q of qp) { qx0 = Math.min(qx0, q.x); qx1 = Math.max(qx1, q.x); qy0 = Math.min(qy0, q.y); qy1 = Math.max(qy1, q.y); }
           const a0 = Math.max(c0, Math.floor(qx0 / cellW)), a1 = Math.min(c1, Math.floor(qx1 / cellW));
@@ -650,7 +673,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       const sz = layer.transform || layer.group !== undefined ? sizeAt(e, tPass) * paintSize(spec, layer) : sizeAt(e, tPass);
       const s = layer.sprite;
 
-      if (s.kind === 'polygon' && sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH)) {
+      if (s.kind === 'polygon' && (sz >= POLYGON_OUTLINE_CELLS * Math.min(cellW, cellH) || (isPathPolygon(s) && ((s.span ?? 'box') !== 'box' || s.origin !== undefined)))) {
         splatPolygonOutline(layer, s, e, p, sz, a, lum, tPass);
         continue;
       }
