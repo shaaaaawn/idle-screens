@@ -38,7 +38,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   shot: 'A named framing to cut to: `orbit` (default), `hero` (three-quarter establishing), `front` (level, long lens), `low` (among the plants looking up), `top` (steep, the floor as a map), `surface` (looking up at the water\'s underside), `macro` (close on the landmark nearest the front). Azimuth and autoRotate turn it; distance scales it.',
   cameraFollow: 'Ride with one fish (cast slot, 0 = first); -1 is the orbit camera. Orbit params are ignored while following. Pair with `followSpot` on the same slot for a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
-  followDistance: 'How far behind the followed fish the camera rides, along its own path (40–70 a chase). Under ~18 it is the fish\'s eye and the fish is hidden.',
+  followDistance: 'How far behind the followed fish the camera rides, along its own path (40–70 a chase). Under ~18 it is the fish\'s eye and the fish is hidden; a floor walker (Dot, crab, octopus, snail, starfish) sees from its own head height, pitched with the ground ahead.',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
