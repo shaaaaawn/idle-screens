@@ -78,7 +78,12 @@ final class PreviewBudgetTests: XCTestCase {
         budget.applyPressure(critical: true)
         XCTAssertFalse(budget.permits(slot: slot))
 
-        try await Task.sleep(for: .milliseconds(250))
+        // The 50ms recovery timer is wall-clock; poll with a generous deadline so
+        // a loaded CI runner can't turn scheduling latency into a failure.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !budget.permits(slot: slot), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
         XCTAssertTrue(budget.permits(slot: slot),
                       "pressure is transient; a permanently frozen gallery is not")
         XCTAssertNil(budget.throttleReason)
