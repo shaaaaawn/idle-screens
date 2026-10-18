@@ -103,6 +103,7 @@ import { babyFrame, HICCUP_JOLT, rigBaby, type BabyLeader, type BabyRig } from '
 import { BurpLayer } from './burps';
 import { rigScreen, setScreen, type ScreenRig } from './screen';
 import { chordPose, chordTurn, dodgeClimb, dodgeTurn } from './heading';
+import { walkerEyeRest, walkerPov, type WalkerPov } from './pov';
 import { rigSeahorse, seahorseFrame, type SeahorseRig } from './seahorse';
 import { BETA_DANCES, BETA_LOOK_STYLE, betaFrame, rigBeta, type BetaDance, type BetaRig } from './beta';
 import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
@@ -633,6 +634,26 @@ const TEMPLATE_CACHE = new Map<string, Promise<FishTemplate | null>>();
 // where multi-URL sessions become normal.
 
 /**
+ * A floor walker's eye at rest, in model units above its feet (`anchorY`), for
+ * the first-person camera (pov.ts). What it sees with, by what the rig names:
+ * Dot's screen face, else the EYES meshes (octopus, snail, starfish), else the
+ * eye bones (the crab's stalks; GLTFLoader drops the dot from `eye.L`). The
+ * body must still be at identity.
+ */
+function walkerEye(body: Object3D, anchorY: number): number {
+  body.updateMatrixWorld(true);
+  const all = new Box3().setFromObject(body), part = new Box3(), at = new Vector3();
+  const screens: number[] = [], whites: number[] = [], bones: number[] = [];
+  body.traverse((o) => {
+    if (/SCREEN/.test(o.name) && !part.setFromObject(o).isEmpty()) screens.push(part.getCenter(at).y);
+    else if (/EYES-White/i.test(o.name) && !part.setFromObject(o).isEmpty()) whites.push(part.getCenter(at).y);
+    else if ((o as { isBone?: boolean }).isBone && /^eye\.?[LR]$/.test(o.name)) bones.push(o.getWorldPosition(at).y);
+  });
+  const eyes = screens.length ? screens : whites.length ? whites : bones;
+  return walkerEyeRest({ minY: all.min.y, maxY: all.max.y, anchorY, eyes });
+}
+
+/**
  * Dispose only GPU resources this tank created — coat/glow materials
  * (tagged `mqOwned` by applyNpcMaterials), tank-built geometry (floor,
  * fallback fish), and each clone's Skeleton boneTexture. Template-shared
@@ -689,6 +710,8 @@ interface Fish {
   mixer: AnimationMixer | null;
   clipDuration: number;
   tail: Object3D | null;
+  /** A floor walker's eye above its feet, in group units at scale 1 (pov.ts); 0 for a swimmer. */
+  eye: number;
   /** Materials this fish owns for crystal tinting, with their untinted
    *  colours. Created on the first tinted frame — never, by default. */
   /** What this fish's GLOW parts add up to; null when nothing on it glows. */
@@ -892,6 +915,8 @@ class TankInstance implements SaverInstance {
   private readonly followAt = new Vector3();
   private readonly followHead = new Vector3(0, 0, 1);
   private readonly followTrail = new Vector3();
+  /** The walker eye's pose, reused frame to frame (pov.ts). */
+  private readonly povScratch: WalkerPov = { y: 0, tx: 0, ty: 0, tz: 0, pitch: 0 };
   private followSeen = false;
   private followHasTrail = false;
   private followState: { slot: number; x: number; y: number; z: number } | null = null;
@@ -1943,14 +1968,16 @@ class TankInstance implements SaverInstance {
    * Chase (`followDistance` ≥ a body length): `followDistance` behind it along
    * the way it has been swimming, lifted a little, looking just past it.
    * Eye (below that): at the fish, looking where it goes; the fish is hidden.
+   * A floor walker's eye is its own (`eye`, its height over its feet, pov.ts):
+   * it looks along its heading at that height, pitched with the seabed ahead.
    * Kept above the floor and any scenery, and inside the room.
    */
-  private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH): void {
+  private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH, eye = 0): void {
     if (slot < 0 || !this.followSeen) { this.followState = null; return; }
     const at = this.followAt, head = this.followHead, cam = this.camera.position;
     const lift = pov ? 1.5 : len * 0.35 + back * 0.18;
     if (pov) {
-      cam.set(at.x, at.y + lift, at.z);
+      cam.set(at.x, at.y + (eye > 0 ? eye : lift), at.z);
     } else {
       // Behind it along the direction it has been swimming over its last
       // couple of lengths — the chord to where it was a moment ago. Smoother
@@ -1986,8 +2013,13 @@ class TankInstance implements SaverInstance {
     // Turned round to face it, the camera looks at the fish itself, not past it.
     // The look-ahead fades out with the angle (full at 0, none from 90 on), so
     // a followAngle that is being eased never snaps the aim.
-    const ahead = pov ? 60 : len * 0.5 * Math.max(0, Math.cos((this.num('followAngle') * Math.PI) / 180));
-    this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
+    if (pov && eye > 0) {
+      const v = walkerPov(at.x, at.z, head.x, head.z, at.y, eye, this.terrainAt, this.povScratch, cam.y);
+      this.camera.lookAt(v.tx, v.ty, v.tz);
+    } else {
+      const ahead = pov ? 60 : len * 0.5 * Math.max(0, Math.cos((this.num('followAngle') * Math.PI) / 180));
+      this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
+    }
     this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
   }
 
@@ -2398,6 +2430,7 @@ class TankInstance implements SaverInstance {
     let octoSkin: OctopusSkin | null = null;
     let snail: SnailRig | null = null;
     let screen: ScreenRig | null = null;
+    let eye = 0;
 
     if (tpl) {
       const body = cloneSkinned(tpl.scene);
@@ -2421,6 +2454,9 @@ class TankInstance implements SaverInstance {
       if (rigged === 'blowfish') puffer = rigPuffer(body, tpl.clips);
       if (rigged === 'octopus') octopus = rigOctopus(body, tpl.clips, tpl.norm, index);
       if (rigged === 'snail') snail = rigSnail(body, tpl.clips, tpl.norm);
+      // Where a walker sees from, measured at rest while the body is still at identity (pov.ts).
+      const standing = crab ?? starfish ?? octopus ?? snail ?? dot;
+      if (standing) eye = walkerEye(body, standing.anchor.y) * tpl.norm;
       if (octopus && !this.ink) {
         this.ink = new InkLayer(this.scene);
         if (this.waterInstalled) patchWater(this.ink.mesh.material as Material, this.str('dither') === 'on');
@@ -2502,6 +2538,7 @@ class TankInstance implements SaverInstance {
       mixer,
       clipDuration,
       tail,
+      eye,
       glow: fishGlow,
       rig: crab || starfish || angler || angel || turtle || seahorse || beta || hacker || shark || baby || tang || puffer || octopus || snail || dot || dolphin
         ? { ...(crab ? { crab } : {}), ...(starfish ? { starfish } : {}), ...(angler ? { angler } : {}), ...(angel ? { angel } : {}), ...(turtle ? { turtle } : {}), ...(seahorse ? { seahorse } : {}), ...(beta ? { beta } : {}), ...(hacker ? { hacker, screen } : {}), ...(shark ? { shark } : {}), ...(baby ? { baby } : {}), ...(tang ? { tang } : {}), ...(puffer ? { puffer } : {}), ...(octopus ? { octopus, ...(octoSkin ? { octoSkin } : {}) } : {}), ...(snail ? { snail } : {}), ...(dot ? { dot, screen } : {}), ...(dolphin ? { dolphin } : {}), lights: {} }
@@ -3780,7 +3817,10 @@ class TankInstance implements SaverInstance {
       }
       this.scenery.setFish(this.floraFish.slice(0, n));
     }
-    this.placeFollowCamera(followSlot, followBack, followPov, followLen);
+    // Riding in a floor walker: its own eye height, as big as it is drawn (pov.ts).
+    const followFish = followPov ? this.fish[followSlot] : undefined;
+    const followEye = followFish && followFish.eye > 0 ? followFish.eye * followFish.baseScale * this.fishSizeAt(followSlot) : 0;
+    this.placeFollowCamera(followSlot, followBack, followPov, followLen, followEye);
     this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
     this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
     this.ink?.update(tSec);
