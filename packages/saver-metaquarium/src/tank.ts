@@ -70,6 +70,7 @@ import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
 import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
+import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
@@ -1063,6 +1064,8 @@ class TankInstance implements SaverInstance {
   private shoalTau = 0;
   /** What the school keeps above: ground, rocks, crystals and the plants' swept tips (canopy.ts). */
   private shoalCanopy: Canopy | null = null;
+  /** What the follow camera's sightline tests against (`followAvoid`): the ground, the scenery and the plants, built once per world. */
+  private sightCanopy: { key: string; canopy: Canopy } | null = null;
   /** The canopy along the school's route (max over the next six lengths), sampled round the loop. */
   private shoalLift: Float64Array | null = null;
   private shoalSpeedTracked = false;
@@ -2002,6 +2005,13 @@ class TankInstance implements SaverInstance {
         [dx, dz] = [(bx * c - bz * s) / bl, (bx * s + bz * c) / bl];
       }
       cam.set(at.x - dx * back, at.y + lift, at.z - dz * back);
+      // Something in the way: rise over it or pull in toward the fish (sightline.ts).
+      const avoid = this.num('followAvoid');
+      if (avoid > 0) {
+        const c = clearSightline({ target: { x: at.x, y: at.y + len * 0.35, z: at.z }, camera: cam, height: this.sightHeight(),
+          minBack: len * 0.9 + 6, amount: avoid, ceiling: this.ceiling ? this.ceiling.position.y : null });
+        cam.set(c.x, c.y, c.z);
+      }
     }
     // Inside the room, above the ground and whatever stands on it.
     const r = Math.hypot(cam.x, cam.z), rMax = BOUNDS.radius * 2.2;
@@ -2041,6 +2051,17 @@ class TankInstance implements SaverInstance {
       if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
       else raw(scene, camera);
     };
+  }
+
+  /** The sightline's height field: rebuilt when the world is (its key), not per frame. */
+  private sightHeight(): (x: number, z: number) => number {
+    const key = `${this.sceneryKey}|${this.str('environment')}|${this.str('floorKind')}`;
+    if (this.sightCanopy?.key !== key) {
+      const ground = this.floorHeightAt ?? (() => 0);
+      this.sightCanopy = { key, canopy: buildCanopy(ground, this.scenery?.canopyTips ?? [], 260, 96) };
+    }
+    const canopy = this.sightCanopy.canopy;
+    return (x, z) => canopy.at(x, z);
   }
 
   private installPools(): void {

@@ -40,6 +40,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
   followDistance: 'How far behind the followed fish the camera rides, along its own path (40–70 a chase). Under ~18 it is the fish\'s eye and the fish is hidden; a floor walker (Dot, crab, octopus, snail, starfish) sees from its own head height, pitched with the ground ahead.',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
+  followAvoid: 'Keep the followed fish in view, 0–1 (default 0): with something in the way (a home, a wall, a lamp, a kelp stand) the chase camera rises a little over low clutter and otherwise pulls in toward the fish — eased, like a game camera\'s spring arm. Use it for long walking takes through a village. No effect in the fish\'s own eye (followDistance under about 16).',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
@@ -441,7 +442,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
   // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
   if (follow < 0) {
-    for (const k of ['followDistance', 'followAngle']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
+    for (const k of ['followDistance', 'followAngle', 'followAvoid']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
   } else if (follow < cast) {
     for (const k of ORBIT_PARAMS) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: `ignored while cameraFollow rides with slot ${follow} — they return when it is -1` });
   }
