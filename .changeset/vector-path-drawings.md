@@ -1,5 +1,0 @@
----
-'@idle-screens/schema': minor
----
-
-Vector drawings on `polygon`. A polygon can take `path` — an SVG path `d` string (curves and arcs) in the −1..1 unit box — or `parts`, a multi-colour drawing of up to 256 paths drawn back to front in one layer. Holes and overlaps resolve by containment (`fillRule: 'auto'`) or SVG's `nonzero` / `evenodd`; fills take a `gradient` (linear or radial, per-stop opacity, `units: 'part'` to shade each piece in its own box); outlines take a `stroke` (open paths too, with `fill: false` for line art); `span` and `origin` anchor a drawing to the screen's edges (`span: 'width', origin: [0, 1]` puts hills on the bottom edge at every aspect). Part colours, gradient stops and stroke widths steer and glide; two paths with the same commands morph point by point. The renderer draws a steady drawing once and reuses it (moving copies are resampled), so detail costs about what a flat fill does per frame. Perception (`luminanceGrid`, `perceiveScene`) reads drawings part by part, gradients cell by cell and strokes as ink. Budget: 4096 flattened points per path, 16384 per scene.
