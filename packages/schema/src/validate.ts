@@ -30,7 +30,8 @@ const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'color
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colors', 'colorWeights']);
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
-const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'soft', 'colors', 'colorWeights']);
+const KNOWN_PATH_PART = new Set(['path', 'color', 'fillRule', 'fill', 'gradient', 'stroke', 'opacity']);
+const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'parts', 'soft', 'colors', 'colorWeights']);
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
@@ -257,9 +258,14 @@ function validateSpecCore(spec: unknown): ValidationResult {
       let pathPoints = 0;
       for (const l of spec.layers as Array<Record<string, unknown>>) {
         const sp = isObj(l) ? (l.sprite as Record<string, unknown> | undefined) : undefined;
-        if (!sp || sp.kind !== 'polygon' || typeof sp.path !== 'string') continue;
+        if (!sp || sp.kind !== 'polygon') continue;
+        const pieces = Array.isArray(sp.parts) ? (sp.parts as unknown[]) : typeof sp.path === 'string' ? [sp] : [];
         const n = typeof l.count === 'number' && l.count > 0 ? l.count : 1;
-        pathPoints += (flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').points.length + (isObj(sp.stroke) ? flattenPath(sp.path, (sp.fillRule as PathFillRule | undefined) ?? 'auto').lines.reduce((m, l) => m + l.points.length, 0) : 0)) * n;
+        for (const pc of pieces) {
+          if (!isObj(pc) || typeof pc.path !== 'string') continue;
+          const fl = flattenPath(pc.path, (pc.fillRule as PathFillRule | undefined) ?? 'auto');
+          pathPoints += ((pc.fill === false ? 0 : fl.points.length) + (isObj(pc.stroke) ? fl.lines.reduce((m, x) => m + x.points.length, 0) : 0)) * n;
+        }
       }
       if (pathPoints > MAX_SCENE_PATH_POINTS) {
         err('layers', `path outlines total ${pathPoints} points (flattened points × count); the scene budget is ${MAX_SCENE_PATH_POINTS}`);
@@ -937,31 +943,29 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.sides`, `must be an integer ${LIMITS.minPolygonSides}..${LIMITS.maxPolygonSides}`);
     }
     if (sprite.points !== undefined) validateShapePoints(sprite.points, `${path}.points`, 3, err);
-    if (sprite.path !== undefined) {
-      if (sprite.points !== undefined || sprite.sides !== undefined) err(`${path}.path`, 'use path, points or sides, not more than one');
-      if (typeof sprite.path !== 'string' || sprite.path.length === 0 || sprite.path.length > 65536) {
-        err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
-      } else {
-        const flat = flattenPath(sprite.path, (sprite.fillRule as PathFillRule | undefined) ?? 'auto');
-        const filled = sprite.fill !== false;
-        if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);
-        else if (filled && flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art');
-        else if (!filled && flat.lines.length === 0) err(`${path}.path`, 'must draw at least one line (2+ points)');
-        else if (flat.points.length > MAX_PATH_POINTS) err(`${path}.path`, `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`);
-        else if (flat.points.some(([x, y]) => Math.abs(x) > 1.0001 || Math.abs(y) > 1.0001)) err(`${path}.path`, 'must stay inside the -1..1 unit box (curves included)');
+    if (sprite.parts !== undefined) {
+      // A multi-colour drawing: paint lives on each part, never on the sprite.
+      for (const k of ['path', 'points', 'sides', 'gradient', 'stroke', 'fill', 'fillRule'] as const) {
+        if (sprite[k] !== undefined) err(`${path}.${k}`, `with parts, put ${k} on each part (or drop parts)`);
       }
-    }
-    if (sprite.path === undefined) {
-      for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path`);
+      if (!Array.isArray(sprite.parts) || sprite.parts.length === 0 || sprite.parts.length > MAX_PATH_PARTS) {
+        err(`${path}.parts`, `must be 1..${MAX_PATH_PARTS} parts, each { path, color?, gradient?, stroke?, fill?, fillRule?, opacity? }`);
+      } else {
+        sprite.parts.forEach((part: unknown, i: number) => {
+          const pp = `${path}.parts[${i}]`;
+          if (!isObj(part)) return err(pp, 'must be { path, color?, gradient?, stroke?, fill?, fillRule?, opacity? }');
+          validatePathPiece(part, pp, err, warn);
+          if (part.color !== undefined) color(part.color, `${pp}.color`, err);
+          if (part.opacity !== undefined && (!isNum(part.opacity) || part.opacity < 0 || part.opacity > 1)) err(`${pp}.opacity`, 'must be 0..1');
+          for (const k of unknownKeys(part, KNOWN_PATH_PART)) warn(`${pp}.${k}`, 'unknown-property', `unknown part property '${k}' — will be ignored`);
+        });
+      }
+    } else if (sprite.path !== undefined) {
+      if (sprite.points !== undefined || sprite.sides !== undefined) err(`${path}.path`, 'use path, points or sides, not more than one');
+      validatePathPiece(sprite, path, err, warn);
     } else {
-      if (sprite.fill !== undefined && typeof sprite.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
-      if (sprite.fill === false && sprite.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
-      if (sprite.gradient !== undefined) validatePathGradient(sprite.gradient, `${path}.gradient`, err);
-      if (sprite.stroke !== undefined) validatePathStroke(sprite.stroke, `${path}.stroke`, err);
-    }
-    if (sprite.fillRule !== undefined) {
-      if (!['auto', 'nonzero', 'evenodd'].includes(sprite.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
-      else if (sprite.path === undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
+      for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path (or parts)`);
+      if (sprite.fillRule !== undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
     }
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     color(sprite.color, `${path}.color`, err);
@@ -1233,6 +1237,30 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
 
 const isPair = (v: unknown, lim = 2): boolean => Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && Math.abs(v[0]) <= lim && Math.abs(v[1]) <= lim;
 
+/** Most parts one multi-colour path drawing may have. */
+const MAX_PATH_PARTS = 256;
+
+/** A path piece — a path polygon itself, or one of its parts: the d string, fill, fill rule, gradient, stroke. */
+function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (typeof piece.path !== 'string' || piece.path.length === 0 || piece.path.length > 65536) {
+    err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
+  } else {
+    const flat = flattenPath(piece.path, (piece.fillRule as PathFillRule | undefined) ?? 'auto');
+    const filled = piece.fill !== false;
+    if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);
+    else if (filled && flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art');
+    else if (!filled && flat.lines.length === 0) err(`${path}.path`, 'must draw at least one line (2+ points)');
+    else if (flat.points.length > MAX_PATH_POINTS) err(`${path}.path`, `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`);
+    else if ([...flat.points, ...flat.lines.flatMap((l) => l.points)].some(([x, y]) => Math.abs(x) > 1.0001 || Math.abs(y) > 1.0001)) err(`${path}.path`, 'must stay inside the -1..1 unit box (curves included)');
+  }
+  if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
+  if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
+  if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err);
+  if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err);
+  if (piece.fillRule !== undefined && !['auto', 'nonzero', 'evenodd'].includes(piece.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
+  void warn;
+}
+
 /** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
 function validatePathGradient(g: unknown, path: string, err: (p: string, m: string) => void): void {
   if (!isObj(g)) return err(path, "must be { type: 'linear', from, to, stops } or { type: 'radial', center, radius, stops }");
@@ -1246,6 +1274,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
   } else {
     return err(`${path}.type`, "must be 'linear' | 'radial'");
   }
+  if (g.units !== undefined && g.units !== 'box' && g.units !== 'part') err(`${path}.units`, "must be 'box' (the drawing's unit box, default) | 'part' (the part's own box, -1..1)");
   if (!Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 8) return err(`${path}.stops`, 'must be 2..8 stops');
   let last = -Infinity;
   g.stops.forEach((st: unknown, i: number) => {

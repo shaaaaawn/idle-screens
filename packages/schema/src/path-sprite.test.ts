@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, gradientSpace, pathParts, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
 import { spriteLuma } from './luma';
 import { validateSpec } from './validate';
 
@@ -162,5 +162,48 @@ describe('polygon.path', () => {
     const black2white = layer({ gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] } });
     expect(spriteLuma(black2white as never, e)).toBeCloseTo(0.5, 2);
     expect(spriteLuma(layer({ fill: false, stroke: { color: '#ffffff', width: 0.05 } }) as never, e)).toBeCloseTo(1, 2);
+  });
+
+  describe('parts (multi-colour drawings)', () => {
+    const sq = (x: number, y: number, h: number) => `M ${x - h} ${y - h} L ${x + h} ${y - h} L ${x + h} ${y + h} L ${x - h} ${y + h} Z`;
+    const withParts = (parts: unknown[], extra: Record<string, unknown> = {}) => {
+      const x = spec('M0 -1 L1 1 L-1 1 Z');
+      const sp = x.layers[0]!.sprite as Record<string, unknown>;
+      delete sp.path;
+      Object.assign(sp, { parts }, extra);
+      return x;
+    };
+    it('resolves parts in order, each with its own colour (null = the entity colour) and box', () => {
+      const parts = pathParts({ kind: 'polygon', radius: [1, 1], color: '#fff', parts: [{ path: sq(-0.5, 0, 0.2) }, { path: sq(0.5, 0.5, 0.1), color: '#ff0000', opacity: 0.5 }] });
+      expect(parts.map((p) => p.color)).toEqual([null, '#ff0000']);
+      expect(parts[1]!.opacity).toBe(0.5);
+      expect(parts[1]!.box).toEqual({ cx: 0.5, cy: 0.5, hw: expect.closeTo(0.1, 6), hh: expect.closeTo(0.1, 6) });
+    });
+    it("maps a units: 'part' gradient into the part's own box", () => {
+      const [p] = pathParts({ kind: 'polygon', radius: [1, 1], color: '#fff', parts: [{ path: sq(0.5, 0.5, 0.1), gradient: { type: 'radial', center: [0, 0], radius: 1, units: 'part', stops: [{ at: 0, color: '#fff' }, { at: 1, color: '#000' }] } }] });
+      expect(gradientSpace(p!, 0.5, 0.5)).toEqual([0, 0]);
+      expect(gradientSpace(p!, 0.6, 0.4)[0]).toBeCloseTo(1, 6);
+    });
+    it('validates parts and keeps paint off the sprite', () => {
+      const stops = [{ at: 0, color: '#ffffff' }, { at: 1, color: '#000000' }];
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5), color: '#ff0000' }, { path: 'M -0.5 0 L 0.5 0', fill: false, stroke: { color: '#000000', width: 0.01 } }])).valid).toBe(true);
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5), gradient: { type: 'linear', from: [-1, 0], to: [1, 0], units: 'part', stops } }])).valid).toBe(true);
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5), gradient: { type: 'linear', from: [-1, 0], to: [1, 0], units: 'piece', stops } }])).valid).toBe(false);
+      expect(validateSpec(withParts([])).valid).toBe(false);
+      expect(validateSpec(withParts([{ color: '#ff0000' }])).valid).toBe(false); // no path
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5) }], { path: sq(0, 0, 0.5) })).valid).toBe(false); // path on sprite too
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5) }], { stroke: { color: '#000000', width: 0.01 } })).valid).toBe(false); // paint belongs on parts
+      expect(validateSpec(withParts([{ path: sq(0, 0, 0.5), opacity: 2 }])).valid).toBe(false);
+    });
+    it('budgets every part', () => {
+      const s = { kind: 'polygon' as const, radius: [1, 1] as [number, number], color: '#fff', parts: [{ path: sq(0, 0, 0.5) }, { path: sq(0, 0, 0.2), stroke: { color: '#000', width: 0.01 } }] };
+      expect(pathPointCount(s)).toBe(4 + 4 + 4);
+      expect(pathStrokeQuads(s, 1)).toHaveLength(4);
+    });
+    it('perception weighs part colours by area', () => {
+      const layer = { count: 1, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#000000', parts: [{ path: sq(-0.5, 0, 0.4), color: '#ffffff' }, { path: sq(0.5, 0, 0.2) }] }, motion: { type: 'static' } };
+      // white area 0.64 vs black 0.16 -> 0.8
+      expect(spriteLuma(layer as never, { colorIndex: 0 } as never)).toBeCloseTo(0.8, 2);
+    });
   });
 });

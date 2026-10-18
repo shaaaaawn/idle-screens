@@ -28,7 +28,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isShapedSprite, pathDrawCost, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isPathPolygon, isShapedSprite, pathDrawCost, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -445,7 +445,7 @@ class SpecInstance implements SaverInstance {
    * starts clean. A drawing whose key keeps changing (spinning, trailing,
    * growing) stops being cached and draws from a reused Path2D instead.
    */
-  private readonly pathBlits = new WeakMap<object, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; path2d?: Path2D | null; stroke2d?: Path2D | null }>();
+  private readonly pathBlits = new WeakMap<object, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }> }>();
   /** Test/bench switch: `globalThis.__idleNoPathCache = true` before compiling draws every path directly. */
   private readonly noPathCache = (globalThis as { __idleNoPathCache?: boolean }).__idleNoPathCache === true;
   /** Device pixels held by every pathBlits bitmap — capped so a TV never pays more than PATH_BLIT_MAX_PIXELS of memory. */
@@ -839,38 +839,58 @@ class SpecInstance implements SaverInstance {
   }
 
   /**
-   * Fill and stroke a path polygon in its own unit box: the caller has moved
-   * to the entity and rotated; this scales by r. The fill is a gradient
-   * (unit-box coordinates), the soft radial falloff, or flat colour; the
-   * stroke traces every subpath as drawn (never the bridges that join the
-   * fill ring), its width in unit-box units. Both outlines are Path2Ds built
-   * once per sprite.
+   * Draw a path polygon in its own unit box: the caller has moved to the
+   * entity and rotated; this scales by r. Parts paint back to front (a single
+   * `path` is one part). Each fill is its gradient (drawing-box coordinates,
+   * or with units 'part' the part's own box, filled under that box's
+   * transform so a radial reads as the part's ellipse), the soft radial
+   * falloff, or flat colour; each stroke traces the part's subpaths as drawn,
+   * width in unit-box units. Outlines are Path2Ds built once per sprite.
    */
   private drawPathUnit(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, sprite: PolygonSprite, color: string, r: number): void {
     const slot = this.pathSlot(sprite);
-    const flat = flattenSprite(sprite);
+    const parts = pathParts(sprite);
+    if (!slot.parts2d) slot.parts2d = parts.map(() => ({}));
     g.scale(r, r);
-    if (sprite.fill !== false && flat.points.length >= 3) {
-      g.fillStyle = sprite.gradient ? pathGradientFill(g, sprite.gradient) : sprite.soft ? softFill(g, color, 1) : color;
-      if (slot.path2d === undefined) {
-        slot.path2d = typeof Path2D === 'undefined' ? null : ringPath2D([{ points: flat.points, closed: true }]);
+    const a0 = g.globalAlpha;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!;
+      const cache = slot.parts2d[i]!;
+      const pc = part.color ?? color;
+      if (part.fill && part.flat.points.length >= 3) {
+        g.globalAlpha = a0 * part.opacity;
+        if (part.gradient?.units === 'part') {
+          // Fill in part space: the gradient's −1..1 is the part's box.
+          const { cx, cy, hw, hh } = part.box;
+          if (cache.fillPart === undefined) {
+            cache.fillPart = typeof Path2D === 'undefined' ? null : ringPath2D([{ points: part.flat.points.map(([x, y]) => [(x - cx) / hw, (y - cy) / hh] as [number, number]), closed: true }]);
+          }
+          g.save();
+          g.transform(hw, 0, 0, hh, cx, cy);
+          g.fillStyle = pathGradientFill(g, part.gradient);
+          if (cache.fillPart) g.fill(cache.fillPart, part.rule);
+          else { traceLines(g, [{ points: part.flat.points.map(([x, y]) => [(x - cx) / hw, (y - cy) / hh] as [number, number]), closed: true }]); g.fill(part.rule); }
+          g.restore();
+        } else {
+          g.fillStyle = part.gradient ? pathGradientFill(g, part.gradient) : sprite.soft && !sprite.parts ? softFill(g, pc, 1) : pc;
+          if (cache.fill === undefined) cache.fill = typeof Path2D === 'undefined' ? null : ringPath2D([{ points: part.flat.points, closed: true }]);
+          if (cache.fill) g.fill(cache.fill, part.rule);
+          else { traceLines(g, [{ points: part.flat.points, closed: true }]); g.fill(part.rule); }
+        }
       }
-      if (slot.path2d) g.fill(slot.path2d, polygonFillRule(sprite));
-      else { traceLines(g, [{ points: flat.points, closed: true }]); g.fill(polygonFillRule(sprite)); }
+      const st = part.stroke;
+      if (st && part.flat.lines.length) {
+        g.globalAlpha = a0 * part.opacity * (st.opacity ?? 1);
+        g.strokeStyle = st.color;
+        g.lineWidth = st.width;
+        g.lineJoin = st.join ?? 'round';
+        g.lineCap = st.cap ?? 'round';
+        if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
+        if (cache.stroke) g.stroke(cache.stroke);
+        else { traceLines(g, part.flat.lines); g.stroke(); }
+      }
     }
-    const st = sprite.stroke;
-    if (st && flat.lines.length) {
-      const a0 = g.globalAlpha;
-      if (st.opacity !== undefined) g.globalAlpha = a0 * st.opacity;
-      g.strokeStyle = st.color;
-      g.lineWidth = st.width;
-      g.lineJoin = st.join ?? 'round';
-      g.lineCap = st.cap ?? 'round';
-      if (slot.stroke2d === undefined) slot.stroke2d = typeof Path2D === 'undefined' ? null : ringPath2D(flat.lines);
-      if (slot.stroke2d) g.stroke(slot.stroke2d);
-      else { traceLines(g, flat.lines); g.stroke(); }
-      g.globalAlpha = a0;
-    }
+    g.globalAlpha = a0;
   }
 
   /**
@@ -901,7 +921,6 @@ class SpecInstance implements SaverInstance {
         slot.entries.clear();
         if (++slot.flushes > 1) { slot.off = true; return false; }
       }
-      const flat = flattenSprite(sprite);
       const c = Math.cos(rot);
       const sn = Math.sin(rot);
       const s = r * k;
@@ -911,9 +930,12 @@ class SpecInstance implements SaverInstance {
         const y = (u[0] * sn + u[1] * c) * s;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
       };
-      if (sprite.fill !== false) for (const u of flat.points) grow(u);
-      if (sprite.stroke) for (const l of flat.lines) for (const u of l.points) grow(u);
-      const pad = 2 + Math.ceil(sprite.stroke ? sprite.stroke.width * s : 0);
+      let sw = 0;
+      for (const part of pathParts(sprite)) {
+        if (part.fill) for (const u of part.flat.points) grow(u);
+        if (part.stroke) { sw = Math.max(sw, part.stroke.width); for (const l of part.flat.lines) for (const u of l.points) grow(u); }
+      }
+      const pad = 2 + Math.ceil(sw * s);
       const bx = Math.floor(fx + x0) - pad;
       const by = Math.floor(fy + y0) - pad;
       const w = Math.ceil(fx + x1) - bx + pad;
@@ -1184,7 +1206,7 @@ class SpecInstance implements SaverInstance {
     if (sprite.kind === 'polygon') {
       const r = sz / 2;
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      if (typeof sprite.path === 'string') {
+      if (isPathPolygon(sprite)) {
         if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor)) return;
         ctx.save();
         ctx.translate(p.x, p.y);
@@ -1608,7 +1630,7 @@ class SpecInstance implements SaverInstance {
     for (let li = a; li <= b; li++) {
       const built = this.layers[li]!;
       const sp = built.layer.sprite;
-      if (sp.kind === 'polygon' && typeof sp.path === 'string') n += pathDrawCost(sp) * built.entities.length;
+      if (sp.kind === 'polygon' && isPathPolygon(sp)) n += pathDrawCost(sp) * built.entities.length;
     }
     return n;
   }
@@ -1626,7 +1648,7 @@ class SpecInstance implements SaverInstance {
     const built = this.layers[li]!;
     const l = built.layer;
     const sp = l.sprite;
-    if (sp.kind !== 'polygon' || typeof sp.path !== 'string') return false;
+    if (!isPathPolygon(sp)) return false;
     if ((l.blend ?? 'source-over') !== 'source-over') return false;
     if (l.trail || l.links || this.paintOverrides?.has(li)) return false;
     if (built.entities.length > 64) return false;
@@ -1663,10 +1685,13 @@ class SpecInstance implements SaverInstance {
     let r = this.pathReach.get(sp);
     if (r === undefined) {
       r = 0;
-      const f = flattenSprite(sp);
-      for (const [x, y] of f.points) r = Math.max(r, Math.hypot(x, y));
-      for (const l of f.lines) for (const [x, y] of l.points) r = Math.max(r, Math.hypot(x, y));
-      r += sp.stroke ? sp.stroke.width : 0;
+      let sw = 0;
+      for (const part of pathParts(sp)) {
+        for (const [x, y] of part.flat.points) r = Math.max(r, Math.hypot(x, y));
+        for (const l of part.flat.lines) for (const [x, y] of l.points) r = Math.max(r, Math.hypot(x, y));
+        if (part.stroke) sw = Math.max(sw, part.stroke.width);
+      }
+      r += sw;
       this.pathReach.set(sp, r || 1);
     }
     return r || 1;

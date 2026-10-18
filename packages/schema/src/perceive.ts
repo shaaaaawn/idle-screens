@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, isShapedSprite, pathLength, pathStrokeQuads, polygonArea, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, gradientSpace, isPathPolygon, isShapedSprite, partStrokeQuads, pathLength, pathParts, pathStrokeQuads, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -557,7 +557,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
       minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
     }
-    if (s.stroke && typeof s.path === 'string') {
+    if (isPathPolygon(s)) {
       // Strokes reach past the fill (and are all there is with fill: false).
       for (const quad of pathStrokeQuads(s, radius)) for (const q of quad) {
         const x = p.x + q.x * cr - q.y * sr, y = p.y + q.x * sr + q.y * cr;
@@ -569,54 +569,66 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const r0 = Math.max(0, Math.floor(minY / cellH));
     const r1 = Math.min(rows - 1, Math.floor(maxY / cellH));
     if (c0 > c1 || r0 > r1) return;
-    const isPath = typeof s.path === 'string';
-    const filled = !(isPath && s.fill === false);
     const nc = c1 - c0 + 1;
-    // Fill: the outline's coverage; a gradient is sampled at each cell's
-    // centre in the drawing's unit box (luma and stop opacity), the way the
-    // canvas paints it, rather than one mean tone for the whole shape.
-    if (filled) {
-      const cov = polygonCellCoverage(pts, cellW, cellH, c0, c1, r0, r1, polygonFillRule(s) === 'evenodd');
-      const gr = isPath ? s.gradient : undefined;
+    const toPx = (q: { x: number; y: number }): { x: number; y: number } => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr });
+    const unitAt = (x: number, y: number): [number, number] => {
+      const dx = x - p.x, dy = y - p.y, rr = Math.max(radius, 1e-6);
+      return [(dx * cr + dy * sr) / rr, (-dx * sr + dy * cr) / rr];
+    };
+    // Plain polygons (sides/points) keep the single-fill path below; path
+    // polygons composite part by part, back to front, as the canvas paints them.
+    const parts = isPathPolygon(s) ? pathParts(s) : null;
+    const fillPass = (ring: Array<{ x: number; y: number }>, rule: boolean, partLum: number, partA: number, part: ResolvedPart | null): void => {
+      const cov = polygonCellCoverage(ring, cellW, cellH, c0, c1, r0, r1, rule);
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const f = cov[(r - r0) * nc + (c - c0)]!;
           if (!(f > 0)) continue;
           const x = (c + 0.5) * cellW;
           const y = (r + 0.5) * cellH;
-          let cl = lum, ca = 1;
-          if (gr) {
-            const dx = x - p.x, dy = y - p.y;
-            const g = gradientAt(gr, (dx * cr + dy * sr) / Math.max(radius, 1e-6), (-dx * sr + dy * cr) / Math.max(radius, 1e-6));
+          let cl = partLum, ca = 1;
+          if (part?.gradient) {
+            const [u, v] = unitAt(x, y);
+            const [gu, gv] = gradientSpace(part, u, v);
+            const g = gradientAt(part.gradient, gu, gv);
             cl = g.luma; ca = g.opacity;
           }
-          const wgt = s.soft && !gr ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
-          if (wgt > 0) compose(r * cols + c, cl, a * ca * Math.min(1, wgt), layer.blend);
+          const wgt = s.soft && !parts ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
+          if (wgt > 0) compose(r * cols + c, cl, a * partA * ca * Math.min(1, wgt), layer.blend);
         }
       }
+    };
+    if (!parts) {
+      fillPass(pts, polygonFillRule(s) === 'evenodd', lum, 1, null);
+      return;
     }
-    // Stroke: thin quads per segment, composited over the fill in the stroke's own luma.
-    if (s.stroke && isPath) {
-      const sa = s.stroke.opacity ?? 1;
-      const sl = hexLuma(s.stroke.color);
-      const scov = new Float64Array(nc * (r1 - r0 + 1));
-      for (const quad of pathStrokeQuads(s, radius)) {
-        const qp = quad.map((q) => ({ x: p.x + q.x * cr - q.y * sr, y: p.y + q.x * sr + q.y * cr }));
-        let qx0 = Infinity, qx1 = -Infinity, qy0 = Infinity, qy1 = -Infinity;
-        for (const q of qp) { qx0 = Math.min(qx0, q.x); qx1 = Math.max(qx1, q.x); qy0 = Math.min(qy0, q.y); qy1 = Math.max(qy1, q.y); }
-        const a0 = Math.max(c0, Math.floor(qx0 / cellW)), a1 = Math.min(c1, Math.floor(qx1 / cellW));
-        const b0 = Math.max(r0, Math.floor(qy0 / cellH)), b1 = Math.min(r1, Math.floor(qy1 / cellH));
-        if (a0 > a1 || b0 > b1) continue;
-        const qc = polygonCellCoverage(qp, cellW, cellH, a0, a1, b0, b1);
-        const qn = a1 - a0 + 1;
-        for (let r = b0; r <= b1; r++) for (let c = a0; c <= a1; c++) {
-          const i = (r - r0) * nc + (c - c0);
-          scov[i] = Math.min(1, scov[i]! + qc[(r - b0) * qn + (c - a0)]!);
-        }
+    for (const part of parts) {
+      const partLum = part.color ? hexLuma(part.color) : lum;
+      if (part.fill && part.flat.points.length >= 3) {
+        fillPass(part.flat.points.map(([x, y]) => toPx({ x: x * radius, y: y * radius })), part.rule === 'evenodd', partLum, part.opacity, part);
       }
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-        const f = scov[(r - r0) * nc + (c - c0)]!;
-        if (f > 0) compose(r * cols + c, sl, a * sa * f, layer.blend);
+      if (part.stroke) {
+        const sa = (part.stroke.opacity ?? 1) * part.opacity;
+        const sl = hexLuma(part.stroke.color);
+        const scov = new Float64Array(nc * (r1 - r0 + 1));
+        for (const quad of partStrokeQuads(part, radius)) {
+          const qp = quad.map(toPx);
+          let qx0 = Infinity, qx1 = -Infinity, qy0 = Infinity, qy1 = -Infinity;
+          for (const q of qp) { qx0 = Math.min(qx0, q.x); qx1 = Math.max(qx1, q.x); qy0 = Math.min(qy0, q.y); qy1 = Math.max(qy1, q.y); }
+          const a0 = Math.max(c0, Math.floor(qx0 / cellW)), a1 = Math.min(c1, Math.floor(qx1 / cellW));
+          const b0 = Math.max(r0, Math.floor(qy0 / cellH)), b1 = Math.min(r1, Math.floor(qy1 / cellH));
+          if (a0 > a1 || b0 > b1) continue;
+          const qc = polygonCellCoverage(qp, cellW, cellH, a0, a1, b0, b1);
+          const qn = a1 - a0 + 1;
+          for (let r = b0; r <= b1; r++) for (let c = a0; c <= a1; c++) {
+            const i = (r - r0) * nc + (c - c0);
+            scov[i] = Math.min(1, scov[i]! + qc[(r - b0) * qn + (c - a0)]!);
+          }
+        }
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+          const f = scov[(r - r0) * nc + (c - c0)]!;
+          if (f > 0) compose(r * cols + c, sl, a * sa * f, layer.blend);
+        }
       }
     }
   };

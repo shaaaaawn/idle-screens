@@ -12,4 +12,4 @@ export * from './finish';
 export * from './sequence';
 export * from './timeline';
 export * from './examples';
-export { flattenPath, MAX_PATH_POINTS, type FlattenedPath } from './shapes';
+export { flattenPath, isPathPolygon, pathParts, MAX_PATH_POINTS, type FlattenedPath, type ResolvedPart } from './shapes';

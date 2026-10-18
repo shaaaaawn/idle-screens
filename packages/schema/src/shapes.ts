@@ -9,7 +9,7 @@
  * `length` for strokes), so the seeded size range is the glyph's bounding
  * diameter — the same rule `circle.radius` / `streak.length` already follow.
  */
-import type { SpriteSpec } from './types';
+import type { PathGradient, PathPart, PathStroke, SpriteSpec } from './types';
 
 export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' | 'bar' }>;
 export type BarSprite = Extract<SpriteSpec, { kind: 'bar' }>;
@@ -47,7 +47,7 @@ export const STROKE_SAMPLES = 24;
 
 /** Polygon vertices centred on (0,0), unrotated, circumradius `radius` px. Regular n-gons point up. */
 export function polygonPoints(s: PolygonSprite, radius: number): Array<{ x: number; y: number }> {
-  if (typeof s.path === 'string') {
+  if (isPathPolygon(s)) {
     const unit = flattenSprite(s);
     if (unit.points.length >= 3) return unit.points.map(([x, y]) => ({ x: x * radius, y: y * radius }));
   }
@@ -314,8 +314,10 @@ const spriteFlat = new WeakMap<object, { d: string; rule: PathFillRule; flat: Fl
  * string as a Map key each time cost more than drawing it.
  */
 export function flattenSprite(s: PolygonSprite): FlattenedPath {
-  const d = s.path ?? '';
-  const rule = s.fillRule ?? 'auto';
+  // A multi-part drawing's outline is its filled parts together (bbox, area,
+  // small-entity perception); parts draw and perceive individually elsewhere.
+  const d = s.parts ? s.parts.filter((p) => p.fill !== false).map((p) => p.path).join(' ') : s.path ?? '';
+  const rule = s.parts ? 'auto' : s.fillRule ?? 'auto';
   const hit = spriteFlat.get(s);
   if (hit && hit.d === d && hit.rule === rule) return hit.flat;
   const flat = flattenPath(d, rule);
@@ -326,6 +328,67 @@ export function flattenSprite(s: PolygonSprite): FlattenedPath {
 /** The canvas fill rule for a polygon: evenodd only for a path that asks for it. */
 export function polygonFillRule(s: PolygonSprite): 'nonzero' | 'evenodd' {
   return typeof s.path === 'string' && s.fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
+}
+
+/** A polygon drawn from SVG paths: one `path`, or a multi-colour drawing of `parts`. */
+export function isPathPolygon(s: SpriteSpec): boolean {
+  return s.kind === 'polygon' && (typeof s.path === 'string' || Array.isArray(s.parts));
+}
+
+/** One drawable piece of a path polygon, resolved: its outline, paint and part-space box. */
+export interface ResolvedPart {
+  flat: FlattenedPath;
+  /** Its own colour, or null to use the entity's (sprite colour / palette pick). */
+  color: string | null;
+  fill: boolean;
+  rule: 'nonzero' | 'evenodd';
+  gradient?: PathGradient;
+  stroke?: PathStroke;
+  opacity: number;
+  /** The fill's bounding box in the unit box (centre + half extents) — the space of `gradient.units: 'part'`. */
+  box: { cx: number; cy: number; hw: number; hh: number };
+}
+
+const spriteParts = new WeakMap<object, { key: unknown; parts: ResolvedPart[] }>();
+
+/**
+ * A path polygon as an ordered list of parts, back to front. A single
+ * `path` is a drawing of one part (its colour the entity's), so the renderer,
+ * perception and the budget treat both forms one way. Memoised per sprite.
+ */
+export function pathParts(s: PolygonSprite): ResolvedPart[] {
+  const key = s.parts ?? s.path;
+  const hit = spriteParts.get(s);
+  if (hit && hit.key === key) return hit.parts;
+  const src: Array<PathPart & { color?: string }> = s.parts ?? (typeof s.path === 'string'
+    ? [{ path: s.path, fillRule: s.fillRule, fill: s.fill, gradient: s.gradient, stroke: s.stroke }]
+    : []);
+  const parts = src.map((p): ResolvedPart => {
+    const flat = flattenPath(p.path, p.fillRule ?? 'auto');
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of flat.points.length ? flat.points : flat.lines.flatMap((l) => l.points)) {
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    if (!Number.isFinite(x0)) { x0 = -1; x1 = 1; y0 = -1; y1 = 1; }
+    return {
+      flat,
+      color: s.parts ? p.color ?? null : null,
+      fill: p.fill !== false,
+      rule: p.fillRule === 'evenodd' ? 'evenodd' : 'nonzero',
+      gradient: p.gradient,
+      stroke: p.stroke,
+      opacity: p.opacity ?? 1,
+      box: { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, hw: Math.max((x1 - x0) / 2, 1e-6), hh: Math.max((y1 - y0) / 2, 1e-6) },
+    };
+  });
+  spriteParts.set(s, { key, parts });
+  return parts;
+}
+
+/** A unit-box point in a gradient's own space: the drawing box, or (units 'part') the part's box mapped to −1..1. */
+export function gradientSpace(part: ResolvedPart, u: number, v: number): [number, number] {
+  if (part.gradient?.units !== 'part') return [u, v];
+  return [(u - part.box.cx) / part.box.hw, (v - part.box.cy) / part.box.hh];
 }
 
 type Pt = [number, number];
@@ -677,37 +740,41 @@ function bridge(rings: Pt[][]): Pt[] {
   return ring;
 }
 
-/** Points a path draws per frame: the fill ring (when filled) plus every stroked line. */
+/** Points a path polygon draws per frame: every part's fill ring (when filled) plus its stroked lines. */
 export function pathPointCount(s: PolygonSprite): number {
-  const f = flattenSprite(s);
-  let n = s.fill === false ? 0 : f.points.length;
-  if (s.stroke) for (const l of f.lines) n += l.points.length;
+  let n = 0;
+  for (const p of pathParts(s)) {
+    if (p.fill) n += p.flat.points.length;
+    if (p.stroke) for (const l of p.flat.lines) n += l.points.length;
+  }
   return n;
 }
 
 /**
- * Per-frame drawing cost of a path in "flat fill point" units: a gradient
- * fill costs about twice a flat one, a stroked point about three times. The
- * render-once cache decides by cost, so a lightly-pointed but shaded and
- * inked drawing still earns its bitmap.
+ * Per-frame drawing cost of a path polygon in "flat fill point" units: a
+ * gradient fill costs about twice a flat one, a stroked point about three
+ * times. The render-once cache decides by cost, so a lightly-pointed but
+ * shaded and inked drawing still earns its bitmap.
  */
 export function pathDrawCost(s: PolygonSprite): number {
-  const f = flattenSprite(s);
-  let c = s.fill === false ? 0 : f.points.length * (s.gradient ? 2 : 1);
-  if (s.stroke) for (const l of f.lines) c += l.points.length * 3;
+  let c = 0;
+  for (const p of pathParts(s)) {
+    if (p.fill) c += p.flat.points.length * (p.gradient ? 2 : 1);
+    if (p.stroke) for (const l of p.flat.lines) c += l.points.length * 3;
+  }
   return c;
 }
 
 /**
- * A path's stroke as thin quads (one per segment, `width` unit-box units
+ * A part's stroke as thin quads (one per segment, `width` unit-box units
  * wide), scaled by `radius` px and centred on (0,0): what perception
  * rasterises for a stroke. Joints overlap a little; perception clamps.
  */
-export function pathStrokeQuads(s: PolygonSprite, radius: number): Array<Array<{ x: number; y: number }>> {
-  if (!s.stroke) return [];
-  const hw = (s.stroke.width * radius) / 2;
+export function partStrokeQuads(part: ResolvedPart, radius: number): Array<Array<{ x: number; y: number }>> {
+  if (!part.stroke) return [];
+  const hw = (part.stroke.width * radius) / 2;
   const out: Array<Array<{ x: number; y: number }>> = [];
-  for (const l of flattenSprite(s).lines) {
+  for (const l of part.flat.lines) {
     const pts = l.points;
     const n = l.closed ? pts.length : pts.length - 1;
     for (let i = 0; i < n; i++) {
@@ -719,4 +786,9 @@ export function pathStrokeQuads(s: PolygonSprite, radius: number): Array<Array<{
     }
   }
   return out;
+}
+
+/** Every part's stroke quads together (see partStrokeQuads). */
+export function pathStrokeQuads(s: PolygonSprite, radius: number): Array<Array<{ x: number; y: number }>> {
+  return pathParts(s).flatMap((p) => partStrokeQuads(p, radius));
 }
