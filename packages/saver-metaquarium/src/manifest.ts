@@ -32,6 +32,12 @@ export const METAQUARIUM_PARAMS = {
    *  it (the default), 90 at its side, 180 in front looking back at its face
    *  — a hackerfish's screen, a crab's smile. */
   followAngle: { type: 'number', default: 0, min: -180, max: 180, ease: 'smooth' },
+  /** Keep the followed fish in view (sightline.ts): when a home, a wall, a lamp
+   *  or a kelp stand comes between it and the chase camera, the camera rises a
+   *  little to look over low clutter and otherwise pulls in toward the fish, as
+   *  a game camera's spring arm does — eased, never a snap. 0 (default) is the
+   *  plain chase camera; 1 the full arm. Not the fish's-eye view (it has none). */
+  followAvoid: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },

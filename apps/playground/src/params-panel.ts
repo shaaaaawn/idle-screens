@@ -122,7 +122,7 @@ function fishPicker(value: ParamValue, onChange: (v: ParamValue) => void): Param
 const METAQUARIUM: PanelKnowledge = {
   owns: (saver) => saver.manifest.id === 'metaquarium' || saver.manifest.id.startsWith('metaquarium-'),
   sections: [
-    ['camera', ['shot', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle']],
+    ['camera', ['shot', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle', 'followAvoid']],
     ['light', ['caustics', 'causticScale', 'surfaceMirror']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     ['dance', ['starfishDance', 'danceTempo']],
