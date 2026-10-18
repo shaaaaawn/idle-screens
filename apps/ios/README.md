@@ -95,8 +95,14 @@ live specs), `PaintTests` (`position.dx/dy`, layer `opacity`/`transform`,
 `groups` — `paint.ts`), `ShapeParityTests` (stroke outlines, trail echoes,
 feather — `shapes.ts`/`trail.ts`), `FishMixTests` (`parseFishMix`) and
 `TankParityTests` (the 2D aquarium against the metaquarium package's `lofi`
-backend, its browser mirror). The goldens live in `IdleScreensTVTests/Fixtures`
+backend, its browser mirror) and `PathDrawingTests` (`polygon.path` / `parts`:
+the path parser, flattening, hole and overlap rules — `shapes.ts` `flattenPath`,
+point for point; regenerate with `node scripts/paths-golden.mjs` after building
+the schema). The goldens live in `IdleScreensTVTests/Fixtures`
 or inline; regenerate them from the TypeScript when a rule changes on purpose.
+Path drawings (fills, gradients, strokes, span/origin) are rasterised once per
+drawing, colour and size by `PathRaster` and placed per entity on both native
+tiers, the web engine's render-once cache.
 The 2D aquarium's unminted-breed icons are rendered from the breed models by
 `packages/saver-metaquarium/breeds/icons/` and ship to both sides.
 

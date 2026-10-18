@@ -70,9 +70,14 @@ enum SceneVisibility {
                     let maxWPx = maxWidth * dim
                     let lineCount = breakTextBlock(text: text, maxWidthEm: maxWPx / fsPx).count
                     area = maxWPx * lh * Double(lineCount)
-                case .polygon(_, _, _, let sides, let points, _):
+                case .polygon(_, _, _, let sides, let points, _, let drawing):
                     let r = entity.size * dim
                     guard r >= 0.5 else { continue }
+                    if let drawing {
+                        // A path drawing's real filled area (and stroke ink), through its span frame.
+                        area = drawing.area(r: r, width: canvas.width, height: canvas.height)
+                        break
+                    }
                     // Shoelace of the actual facet — a thin shard is not a disc.
                     let verts = NativeSceneView.polygonPoints(sides: sides, points: points, radius: r)
                     guard verts.count >= 3 else { continue }
