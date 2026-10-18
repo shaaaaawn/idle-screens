@@ -1,5 +1,18 @@
 # @idle-screens/saver-metaquarium
 
+## 0.19.0
+
+### Minor Changes
+
+- 9bca963: Metaquarium: `followAvoid` keeps the followed fish in view. When a home, a castle wall, a lamp or a kelp stand comes between the chase camera and its fish, the camera rises a little over low clutter and otherwise pulls in toward the fish, like a game camera's spring arm. It never comes inside the fish's-eye threshold and never booms through the surface. Pure and continuous (no state, no snaps): a frame is still a function of t. 0 (the default) is the plain chase camera.
+
+### Patch Changes
+
+- b9200bd: lofi backend: the room and atmosphere the Apple TV tank now draws — authored `fogColor` / `floorColor`, `interior: geode` and `floraDensity`; `marineSnow`, `skyLanterns` and a `shoal`; and the unminted breeds a `fishMix` names (crab, snail, Dot, the dolphin, …) as critters with icons rendered from their own models, floor breeds crawling the dunes. A mix of only unminted breeds no longer falls back to a random minted cast. New elements draw from their own seeded streams, so every existing lofi layout is unchanged.
+- 0cbac93: The dolphin's flips and rolls are fluid. The whole turn was baked into a bone, and when the tank blended the clip (against the swim as a moment faded in and out, or under a vignette gesture's envelope, Dot's hop) a turn past half-way interpolated the short way, so the dolphin unwound mid-flip. The clips now keep the curl, tuck and flippers; the turn is one smooth closed-form angle (`dolphinTurn`) that the tank applies to the whole dolphin about its body, played once and never blended.
+- db0d6e6: Riding inside a floor walker (`cameraFollow` on Dot, a crab, an octopus, a snail or a starfish, with `followDistance` under a body length), the camera now sees from the walker's own eye. It used to sit at its feet + 1.5, held at floor + 7, and look level at its feet 60 units on: on Dot that is ankle height, so curbs, sign posts, basins and the other floor folk filled the frame and any rise ahead read as a wall. The eye height is measured once from the model at load (Dot's screen face, the others' eyes, else near the top of its bounds) and scales with the walker's size; it looks along the heading at eye height, pitched (at most ~15°) with the seabed's rise ahead, so a path up or down a hill stays in frame. Swimmers' first-person eye and every chase camera are unchanged.
+- 40fe814: The tank says how many fish it is filling toward. Beside `data-mq-fish` (fish spawned so far), the host now carries `data-mq-want`, the size of the population being loaded, so an embedding app can reveal the tank the moment its whole cast is in instead of waiting for the count to go quiet.
+
 ## 0.18.0
 
 ### Minor Changes

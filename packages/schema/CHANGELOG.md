@@ -1,5 +1,16 @@
 # @idle-screens/schema
 
+## 3.13.0
+
+### Minor Changes
+
+- 37a6b06: Vector drawings on `polygon`. A polygon can take `path` — an SVG path `d` string (curves and arcs) in the −1..1 unit box — or `parts`, a multi-colour drawing of up to 256 paths drawn back to front in one layer. Holes and overlaps resolve by containment (`fillRule: 'auto'`) or SVG's `nonzero` / `evenodd`; fills take a `gradient` (linear or radial, per-stop opacity, `units: 'part'` to shade each piece in its own box); outlines take a `stroke` (open paths too, with `fill: false` for line art); `span` and `origin` anchor a drawing to the screen's edges (`span: 'width', origin: [0, 1]` puts hills on the bottom edge at every aspect). Part colours, gradient stops and stroke widths steer and glide; two paths with the same commands morph point by point. The renderer draws a steady drawing once and reuses it (moving copies are resampled), so detail costs about what a flat fill does per frame. Perception (`luminanceGrid`, `perceiveScene`) reads drawings part by part, gradients cell by cell and strokes as ink. Budget: 4096 flattened points per path, 16384 per scene.
+
+### Patch Changes
+
+- 060dde6: Perception reads what the canvas paints. `luminanceGrid` / `perceiveScene` were scored against rendered pixels (464 stored scenes, two sizes, two times) and corrected where they disagreed: round sprites and text light cells by the ink they lay; soft sprites follow the renderer's own radial gradient with no modelled halo (`GLOW_SPREAD` removed — additive glow had read 4× the pixels); discs smaller than a cell keep their ink; and a text sprite's px font scales with the viewport the way the renderer draws it, so `textSprites().sizePx` reports the size on screen. Fidelity to pixels on held-out scenes rose from 0.71 to 0.84. Coverage numbers fall for glow- and text-heavy scenes; that is the correction, not a regression.
+- 3ee1ccf: `links` in `mode: "chain"` no longer requires `k` or `maxDist` (X541). A chain wires entities in order and reads neither, as FORMAT.md already said, but the validator and the JSON Schema demanded both for every mode. A chain may now omit both; `maxDist` is required only alongside `falloff: true`, where it is the fade distance, and either field is still range-checked when given. `nearest` and `random` are unchanged. Every reader (render, perception, advisories, `describeScene`) goes through the new `linkMaxDistPx` helper, which reads an absent `maxDist` as no cutoff and never feeds NaN into a falloff. `describeScene` now counts a chain's expected links as the chain itself instead of k-nearest. Type note: `LayerSpec.links.k` and `.maxDist` are now optional, so a consumer that reads them directly must handle `undefined`.
+
 ## 3.12.1
 
 ### Patch Changes
