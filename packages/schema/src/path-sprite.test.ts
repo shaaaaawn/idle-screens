@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, gradientSpace, pathFrame, pathParts, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, gradientSpace, pathFrame, pathPaintSig, pathParts, pathPointCount, pathStrokeQuads, polygonArea, polygonPoints } from './shapes';
 import { spriteLuma } from './luma';
 import { luminanceGrid } from './perceive';
+import { lerpPathD, lerpSpec, steerablePaths } from './steer';
+import { validateSpecPaths } from './validate';
 import { validateSpec } from './validate';
 
 const spec = (path: string) => ({
@@ -235,6 +237,44 @@ describe('polygon.path', () => {
         expect(Math.min(...last)).toBeGreaterThan(0.9); // the bottom row is lit edge to edge
         expect(Math.max(...top)).toBeLessThan(0.05); // nothing at the top
       }
+    });
+  });
+
+  describe('steering and morphs', () => {
+    const drawing = () => ({
+      schemaVersion: 1, id: 'p', label: 'p', background: { type: 'solid', color: '#000000' },
+      layers: [{ count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#ffffff', parts: [
+        { path: 'M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 Z', color: '#ff0000', gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] } },
+        { path: 'M 0 0 L 0.5 0 L 0 0.5 Z', stroke: { color: '#00ff00', width: 0.02 } },
+      ] }, motion: { type: 'static' } }],
+    }) as never;
+    it('advertises and accepts per-part paint paths', () => {
+      const paths = steerablePaths(drawing());
+      for (const p of ['layers.0.sprite.parts.0.color', 'layers.0.sprite.parts.0.gradient.stops.1.color', 'layers.0.sprite.parts.1.stroke.width', 'layers.0.sprite.parts.0.path']) {
+        expect(paths).toContain(p);
+        expect(validateSpecPaths(drawing(), [p])).toBe(true);
+      }
+    });
+    it('morphs two same-structure paths number by number, colours by channel', () => {
+      const a = drawing() as unknown as { layers: Array<{ sprite: { parts: Array<{ path: string; color: string }> } }> };
+      const b = JSON.parse(JSON.stringify(a));
+      b.layers[0].sprite.parts[0].path = 'M -0.3 -0.7 L 0.7 -0.3 L 0.3 0.7 Z';
+      b.layers[0].sprite.parts[0].color = '#0000ff';
+      const mid = lerpSpec(a as never, b, 0.5) as unknown as typeof a;
+      expect(mid.layers[0]!.sprite.parts[0]!.path).toBe('M -0.4 -0.6 L 0.6 -0.4 L 0.4 0.6 Z');
+      expect(mid.layers[0]!.sprite.parts[0]!.color).toBe('#800080');
+    });
+    it('lerpPathD keeps arc flags valid and refuses different structures', () => {
+      expect(lerpPathD('M -1 0 A 1 1 0 1 1 1 0 Z', 'M -0.5 0 A 0.5 0.5 0 0 1 0.5 0 Z', 0.4)).toBe('M -0.8 0 A 0.8 0.8 0 1 1 0.8 0 Z');
+      expect(lerpPathD('M 0 0 L 1 1', 'M 0 0 Q 1 1 2 2', 0.5)).toBeNull();
+    });
+    it('gives two sprite objects that draw the same thing one cache signature', () => {
+      const a = (drawing() as unknown as { layers: Array<{ sprite: never }> }).layers[0]!.sprite;
+      const b = JSON.parse(JSON.stringify(a));
+      expect(pathPaintSig(a)).toBe(pathPaintSig(b));
+      const c = JSON.parse(JSON.stringify(a));
+      c.parts[0].color = '#00ff00';
+      expect(pathPaintSig(a)).not.toBe(pathPaintSig(c));
     });
   });
 });

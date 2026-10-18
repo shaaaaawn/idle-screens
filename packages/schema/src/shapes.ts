@@ -287,11 +287,14 @@ export interface FlattenedPath {
  */
 export type PathFillRule = 'auto' | 'nonzero' | 'evenodd';
 
-const pathCache = new Map<string, FlattenedPath>();
+// Keyed by the d string itself (one map per rule): V8 caches a string's hash
+// on the string, so a frame that hands back the same path string looks it up
+// in O(1) — a `${rule}|${d}` key would re-hash a 60 kB string every call.
+const pathCache = { auto: new Map<string, FlattenedPath>(), nonzero: new Map<string, FlattenedPath>(), evenodd: new Map<string, FlattenedPath>() };
 
 export function flattenPath(d: string, rule: PathFillRule = 'auto'): FlattenedPath {
-  const key = `${rule}|${d}`;
-  const hit = pathCache.get(key);
+  const cache = pathCache[rule] ?? pathCache.auto;
+  const hit = cache.get(d);
   if (hit) return hit;
   let out: FlattenedPath;
   try {
@@ -302,8 +305,8 @@ export function flattenPath(d: string, rule: PathFillRule = 'auto'): FlattenedPa
   } catch (e) {
     out = { points: [], subpaths: 0, lines: [], error: e instanceof Error ? e.message : String(e) };
   }
-  if (pathCache.size > 256) pathCache.clear();
-  pathCache.set(key, out);
+  if (cache.size > 256) cache.clear();
+  cache.set(d, out);
   return out;
 }
 
@@ -365,11 +368,6 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
     : []);
   const parts = src.map((p): ResolvedPart => {
     const flat = flattenPath(p.path, p.fillRule ?? 'auto');
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (const [x, y] of flat.points.length ? flat.points : flat.lines.flatMap((l) => l.points)) {
-      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
-    }
-    if (!Number.isFinite(x0)) { x0 = -1; x1 = 1; y0 = -1; y1 = 1; }
     return {
       flat,
       color: s.parts ? p.color ?? null : null,
@@ -378,7 +376,7 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
       gradient: p.gradient,
       stroke: p.stroke,
       opacity: p.opacity ?? 1,
-      box: { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, hw: Math.max((x1 - x0) / 2, 1e-6), hh: Math.max((y1 - y0) / 2, 1e-6) },
+      box: boxOfFlat(flat),
     };
   });
   spriteParts.set(s, { key, parts });
@@ -404,6 +402,49 @@ export function pathFrame(s: PolygonSprite, r: number, w: number, h: number): { 
   const sy = span === 'height' || span === 'screen' ? h / 2 : r;
   const [ox, oy] = s.origin ?? [0, 0];
   return { sx, sy, ox, oy, uniform: sx === sy };
+}
+
+const flatBoxes = new WeakMap<FlattenedPath, ResolvedPart['box']>();
+/** A flattened path's bounding box (centre + half extents), memoised on the (cached) flattening. */
+function boxOfFlat(flat: FlattenedPath): ResolvedPart['box'] {
+  const hit = flatBoxes.get(flat);
+  if (hit) return hit;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of flat.points.length ? flat.points : flat.lines.flatMap((l) => l.points)) {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  if (!Number.isFinite(x0)) { x0 = -1; x1 = 1; y0 = -1; y1 = 1; }
+  const box = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, hw: Math.max((x1 - x0) / 2, 1e-6), hh: Math.max((y1 - y0) / 2, 1e-6) };
+  flatBoxes.set(flat, box);
+  return box;
+}
+
+const pathIds = new Map<string, number>();
+let pathSeq = 0;
+const paintSigs = new WeakMap<object, string>();
+/**
+ * A content signature for a path polygon's appearance: every field, with each
+ * d string replaced by an interned id. Two sprite objects that draw the same
+ * thing share it — a glide or a timeline hands the renderer a new object every
+ * frame, so the caches key on this, never on object identity. Memoised per
+ * object: specs are treated as immutable (steers and glides always build new
+ * objects), so a sprite must never be edited in place after it is drawn.
+ */
+export function pathPaintSig(s: PolygonSprite): string {
+  const hit = paintSigs.get(s);
+  if (hit !== undefined) return hit;
+  const sig = JSON.stringify(s, (k, v) => {
+    if (k !== 'path' || typeof v !== 'string') return v;
+    let id = pathIds.get(v);
+    if (id === undefined) {
+      if (pathIds.size > 4096) pathIds.clear(); // ids keep counting up, so a cleared table never reuses one
+      id = ++pathSeq;
+      pathIds.set(v, id);
+    }
+    return `#${id}`;
+  });
+  paintSigs.set(s, sig);
+  return sig;
 }
 
 /** A unit-box point in a gradient's own space: the drawing box, or (units 'part') the part's box mapped to −1..1. */

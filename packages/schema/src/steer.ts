@@ -250,6 +250,12 @@ export function lerpValue(from: unknown, to: unknown, k: number, specRoot = fals
     if (typeof a === 'string' && typeof b === 'string' && HEX.test(a) && HEX.test(b)) {
       return lerpHex(a, b, kk);
     }
+    if (key === 'path' && typeof a === 'string' && typeof b === 'string' && a !== b) {
+      // Two SVG paths with the same commands (Lottie's rule: same letters,
+      // same number count) morph number by number; otherwise they step.
+      const m = lerpPathD(a, b, kk);
+      if (m !== null) return m;
+    }
     if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
       return b.map((bv, i) => walk(a[i], bv, i));
     }
@@ -265,6 +271,41 @@ export function lerpValue(from: unknown, to: unknown, k: number, specRoot = fals
     return kk > 0 ? b : a; // non-interpolable → step to target
   };
   return walk(from, to, rootKey, specRoot);
+}
+
+const PATH_TOKEN = /[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+
+/**
+ * Interpolate two SVG path d strings that share their structure — the same
+ * command letters in the same order and the same count of numbers — by
+ * lerping every number; null when they differ in structure (the morph then
+ * steps). Arc flags (0/1) round, so a half-way arc stays a valid arc.
+ */
+export function lerpPathD(a: string, b: string, k: number): string | null {
+  const ta = a.match(PATH_TOKEN) ?? [];
+  const tb = b.match(PATH_TOKEN) ?? [];
+  if (ta.length !== tb.length) return null;
+  const out: string[] = [];
+  let cmd = '';
+  let argIndex = 0;
+  for (let i = 0; i < ta.length; i++) {
+    const x = ta[i]!, y = tb[i]!;
+    const isCmdA = /[a-zA-Z]/.test(x), isCmdB = /[a-zA-Z]/.test(y);
+    if (isCmdA !== isCmdB) return null;
+    if (isCmdA) {
+      if (x !== y) return null;
+      cmd = x.toUpperCase();
+      argIndex = 0;
+      out.push(x);
+      continue;
+    }
+    const va = Number(x), vb = Number(y);
+    const flag = cmd === 'A' && (argIndex % 7 === 3 || argIndex % 7 === 4);
+    argIndex++;
+    const v = va + (vb - va) * k;
+    out.push(flag ? String(Math.round(v)) : String(+v.toFixed(5)));
+  }
+  return out.join(' ');
 }
 
 /**
@@ -375,7 +416,7 @@ export function steerablePaths(spec: unknown): string[] {
   const SKIP_ROOT = new Set(['timeline']);
   // `bands` (a field background's palette) is indexed like `stops`, so
   // `background.bands.2` is a hex paint path that glides.
-  const INDEXED = new Set(['layers', 'stops', 'bands']);
+  const INDEXED = new Set(['layers', 'stops', 'bands', 'parts']);
   // Mirror resolveSpecPath's layer-key precedence: a root field named the
   // same as a layer's key resolves to that layer, not the scalar, so don't
   // advertise a root path we can't actually deliver a delta to.

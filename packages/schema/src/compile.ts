@@ -28,7 +28,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, flattenSprite, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -313,6 +313,8 @@ const PATH_BLIT_MIN_POINTS = 128;
 const PLATE_MIN_POINTS = 2500;
 /** Distinct bitmaps one path sprite may hold before it is judged "changing" and flushed. */
 const PATH_BLIT_PER_SPRITE = 8;
+/** Distinct drawings (by content) the path caches remember at once. */
+const PATH_SLOT_MAX = 96;
 /** Colour × size-step bitmaps one drawing may hold in the moving-sprite cache. */
 const PATH_SPRITE_PER_SPRITE = 96;
 /** Largest moving-sprite bitmap (device px): beyond it a resampled (and maybe rotated) copy costs more than the fills — big moving drawings draw directly. */
@@ -451,7 +453,7 @@ class SpecInstance implements SaverInstance {
    * starts clean. A drawing whose key keeps changing (spinning, trailing,
    * growing) stops being cached and draws from a reused Path2D instead.
    */
-  private readonly pathBlits = new WeakMap<object, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }>; sprite?: boolean }>();
+  private readonly pathBlits = new Map<string, { entries: Map<string, { canvas: HTMLCanvasElement | OffscreenCanvas; x0: number; y0: number; px: number }>; flushes: number; off: boolean; parts2d?: Array<{ fill?: Path2D | null; fillPart?: Path2D | null; stroke?: Path2D | null }>; sprite?: boolean }>();
   /** Test/bench switch: `globalThis.__idleNoPathCache = true` before compiling draws every path directly. */
   private readonly noPathCache = (globalThis as { __idleNoPathCache?: boolean }).__idleNoPathCache === true;
   /** Device pixels held by every pathBlits bitmap — capped so a TV never pays more than PATH_BLIT_MAX_PIXELS of memory. */
@@ -838,10 +840,47 @@ class SpecInstance implements SaverInstance {
   }
 
   /** A fresh 2D canvas (DOM or Offscreen), or null where none can be made. */
+  /**
+   * A drawing's cache slot, keyed by what it draws (pathPaintSig), not by the
+   * sprite object — glides and timelines replace that object every frame.
+   * Least-recently-used slots are evicted past PATH_SLOT_MAX, and their
+   * bitmaps' pixels returned to the budget.
+   */
   private pathSlot(sprite: PolygonSprite) {
-    let slot = this.pathBlits.get(sprite);
-    if (!slot) { slot = { entries: new Map(), flushes: 0, off: false }; this.pathBlits.set(sprite, slot); }
+    const sig = pathPaintSig(sprite);
+    let slot = this.pathBlits.get(sig);
+    if (slot) {
+      this.pathBlits.delete(sig);
+      this.pathBlits.set(sig, slot);
+      return slot;
+    }
+    if (this.pathBlits.size >= PATH_SLOT_MAX) {
+      const [oldSig, old] = this.pathBlits.entries().next().value!;
+      for (const ent of old.entries.values()) this.pathBlitPixels -= ent.px;
+      this.pathBlits.delete(oldSig);
+    }
+    slot = { entries: new Map(), flushes: 0, off: false };
+    this.pathBlits.set(sig, slot);
     return slot;
+  }
+
+  /**
+   * Whether a layer's path drawing looks the same as last frame — the caches
+   * serve only steady drawings; one that is gliding (colour, gradient, shape)
+   * draws directly until it settles, instead of rasterising a bitmap a frame.
+   */
+  // Keyed by the layer's place in the scene, never the per-layer record: a
+  // scene that animates a baked field (alpha, size) rebuilds every record
+  // every frame, and a drawing beside it is still steady.
+  private readonly pathSteady = new Map<number, { sig: string; seq: number; steady: boolean }>();
+  private drawingSteady(built: Built, sprite: PolygonSprite): boolean {
+    const sig = pathPaintSig(sprite);
+    const li = this.layers.indexOf(built);
+    const prev = this.pathSteady.get(li);
+    if (prev && prev.seq === this.paintSeq && prev.sig === sig) return prev.steady;
+    const steady = prev !== undefined && prev.sig === sig;
+    this.pathSteady.set(li, { sig, seq: this.paintSeq, steady });
+    return steady;
   }
 
   /**
@@ -1298,7 +1337,7 @@ class SpecInstance implements SaverInstance {
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
       if (isPathPolygon(sprite)) {
         const fr = pathFrame(sprite, r, this.w, this.h);
-        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.blitPath(sprite, p, r, rot, resolvedColor, fr)) return;
+        if (pathDrawCost(sprite) >= PATH_BLIT_MIN_POINTS && !this.noPathCache && this.drawingSteady(built, sprite) && this.blitPath(sprite, p, r, rot, resolvedColor, fr)) return;
         ctx.save();
         ctx.translate(p.x, p.y);
         if (rot) ctx.rotate(rot);
@@ -1706,15 +1745,6 @@ class SpecInstance implements SaverInstance {
    */
   private readonly plates = new Map<number, { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D; end: number; sig: string; box: { x: number; y: number; w: number; h: number }; frameW: number; frameH: number }>();
 
-  /** Stable small ids for sprite objects, so a steer that swaps a sprite (new path, colour, rule) changes the plate signature. */
-  private readonly objIds = new WeakMap<object, number>();
-  private objSeq = 0;
-  private objId(o: object): number {
-    let id = this.objIds.get(o);
-    if (id === undefined) { id = ++this.objSeq; this.objIds.set(o, id); }
-    return id;
-  }
-
   /** Outline points a run of path layers fills per frame (points × entities). */
   private runPoints(a: number, b: number): number {
     let n = 0;
@@ -1755,7 +1785,7 @@ class SpecInstance implements SaverInstance {
     const opacity = built.layer.opacity;
     let lifeA = opacity === undefined ? lifeAlphaAt(built.layer.life, t) : lifeAlphaAt(built.layer.life, t) * clamp01(opacity);
     if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
-    let sig = `${this.objId(built.layer.sprite)}:${(built.layer.sprite as { color?: string }).color}:${lifeA.toFixed(4)}:${JSON.stringify(built.layer.transform ?? null)}:${JSON.stringify(group?.transform ?? null)}`;
+    let sig = `${pathPaintSig(built.layer.sprite as PolygonSprite)}:${lifeA.toFixed(4)}:${JSON.stringify(built.layer.transform ?? null)}:${JSON.stringify(group?.transform ?? null)}`;
     const parentE = this.parentEntityFor(built);
     for (const e of built.entities) {
       const p = this.entityPos(e, t, parentE);
