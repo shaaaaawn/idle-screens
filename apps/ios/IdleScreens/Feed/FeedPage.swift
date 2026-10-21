@@ -57,6 +57,11 @@ struct FeedPage: View {
     /// gating on that showed the site's bare black page for ~1 s.
     @State private var liveWebPainted = false
     @State private var liveStillGone = false
+    /// Last session's picture of this channel, chosen once on appearing and
+    /// held until the live scene paints over it. Re-checking it against each
+    /// refresh pulled it mid-launch whenever the channel had been steered
+    /// since — a flat backdrop for ~2 s between two pictures (2026-10-20).
+    @State private var launchPicture: UIImage?
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -205,7 +210,12 @@ struct FeedPage: View {
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
         }
-        .onAppear { if isActive { activate() } }
+        .onAppear {
+            if launchPicture == nil {
+                launchPicture = WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt)
+            }
+            if isActive { activate() }
+        }
         .onChange(of: refreshToken) { _, _ in
             if isActive { Task { await loadHistory() } }
         }
@@ -413,7 +423,9 @@ struct FeedPage: View {
     /// timeline) shows its background colour — its native still is often black.
     @ViewBuilder
     private var liveHoldingStill: some View {
-        if let picture = WebScenePool.shared.snapshot(channelId: channelId, sceneId: nil) {
+        if let picture = WebScenePool.shared.snapshot(channelId: channelId, sceneId: nil)
+            ?? launchPicture
+            ?? WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt) {
             // How the web engine last drew it, this visit — closer than any
             // native still, and what a sequence has instead of black.
             Image(uiImage: picture).resizable().scaledToFill().ignoresSafeArea()

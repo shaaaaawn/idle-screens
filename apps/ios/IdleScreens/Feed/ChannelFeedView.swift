@@ -42,6 +42,14 @@ struct ChannelFeedView: View {
     /// and sits there frozen. Re-sorted only on pull-to-refresh or reopening.
     @State private var order: [String] = []
     @Environment(\.scenePhase) private var scenePhase
+    /// Away long enough that the page should let go of its web view and
+    /// socket. A glance at another app, the app switcher or Control Center is
+    /// not that: the page used to be torn down on any of them, and coming
+    /// back reloaded the scene from nothing.
+    @State private var parked = false
+    @State private var parkTask: Task<Void, Never>?
+    /// How long a backgrounded page keeps its scene alive.
+    static let backgroundGrace: Duration = .seconds(120)
 
     /// The caller's channels, in the held order.
     private var pages: [PublicChannel] { FeedOrder.arrange(channels, by: order) }
@@ -66,7 +74,7 @@ struct ChannelFeedView: View {
                     ForEach(pages) { channel in
                         FeedPage(channel: channel,
                                  // Exactly one page holds a web view and a socket.
-                                 isActive: isOnScreen && scenePhase == .active
+                                 isActive: isOnScreen && !parked
                                      && channel.id == selection,
                                  showsBack: showsBack,
                                  refreshToken: refreshToken,
@@ -128,8 +136,28 @@ struct ChannelFeedView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            // Backgrounded: no warm page keeps a socket or a web process.
-            if phase != .active { WebScenePool.shared.drain() }
+            switch phase {
+            case .active:
+                parkTask?.cancel()
+                parkTask = nil
+                parked = false
+            case .background:
+                // Warm neighbours go now; the page on screen stays, so a quick
+                // return is the scene still playing (WebKit suspends it while
+                // we are away). Gone long enough, it is let go — its picture
+                // is kept, so even then it comes back as itself.
+                WebScenePool.shared.drain(keepSnapshots: true)
+                WebScenePool.shared.persistLaunchStills { id in
+                    channels.first { $0.id == id }?.lastEventAt
+                }
+                parkTask?.cancel()
+                parkTask = Task { @MainActor in
+                    try? await Task.sleep(for: Self.backgroundGrace)
+                    if !Task.isCancelled { parked = true }
+                }
+            default:
+                break
+            }
         }
         .statusBarHidden(chromeHidden)
         // Tap-to-hide is "just the scene": the tab bar goes with the rest of

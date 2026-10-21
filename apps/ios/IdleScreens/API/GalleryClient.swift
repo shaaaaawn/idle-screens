@@ -57,7 +57,7 @@ actor GalleryClient {
     }
 
     /// Last successfully fetched category catalog, or nil if never fetched.
-    func cachedCategories() -> [ChannelCategory]? {
+    nonisolated func cachedCategories() -> [ChannelCategory]? {
         guard let data = try? Data(contentsOf: categoriesCacheFileURL()) else { return nil }
         return (try? JSONDecoder().decode(CategoriesResponse.self, from: data))?.categories
     }
@@ -66,7 +66,7 @@ actor GalleryClient {
         let categories: [ChannelCategory]
     }
 
-    private func categoriesCacheFileURL() -> URL {
+    private nonisolated func categoriesCacheFileURL() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"
         return dir.appendingPathComponent("categories-\(host).json")
@@ -74,7 +74,7 @@ actor GalleryClient {
 
     /// Last successfully fetched channel list, or nil if never fetched.
     /// The inline scene specs make cached content fully renderable offline.
-    func cachedChannels() -> [PublicChannel]? {
+    nonisolated func cachedChannels() -> [PublicChannel]? {
         guard let data = try? Data(contentsOf: cacheFileURL()) else { return nil }
         return try? JSONDecoder().decode([PublicChannel].self, from: data)
     }
@@ -88,7 +88,7 @@ actor GalleryClient {
     /// clean miss instead of a silent, wrongly-permissive decode. Bump this
     /// again if `PublicChannel` ever gains another field whose absence must
     /// not be read as a default.
-    private func cacheFileURL() -> URL {
+    private nonisolated func cacheFileURL() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"
         return dir.appendingPathComponent("channels-v2-\(host).json")

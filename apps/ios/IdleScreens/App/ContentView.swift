@@ -1,7 +1,26 @@
 import SwiftUI
 
 struct ContentView: View {
+    /// The launch screen, held a beat and lifted: the scene and its chrome rise
+    /// out of the launch colour together instead of snapping in under it.
+    @State private var curtainUp = false
+
     var body: some View {
+        tabs
+            .overlay {
+                Color("LaunchBackground")
+                    .ignoresSafeArea()
+                    .opacity(curtainUp ? 0 : 1)
+                    .allowsHitTesting(false)
+            }
+            .task {
+                // One frame for the first page to lay out and draw its still.
+                try? await Task.sleep(for: .milliseconds(120))
+                withAnimation(.easeOut(duration: 0.7)) { curtainUp = true }
+            }
+    }
+
+    private var tabs: some View {
         TabView {
             WatchFeedView()
                 .tabItem { Label("Watch", systemImage: "play.tv") }

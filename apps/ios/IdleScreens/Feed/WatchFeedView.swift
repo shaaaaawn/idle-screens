@@ -24,9 +24,11 @@ struct WatchFeedView: View {
                 if feed.isEmpty {
                     // First run has no cache: never a bare black screen.
                     ZStack {
-                        Color.appBackground.ignoresSafeArea()
-                        if app.isLoadingGallery {
-                            ProgressView().tint(Color.textSecondary).controlSize(.large)
+                        Color("LaunchBackground").ignoresSafeArea()
+                        if !app.galleryAttempted || app.isLoadingGallery {
+                            // Not "nothing on air" — not asked yet. The launch
+                            // screen's colour, held; a spinner only if it drags.
+                            DelayedSpinner()
                         } else {
                             ContentUnavailableView {
                                 Label("Nothing on air", systemImage: "play.tv")
@@ -52,5 +54,19 @@ struct WatchFeedView: View {
         .task {
             if app.channels.isEmpty { await app.loadGallery() }
         }
+    }
+}
+
+/// A spinner that waits a second before fading in: a fast load shows nothing
+/// but the launch colour, and only a slow one says it is working.
+private struct DelayedSpinner: View {
+    @State private var shown = false
+    var body: some View {
+        ProgressView().tint(Color.textSecondary).controlSize(.large)
+            .opacity(shown ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: .seconds(1))
+                withAnimation(.easeIn(duration: 0.4)) { shown = true }
+            }
     }
 }
