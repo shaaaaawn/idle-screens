@@ -909,7 +909,7 @@ function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]
  * The luminance-grid cells each layer can paint (same viewport, seed and
  * grid as `luminanceGrid` with these options), for the timeline flash gate's
  * shortcut: per layer its cell indices, or null when its footprint is not
- * fixed — it moves, emits, links, orbits or cycles its text — and so may reach
+ * fixed — it moves, emits, links, trails, orbits or cycles its text — and so may reach
  * any cell. Each entity is a disc about its position that holds its whole
  * outline at its largest size under any rotation: generous, never short.
  */
@@ -922,7 +922,7 @@ export function layerCellFootprints(spec: SaverSpec, opts: LuminanceGridOptions 
   const cellH = h / rows;
   const fontScale = fontScaleFor(spec, w, h);
   return scene.layers.map(({ layer, entities }) => {
-    if (layer.motion.type !== 'static' || layer.emit || layer.links) return null;
+    if (layer.motion.type !== 'static' || layer.emit || layer.links || layer.trail) return null;
     const s = layer.sprite;
     const k = layer.transform !== undefined || layer.group !== undefined ? paintSize(spec, layer) : 1;
     const cells = new Set<number>();

@@ -169,6 +169,14 @@ describe('timelineFlashReport', () => {
       expect(r).toMatchObject({ fails: true, incomplete: true });
     });
 
+    it('treats a trailing layer as reaching every cell (trail echoes ignore the layer scale)', () => {
+      const keys = [];
+      for (let i = 0; i < 40; i++) keys.push(step(i * 100, 'dot.sprite.color', i % 2 ? '#000000' : '#ffffff'));
+      const dot = { key: 'dot', count: 1, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 }, opacity: 1, transform: { scale: 0.1 }, trail: { length: 500, fade: 0 }, sprite: { kind: 'circle', radius: [0.6, 0.6], color: '#ffffff' } };
+      const r = timelineFlashReport(scene('#000000', [dot], keys));
+      expect(r.fails).toBe(true);
+    });
+
     it('fails closed, saying how dense, when a large-area dense window is past the budget', () => {
       // Discs that cover most of the frame, each barely changing: nothing
       // flashes, but there is too much to resolve.
