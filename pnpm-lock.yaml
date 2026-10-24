@@ -207,6 +207,10 @@ importers:
         version: 0.1.74
 
   packages/schema:
+    dependencies:
+      '@idle-screens/validator':
+        specifier: workspace:^
+        version: link:../validator
     devDependencies:
       '@idle-screens/core':
         specifier: workspace:*

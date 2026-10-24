@@ -809,7 +809,16 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   Keys are also checked **together**: two keys that are each valid can
   combine past a floor (a `clock.rate` and a `pulse.period` share one), so
   the validator resolves the scene at every key's start, end and glide
-  quarter-points and rejects it there.
+  quarter-points and rejects it there. Paint keys on different paths can
+  also combine into a faster flicker than any one path allows: a top
+  layer's `opacity` switching between its own colour and the colour
+  beneath, each keyed at the floor and out of step, flickers the whole
+  frame 5 times a second. So where any one second holds 7 or more key
+  boundaries on paint paths (opacity, alpha, colours, stops, gradients,
+  strokes), publishing resolves the frame there and refuses more than 3
+  flashes a second over a quarter of the screen (WCAG 2.3.1,
+  `timelineFlashReport`). Keep big brightness changes at least ~170 ms
+  apart across the whole frame, not just per path.
 - A key on a **structural** path rebuilds the scene at that key — a pop, and
   the validator warns `timeline-structural-key`. Animate paint: colours,
   `opacity`, `transform`, polygon `points` (a whole equal-length array
