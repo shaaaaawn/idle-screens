@@ -1,12 +1,14 @@
 import { createRng } from '@idle-screens/core';
+import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
-import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
+import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
+import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -53,6 +55,17 @@ const READ_SAFE_AREA = 0.05;
  */
 const ADDITIVE_INK_CEILING = 1.0;
 
+/**
+ * Mean turn rate, in degrees a second, above which a spinning layer breaks a
+ * `motionIntensity: 'calm'` declaration. About three times the fastest shipped
+ * calm spin (`sakura`'s near petals at 32°/s); confetti tumbling on a
+ * [-220, 220] range averages 110.
+ */
+const CALM_MAX_SPIN = 90;
+
+/** Key boundaries of one window the near-limit flash check resolves: 10 is 5 flashes a second, past the gate's line. */
+const NEAR_FLASH_MAX_BOUNDARIES = 10;
+
 /** True when a region window is butted against an edge on the given axis and
  *  is a band rather than the whole axis — the shape of a deliberate anchor
  *  (a skyline along the bottom, a ceiling of stars along the top). */
@@ -90,6 +103,8 @@ export function adviseSpec(
   // ones; judging those would bury the real advisories. Without `opacity` or
   // `groups` no layer is hidden and every check below runs as it always has.
   const hidden = hiddenLayers(spec);
+  // The timeline as authored, for the checks that read it over time.
+  const authored = spec;
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
@@ -123,7 +138,7 @@ export function adviseSpec(
     if (layer.motion.type !== 'static') motionLayerCount++;
 
     const coh = cohesion[li]!;
-    if (seamsWorthWarning(layer, coh, entities.length)) {
+    if (seamsWorthWarning(layer, coh, entities.length, () => buriedAreaOf(layer, entities, opts.t ?? COHESION_T, w, h))) {
       // A soft or feathered edge has no edge to paint: overlaps pool into
       // smooth lumps, which is a cloud or a haze, not a seam. Measured live
       // (X423): the hard-edged control showed every overlap as an outline,
@@ -358,6 +373,41 @@ export function adviseSpec(
         message: 'most layers are static text — reads as a document, not a screensaver',
       });
     }
+  }
+
+  // `calm` is a promise about tempo, like `density` is one about emptiness —
+  // and spin is motion the eye reads (perception.motion counts it, X607).
+  // Only the turn rate is judged: drift speed cannot tell calm from moderate
+  // (the shipped calm `sakura` gusts outrun the moderate `comets`), while
+  // every shipped calm spin turns at ≤ 32°/s.
+  if (spec.motionIntensity === 'calm') {
+    for (let li = 0; li < spec.layers.length; li++) {
+      if (hidden?.[li]) continue;
+      const layer = spec.layers[li]!;
+      // A disc or ring looks the same turned.
+      if (!layer.spin || layer.sprite.kind === 'circle' || layer.sprite.kind === 'ring') continue;
+      const entities = allEntities[li]!;
+      if (entities.length === 0) continue;
+      const rate = (entities.reduce((s, e) => s + Math.abs(e.spinSpeed), 0) / entities.length) * (180 / Math.PI);
+      if (rate <= CALM_MAX_SPIN) continue;
+      warnings.push({
+        path: `layers[${li}].spin`,
+        code: 'motion-intensity-mismatch',
+        message: `declared motionIntensity: 'calm' but ${layer.key ? `\`${layer.key}\`` : `layers[${li}]`} spins at ~${Math.round(rate)}°/s on average — that reads busy, not calm (calm spins sit at ≤ ${CALM_MAX_SPIN}°/s); slow the spin or declare 'moderate' / 'energetic'`,
+      });
+    }
+  }
+
+  // Flash, near the line: the publish-time gate (`timelineFlashReport`) only
+  // refuses MORE than 3 flashes a second, so a full-frame step keyed at the
+  // 200 ms floor — 2.5 a second, right at the edge — passes it silently (X589).
+  const flicker = nearLimitFlash(authored);
+  if (flicker) {
+    warnings.push({
+      path: 'timeline',
+      code: 'flash-near-limit',
+      message: `the timeline flickers ${flicker.flashesPerSecond} times a second over ${Math.round(flicker.area * 100)}% of the frame around ${Math.round(flicker.at)} ms — at or near WCAG 2.3.1's limit of 3; space opposing luminance changes ≥ 500 ms apart, or lower the contrast between the two states`,
+    });
   }
 
   // Link starvation: links layer where few edges actually form.
@@ -615,26 +665,46 @@ export function adviseSpec(
       }
       return sourceOverPlate(base, ink, alpha);
     };
-    let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
+    let worst: { ground: number; plate: number; plateLabel: string | null; onSolid: boolean } | null = null;
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const cx = (box.x0 + box.x1) / 2;
-      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
-      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
-      const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
-      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
-      if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
-        worst = { ground, plate, plateLabel: lit?.label ?? null };
+      const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(spec, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+      // The ground is what is painted behind the text, not just the page: a
+      // solid backing chip drawn under a label is the standard remedy, and
+      // the one this message recommends (X562 — the same root cause as X388
+      // on low-contrast-layer). The chip must cover the whole box to replace
+      // the page: centre and corners are probed, and any probe it misses
+      // keeps the page at the box centre in play, judged as before.
+      const ix = (box.x1 - box.x0) * 0.02;
+      const iy = (box.y1 - box.y0) * 0.02;
+      const probes = [[cx, cy], [box.x0 + ix, box.y0 + iy], [box.x1 - ix, box.y0 + iy], [box.x0 + ix, box.y1 - iy], [box.x1 - ix, box.y1 - iy]] as const;
+      const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
+      let bare = false;
+      for (const [x, y] of probes) {
+        const under = groundUnder(spec, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
+        if (under) grounds.push({ rgb: under.rgb, onSolid: true });
+        else bare = true;
+      }
+      if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
+      for (const g of grounds) {
+        const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
+        const lit = brightestAdditivePlate(spec, allEntities, g.rgb, box, w, h);
+        const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+        if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
+          worst = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
+        }
       }
     }
     if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
       const under = worst.plateLabel
         ? ` and ${worst.plate.toFixed(1)}:1 under ${worst.plateLabel} at its brightest`
         : '';
+      const against = worst.onSolid ? 'against the solid layer painted under it' : 'against the background at the box centre';
       warnings.push({
         path: `layers[${b.li}].sprite`,
         code: 'text-legibility',
-        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 against the background at the box centre${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
+        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 ${against}${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
       });
     }
 
@@ -660,6 +730,31 @@ export function adviseSpec(
   }
 
   return warnings;
+}
+
+/**
+ * The densest one-second window of luminance key boundaries in a timeline,
+ * resolved and run through the WCAG analyzer at a stricter rate — a tile
+ * counts once it reaches 2 flashes a second — or null when nothing flickers
+ * that fast over a quarter of the frame. One window, at most
+ * {@link NEAR_FLASH_MAX_BOUNDARIES} boundaries of it: this runs on every
+ * preview, and a window denser than that is the publish gate's to judge.
+ */
+function nearLimitFlash(spec: SaverSpec): { flashesPerSecond: number; area: number; at: number } | null {
+  if (!spec.timeline) return null;
+  const { times, lap } = lumaKeyTimes(spec);
+  // Two flashes are four reversals inside the window.
+  let best: { from: number; n: number } | null = null;
+  for (let i = 0, e = 0; i < times.length; i++) {
+    while (e < times.length && times[e]! < times[i]! + 1000) e++;
+    if (e - i >= 4 && (!best || e - i > best.n)) best = { from: i, n: e - i };
+  }
+  if (!best) return null;
+  const window = times.slice(best.from, best.from + Math.min(best.n, NEAR_FLASH_MAX_BOUNDARIES));
+  const samples = flashSampleTimes(window).map((t) => ({ t, lum: luminanceGrid(spec, { t, cols: 16, rows: 9 }).cells.flat().map((v) => srgbToLinear(v * 255)) }));
+  const r = analyzeFlashes(samples, { maxFlashesPerSecond: 1 }).general;
+  if (!r.fails) return null;
+  return { flashesPerSecond: r.worstTileFlashesPerSecond, area: r.flashingAreaFraction, at: lap ? window[0]! % lap : window[0]! };
 }
 
 /**
@@ -762,7 +857,8 @@ function holeFrame(
 
 /**
  * What an earlier layer has painted at `pt` (t = 0), composited over the
- * page colour, or null when nothing solid sits there. Conservative on
+ * page colour (or over `base`, the page sampled where `pt` is, when the
+ * caller has it), or null when nothing solid sits there. Conservative on
  * purpose: only static, transform-free, normal-blend, hard-edged shapes
  * count, with exact containment for circles, axis-aligned (or quarter-turned)
  * rects and unrotated polygons — so the low-contrast check can only be
@@ -776,19 +872,23 @@ function groundUnder(
   pt: { x: number; y: number },
   w: number,
   h: number,
+  base: Rgb = backgroundRgb(spec),
 ): { rgb: Rgb; luma: number } | null {
-  let plate: Rgb = backgroundRgb(spec);
+  let plate: Rgb = base;
   let covered = false;
   for (let lj = 0; lj < li; lj++) {
     if (hidden?.[lj]) continue;
     const layer = spec.layers[lj]!;
     const sp = layer.sprite;
     if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    // A chip that is not there for the whole run (lifecycle, sparse emit) is
+    // not a ground the text can lean on.
+    if (layer.life !== undefined || layer.emit !== undefined) continue;
     if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
     if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
     const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of allEntities[lj]!) {
-      if (e.spinSpeed !== 0 || e.alpha * a <= 0) continue;
+      if (e.spinSpeed !== 0 || e.pulseAmp > 0 || e.growAmp > 0 || e.alpha * a <= 0) continue;
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
       const c = positionAt(e, 0, w, h);
@@ -842,7 +942,10 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
  * The outline / drop-shadow idiom (X416): the SAME string painted twice at the
  * same size, nudged a few px — a dark copy under the fill. That is one title,
  * not two labels colliding. "A few px" is judged against the glyph height, so
- * it holds at every viewport: centres within 15 % of it, sizes within 10 %.
+ * it holds at every viewport: centres within 15 % of it on EACH axis, sizes
+ * within 10 %. Per axis, not by straight-line distance: the four-corner
+ * outline puts copies at (±d, ±d), and the diagonal opposites sit √2 further
+ * apart than the axis neighbours for the same nudge (X611).
  */
 const OUTLINE_STACK_OFFSET = 0.15;
 
@@ -852,7 +955,7 @@ function isOutlineStack(a: TextBoxAt, b: TextBoxAt): boolean {
   if (fs <= 0 || Math.abs(a.fs - b.fs) > 0.1 * Math.max(a.fs, b.fs)) return false;
   const dx = (a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2;
   const dy = (a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2;
-  return Math.hypot(dx, dy) <= OUTLINE_STACK_OFFSET * fs;
+  return Math.max(Math.abs(dx), Math.abs(dy)) <= OUTLINE_STACK_OFFSET * fs;
 }
 
 interface TextBoxAt {

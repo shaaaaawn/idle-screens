@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { adviseSequence, adviseSpec } from './advise';
 import { perceiveScene } from './perceive';
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
+import { EXAMPLE_SPECS } from './examples';
 
 const scene = (layers: LayerSpec[], x: Partial<SaverSpec> = {}): SaverSpec =>
   ({ schemaVersion: 1, id: 't', label: 'T', seed: 1, background: { type: 'solid', color: '#101014' }, layers, ...x }) as SaverSpec;
@@ -123,5 +124,124 @@ describe('overlap-seams tells soft lumps from hard seams (X423)', () => {
   });
   it('a hard translucent layer keeps the edge warning', () => {
     expect(seam(storm(false))!.message).toContain('every overlap paints a visible edge');
+  });
+});
+
+describe('text-overlap leaves the four-corner outline alone (X611)', () => {
+  // Spin's meme caption: four black copies at (±d, ±d) under a white one.
+  const block = (key: string, color: string, dx: number, dy: number): LayerSpec =>
+    ({ key, count: 1, position: { x: 0.5, y: 0.5, dx, dy }, sprite: { kind: 'textBlock', text: 'EPIC', maxWidth: 1.6, fontSize: 0.1, lineHeight: 1.1, align: 'center', color, anchor: 'center', font: 'Impact, sans-serif', opacity: 1 }, alpha: [1, 1], motion: { type: 'static' } }) as LayerSpec;
+  const caption = (d: number): SaverSpec => scene([
+    block('o1', '#000000', -d, -d), block('o2', '#000000', d, -d), block('o3', '#000000', -d, d), block('o4', '#000000', d, d),
+    block('w', '#ffffff', 0, 0),
+  ], { background: { type: 'solid', color: '#3a1a6a' } });
+  it('diagonal copies of one caption are one outline, at any resolution', () => {
+    expect(codes(caption(0.0055), { width: 1600, height: 900 })).not.toContain('text-overlap');
+    expect(codes(caption(0.0055), { width: 3840, height: 2160 })).not.toContain('text-overlap');
+  });
+  it('the same copies pushed well past a nudge still clash', () => {
+    expect(codes(caption(0.0165), { width: 1600, height: 900 })).toContain('text-overlap');
+  });
+});
+
+describe('text-legibility judges the backing plate under the text (X562)', () => {
+  const field = { type: 'field', scale: 1.5, octaves: 3, warp: 0.55, quantize: 7, bands: ['#07040f', '#2a0a47', '#661069', '#b51f43', '#ec5a1c', '#ffb238', '#fff3cf'] };
+  const label = { key: 'label', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'THERMAL · 7 BANDS', fontSize: 0.02, maxWidth: 0.5, anchor: 'center', color: '#f4efe6', role: 'read' }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec;
+  const chip = (alpha: number, width = 0.25, x = 0.5): LayerSpec =>
+    ({ key: 'chip', count: 1, position: { x, y: 0.5 }, sprite: { kind: 'rect', width: [width, width], aspect: [0.14, 0.14], color: '#07040f' }, alpha: [alpha, alpha], motion: { type: 'static' } }) as LayerSpec;
+  const legible = (layers: LayerSpec[]) => codes(scene(layers, { seed: 42, background: field } as Partial<SaverSpec>), { width: 960, height: 540 });
+  it('the report: a dark chip under a pale label clears it', () => {
+    expect(legible([chip(0.72), label])).not.toContain('text-legibility');
+  });
+  it('the same label with no chip still fires', () => {
+    expect(legible([label])).toContain('text-legibility');
+  });
+  it('a chip too faint to darken the ground still fires', () => {
+    expect(legible([chip(0.2), label])).toContain('text-legibility');
+  });
+  it('a chip under only part of the label still fires', () => {
+    expect(legible([chip(0.72, 0.12, 0.44), label])).toContain('text-legibility');
+  });
+  it('a chip that is not on screen yet does not count as the ground', () => {
+    expect(legible([{ ...chip(0.72), life: { enter: 5000 } } as LayerSpec, label])).toContain('text-legibility');
+  });
+  it('a chip that breathes does not count as the ground', () => {
+    expect(legible([{ ...chip(0.72), pulse: { amp: 0.3, period: 4000 } } as LayerSpec, label])).toContain('text-legibility');
+  });
+});
+
+describe('overlap-seams leaves a banded table alone (X574)', () => {
+  const sky = (x: Partial<LayerSpec> = {}): SaverSpec => scene([
+    { key: 'sky', count: 7, position: { x: 0.5, y: 0.5, dx: 0, dy: -0.4 }, layout: { type: 'table', columns: 1, gap: { x: 1, y: 0.08 } }, sprite: { kind: 'rect', width: [1.64, 1.64], aspect: [0.0506, 0.0506], color: '#0f3d44', colors: ['#0f3d44', '#145056', '#1b6468', '#2a7a78', '#4a9488', '#7ab0a0', '#9cc4b0'] }, alpha: [1, 1], motion: { type: 'static' }, ...x } as LayerSpec,
+  ], { background: { type: 'solid', color: '#101a19' } });
+  it('rows of unlike colour that overlap by a hairline are bands, not a seam pile', () => {
+    expect(codes(sky(), { width: 1920, height: 1080 })).not.toContain('overlap-seams');
+  });
+  it('the same table painted translucent keeps the warning: every hairline paints darker', () => {
+    expect(codes(sky({ alpha: [0.8, 0.8] }), { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+  it('tall bands that overlap by a third of their width still warn in a square frame', () => {
+    const bars = scene([{ key: 'bars', count: 7, position: { x: 0.1, y: 0 }, layout: { type: 'table', columns: 7, gap: { x: 0.016, y: 0 } }, sprite: { kind: 'rect', width: [0.02, 0.02], aspect: [64, 64], color: '#0f3d44', colors: ['#0f3d44', '#145056', '#1b6468', '#2a7a78', '#4a9488', '#7ab0a0', '#9cc4b0'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);
+    expect(codes(bars, { width: 1000, height: 1000 })).toContain('overlap-seams');
+  });
+  it('a multi-colour silhouette of packed hard discs still warns', () => {
+    const hill = scene([{ key: 'hill', count: 30, region: { x: [0.3, 0.7], y: [0.55, 0.7] }, sprite: { kind: 'circle', radius: [0.08, 0.12], colors: ['#2a5a30', '#3a7a40'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);
+    expect(codes(hill, { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+});
+
+describe('flash-near-limit: a full-frame strobe at the key floor is named (X589)', () => {
+  const sq = 'M -1 -1 L 1 -1 L 1 1 L -1 1 Z';
+  const panel = (key: string): LayerSpec =>
+    ({ key, count: 1, position: { x: 0.5, y: 0.5 }, opacity: 0, sprite: { kind: 'polygon', radius: [1.5, 1.5], color: '#ffffff', path: sq }, alpha: [1, 1], motion: { type: 'static' } }) as LayerSpec;
+  const strobe = (every: number, n: number, keys: Array<{ t: number; path: string; value: number; dur: number; ease?: string }> = []): SaverSpec => scene([panel('a')], {
+    background: { type: 'solid', color: '#000000' },
+    timeline: { loop: true, duration: 4000, keys: [...Array.from({ length: n }, (_, i) => ({ t: i * every, path: 'a.opacity', value: i % 2 ? 0 : 1, dur: 0, ease: 'step' })), ...keys] },
+  } as Partial<SaverSpec>);
+  it('the report: one layer stepping black↔white every 200 ms', () => {
+    const w = adviseSpec(strobe(200, 10), { width: 960, height: 540 }).find((x) => x.code === 'flash-near-limit');
+    expect(w).toBeDefined();
+    expect(w!.message).toContain('2 times a second');
+  });
+  it('the same steps 600 ms apart are silent', () => {
+    expect(codes(strobe(600, 6))).not.toContain('flash-near-limit');
+  });
+  it('a closet light switching off over 280 ms twice a lap is silent', () => {
+    const closet = scene([{ ...panel('a'), opacity: 0.86, sprite: { kind: 'polygon', radius: [1.5, 1.5], color: '#000000', path: sq } } as LayerSpec], {
+      background: { type: 'solid', color: '#f0e8d0' },
+      timeline: { loop: true, duration: 24000, keys: [
+        { t: 2000, path: 'a.opacity', value: 0, dur: 280 }, { t: 8000, path: 'a.opacity', value: 0.86, dur: 280 },
+        { t: 14000, path: 'a.opacity', value: 0, dur: 280 }, { t: 20000, path: 'a.opacity', value: 0.86, dur: 280 },
+      ] },
+    } as Partial<SaverSpec>);
+    expect(codes(closet)).not.toContain('flash-near-limit');
+  });
+  it('a small blinking light is not a full-frame flash', () => {
+    const blink = scene([{ ...panel('a'), sprite: { kind: 'polygon', radius: [0.05, 0.05], color: '#ffffff', path: sq } } as LayerSpec], {
+      background: { type: 'solid', color: '#000000' },
+      timeline: { loop: true, duration: 4000, keys: Array.from({ length: 10 }, (_, i) => ({ t: i * 200, path: 'a.opacity', value: i % 2 ? 0 : 1, dur: 0, ease: 'step' })) },
+    } as Partial<SaverSpec>);
+    expect(codes(blink)).not.toContain('flash-near-limit');
+  });
+  it('no shipped example trips it', () => {
+    for (const s of EXAMPLE_SPECS) expect(codes(s)).not.toContain('flash-near-limit');
+  });
+});
+
+describe("motionIntensity: 'calm' is checked against spin (motion-intensity-mismatch)", () => {
+  const confetti = (intensity: SaverSpec['motionIntensity'], spin: [number, number]): SaverSpec => scene([
+    { key: 'confetti', count: 150, region: { x: [0, 1], y: [0, 1] }, sprite: { kind: 'rect', width: [0.008, 0.014], aspect: [0.5, 0.6], color: '#ffd070' }, alpha: [0.95, 0.95], motion: { type: 'drift', speed: [0.03, 0.07], angle: 92 }, spin } as LayerSpec,
+  ], { motionIntensity: intensity });
+  it('confetti tumbling at ±220°/s under calm is named', () => {
+    expect(codes(confetti('calm', [-220, 220]))).toContain('motion-intensity-mismatch');
+  });
+  it('the same confetti declared moderate is silent', () => {
+    expect(codes(confetti('moderate', [-220, 220]))).not.toContain('motion-intensity-mismatch');
+  });
+  it('a calm tumble is silent', () => {
+    expect(codes(confetti('calm', [-30, 30]))).not.toContain('motion-intensity-mismatch');
+  });
+  it('no shipped example trips it', () => {
+    for (const s of EXAMPLE_SPECS) expect(codes(s)).not.toContain('motion-intensity-mismatch');
   });
 });
