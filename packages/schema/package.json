@@ -47,6 +47,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src"
   },
+  "dependencies": {
+    "@idle-screens/validator": "workspace:^"
+  },
   "peerDependencies": {
     "@idle-screens/core": "workspace:^"
   },
