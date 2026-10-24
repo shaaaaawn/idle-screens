@@ -847,7 +847,14 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   strokes), publishing resolves the frame there and refuses more than 3
   flashes a second over a quarter of the screen (WCAG 2.3.1,
   `timelineFlashReport`). Keep big brightness changes at least ~170 ms
-  apart across the whole frame, not just per path.
+  apart across the whole frame, not just per path. The count is also taken
+  per cell of the check's 16 × 9 grid, from the keys on the layers that can
+  paint that cell: a staggered wave of small static dots is busy across the
+  frame but sparse in every cell, so it passes without a frame resolved. A
+  layer that moves, emits, links or has its geometry keyed counts as
+  reaching every cell. Past 512 frames to resolve, publishing refuses and
+  says the timeline is too dense to verify: put fewer paint keys in that
+  second, or align them to shared times.
 - **Path drawings: what a key can address.** Every field of a path
   polygon is paint, so all of these glide (`N` is a part's index):
   `sprite.path` and `sprite.parts.N.path` (a morph number by number when the

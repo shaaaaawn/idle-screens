@@ -905,6 +905,66 @@ function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]
   };
 }
 
+/**
+ * The luminance-grid cells each layer can paint (same viewport, seed and
+ * grid as `luminanceGrid` with these options), for the timeline flash gate's
+ * shortcut: per layer its cell indices, or null when its footprint is not
+ * fixed — it moves, emits, links, trails, orbits or cycles its text — and so may reach
+ * any cell. Each entity is a disc about its position that holds its whole
+ * outline at its largest size under any rotation: generous, never short.
+ */
+export function layerCellFootprints(spec: SaverSpec, opts: LuminanceGridOptions = {}): Array<number[] | null> {
+  const scene = buildScene(spec, opts);
+  const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
+  const rows = Math.max(8, Math.min(200, opts.rows ?? 48));
+  const { w, h, scale } = scene;
+  const cellW = w / cols;
+  const cellH = h / rows;
+  const fontScale = fontScaleFor(spec, w, h);
+  return scene.layers.map(({ layer, entities }) => {
+    if (layer.motion.type !== 'static' || layer.emit || layer.links || layer.trail) return null;
+    const s = layer.sprite;
+    const k = layer.transform !== undefined || layer.group !== undefined ? paintSize(spec, layer) : 1;
+    const cells = new Set<number>();
+    for (const e of entities) {
+      if (e.orbitParent || e.cyclePeriod > 0) return null;
+      const p = posOf(scene, e, 0);
+      const grow = 1 + Math.abs(e.growAmp);
+      const sz = e.size * grow * k;
+      const per = e.size > 0 ? sz / e.size : 1;
+      let reach: number;
+      if (s.kind === 'circle' || s.kind === 'ring') reach = sz / 2;
+      else if (s.kind === 'polygon' && isPathPolygon(s)) {
+        const fr = pathFrame(s, sz / 2, w, h);
+        reach = 0;
+        for (const part of pathParts(s)) {
+          const { cx, cy, hw, hh } = part.box;
+          const dx = Math.max(Math.abs(cx - hw - fr.ox), Math.abs(cx + hw - fr.ox)) * fr.sx;
+          const dy = Math.max(Math.abs(cy - hh - fr.oy), Math.abs(cy + hh - fr.oy)) * fr.sy;
+          reach = Math.max(reach, Math.hypot(dx, dy) + ((part.stroke?.width ?? 0) * sz) / 4);
+        }
+      } else if (s.kind === 'polygon') reach = polygonPoints(s, sz / 2).reduce((m, q) => Math.max(m, Math.hypot(q.x, q.y)), sz / 2);
+      else if (s.kind === 'rect') reach = Math.hypot(sz, (e.size2 ?? e.size) * per) / 2;
+      else if (s.kind === 'bar') {
+        const b = barBox(s.direction ?? 'right', sz * barFraction(s, e.barIndex ?? 0), e.size2 !== undefined ? e.size2 * per : sz * 0.2);
+        reach = Math.hypot(Math.abs(b.cx) + b.halfX, Math.abs(b.cy) + b.halfY);
+      } else if (s.kind === 'streak') reach = sz + (s.width ?? (scale === 1 ? 2 : 0.002)) * scale;
+      else if (s.kind === 'stroke') reach = strokeSamples(s, sz / 2).reduce((m, q) => Math.max(m, Math.hypot(q.x, q.y)), 0) + strokeWidthPx(s, scale);
+      else if (s.kind === 'text' || s.kind === 'textBlock') {
+        const b = s.kind === 'text' ? textBox(s, e, p, fontScale, scale) : textBlockBox(s, e, p, w, h);
+        reach = Math.hypot(Math.abs(b.cx - p.x) + b.halfX, Math.abs(b.cy - p.y) + b.halfY) * grow * Math.max(1, k);
+      } else reach = sz; // emoji: a glyph about its size
+      if (!Number.isFinite(reach) || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+      const c0 = Math.max(0, Math.floor((p.x - reach - 1) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((p.x + reach + 1) / cellW));
+      const r0 = Math.max(0, Math.floor((p.y - reach - 1) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((p.y + reach + 1) / cellH));
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.add(r * cols + c);
+    }
+    return [...cells].sort((a, b) => a - b);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Braille rendering
 // ---------------------------------------------------------------------------
