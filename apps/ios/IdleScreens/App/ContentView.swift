@@ -20,10 +20,15 @@ struct ContentView: View {
     var body: some View {
         // Measured once, here: every screen sizes its chrome from it.
         GeometryReader { window in
-            let scale = DeviceScale.forWidth(window.size.width)
+            let scale = DeviceScale.forSize(window.size)
             tabs
                 .environment(\.deviceScale, scale)
                 .dynamicTypeSize(typeSize.stepped(DeviceScale.typeSteps(scale)))
+                // A foldable folding or unfolding swaps the screen under us:
+                // which ways it may turn changes with it.
+                .onChange(of: min(window.size.width, window.size.height) >= OrientationPolicy.roomyShortSide) {
+                    OrientationPolicy.refresh()
+                }
         }
         .overlay {
             Color("LaunchBackground")

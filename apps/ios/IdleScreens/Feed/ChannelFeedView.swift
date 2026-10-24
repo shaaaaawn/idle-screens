@@ -33,6 +33,12 @@ struct ChannelFeedView: View {
     /// One switch for the whole feed: hide the chrome on one channel and it
     /// stays hidden as you flip, and the status bar goes with it.
     @State private var chromeHidden = false
+    /// A phone turned sideways (compact height): the player's full-screen
+    /// mode. No tab bar, and the controls fade on their own like a video
+    /// player's, back on a tap.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var sideways: Bool { verticalSizeClass == .compact }
+    @State private var autoHide: Task<Void, Never>?
     /// The order the pages are laid out in, by channel id. Held still while
     /// you watch: the caller's list is re-sorted "latest update first" on
     /// every gallery load (cold start swaps the disk cache for fresh data a
@@ -163,10 +169,17 @@ struct ChannelFeedView: View {
                 break
             }
         }
-        .statusBarHidden(chromeHidden)
+        .statusBarHidden(chromeHidden || sideways)
         // Tap-to-hide is "just the scene": the tab bar goes with the rest of
         // the chrome, on the same animation (the tap wraps it in withAnimation).
-        .toolbar(chromeHidden ? .hidden : .visible, for: .tabBar)
+        .toolbar(chromeHidden || sideways ? .hidden : .visible, for: .tabBar)
+        // Turning sideways shows the controls for a moment, then gets out of
+        // the way; any time they come back while sideways, they fade again.
+        .onChange(of: sideways) { _, now in
+            if now { withAnimation(.easeInOut(duration: 0.25)) { chromeHidden = false } }
+            scheduleAutoHide()
+        }
+        .onChange(of: chromeHidden) { _, _ in scheduleAutoHide() }
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -177,11 +190,14 @@ struct ChannelFeedView: View {
             // (see `PreviewBudget.enterFullscreen`), refcounted the same way
             // so an interleaved transition can't wake the device mid-viewing.
             PreviewBudget.shared.enterFullscreen()
+            OrientationPolicy.feedAppeared()
         }
         .onDisappear {
             isOnScreen = false
             WebScenePool.shared.drain()
             PreviewBudget.shared.exitFullscreen()
+            OrientationPolicy.feedDisappeared()
+            autoHide?.cancel()
         }
     }
 
@@ -189,6 +205,18 @@ struct ChannelFeedView: View {
         guard let here = pages.firstIndex(where: { $0.id == selection }),
               pages.indices.contains(here + delta) else { return }
         select(pages[here + delta].id, reader: reader, animated: true)
+    }
+
+    /// Sideways with the controls showing: fade them in 4 s. Anything else
+    /// cancels a pending fade.
+    private func scheduleAutoHide() {
+        autoHide?.cancel()
+        guard sideways, !chromeHidden else { return }
+        autoHide = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, sideways else { return }
+            withAnimation(.easeInOut(duration: 0.4)) { chromeHidden = true }
+        }
     }
 
     private func select(_ id: String?, reader: ScrollViewProxy, animated: Bool) {

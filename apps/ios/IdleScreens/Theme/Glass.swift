@@ -41,15 +41,16 @@ extension View {
     }
 }
 
-/// How much bigger the chrome is on this window than on a phone. A phone is
-/// 1; an iPad mini / Air 11" (or a mid-size window) 1.15; a 13" iPad, or any
-/// window 900 pt and wider, 1.3. Text grows with it through Dynamic Type
+/// How much bigger the chrome is on this window than on a phone, judged by
+/// its SHORT side so a phone turned sideways (874 × 402) stays a phone. A
+/// phone, or a foldable's cover screen, is 1; an iPad mini / Air 11" or an
+/// unfolded foldable 1.15; a 13" iPad 1.3. Text grows with it through Dynamic Type
 /// (`typeSteps`, on top of the person's own setting); fixed sizes — margins,
 /// avatars, buttons, card widths — multiply by it. Without it the iPad got
 /// phone-sized type and controls floating on a canvas twice as wide.
 enum DeviceScale {
-    static func forWidth(_ width: CGFloat) -> CGFloat {
-        switch width {
+    static func forSize(_ size: CGSize) -> CGFloat {
+        switch min(size.width, size.height) {
         case ..<600: return 1
         case ..<900: return 1.15
         default: return 1.3

@@ -131,7 +131,7 @@ struct WebSceneView: UIViewRepresentable {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true))
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = FullBleedWebView(frame: .zero, configuration: config)
         // Transparent until the page paints: the native backdrop behind it is
         // already the channel's colour, so entering never flashes white.
         webView.isOpaque = false
@@ -451,6 +451,14 @@ struct WebSceneView: UIViewRepresentable {
             webView.reload()
         }
     }
+}
+
+/// A web view that reports no safe area, so the page lays the scene out edge
+/// to edge. Sideways on a phone WebKit otherwise held the scene inside the
+/// notch insets, ~80 pt black bars down both sides. The native chrome above it
+/// clears the Dynamic Island itself.
+final class FullBleedWebView: WKWebView {
+    override var safeAreaInsets: UIEdgeInsets { .zero }
 }
 
 /// `WKUserContentController` retains its handlers strongly; without this the

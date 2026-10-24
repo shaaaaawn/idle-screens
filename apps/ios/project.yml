@@ -48,8 +48,12 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIUserInterfaceStyle: Dark
+        # iPhone: sideways is allowed so the feed can turn; OrientationPolicy
+        # (App/Orientation.swift) narrows it to portrait everywhere else.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # iPad: all orientations — required for multitasking support.
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait

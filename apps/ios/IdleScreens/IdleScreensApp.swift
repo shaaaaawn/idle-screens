@@ -1,7 +1,10 @@
 import SwiftUI
+import UIKit
 
 @main
 struct IdleScreensApp: App {
+    /// Only for `supportedInterfaceOrientationsFor:` — see `OrientationPolicy`.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -52,6 +55,18 @@ struct IdleScreensApp: App {
                     #if DEBUG
                     if args.contains("-seed-screens") {
                         appState.seedDemoScreens()
+                    }
+                    // `-orientation landscape` turns an iPhone sim sideways
+                    // headlessly (simctl has no rotate). iPhone only: iPadOS
+                    // refuses programmatic turns for multitasking apps.
+                    if let i = args.firstIndex(of: "-orientation"), args.indices.contains(i + 1) {
+                        try? await Task.sleep(for: .seconds(1.5))   // after the feed has appeared
+                        let mask: UIInterfaceOrientationMask = args[i + 1] == "landscape" ? .landscapeRight : .portrait
+                        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                                print("[orientation] \(error.localizedDescription)")
+                            }
+                        }
                     }
                     #endif
                 }

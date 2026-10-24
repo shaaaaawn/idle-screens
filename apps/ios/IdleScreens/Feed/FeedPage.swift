@@ -582,7 +582,10 @@ struct FeedPage: View {
                 .opacity(phase.isIdentity ? 1 : 0)
                 .blur(radius: phase.isIdentity ? 0 : 6)
         }
-        .padding(.horizontal, DeviceScale.margin(scale))
+        // Sideways the Dynamic Island and the corners are on the left and
+        // right: clear them as well as the margin.
+        .padding(.leading, insets.leading + DeviceScale.margin(scale))
+        .padding(.trailing, insets.trailing + DeviceScale.margin(scale))
         .padding(.top, insets.top + 6 * scale)
         .padding(.bottom, insets.bottom + 14 * scale)
     }
