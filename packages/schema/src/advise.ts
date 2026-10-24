@@ -1,12 +1,14 @@
 import { createRng } from '@idle-screens/core';
-import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
-import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
+import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
+import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
+import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
+import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
+import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -53,6 +55,17 @@ const READ_SAFE_AREA = 0.05;
  */
 const ADDITIVE_INK_CEILING = 1.0;
 
+/**
+ * Mean turn rate, in degrees a second, above which a spinning layer breaks a
+ * `motionIntensity: 'calm'` declaration. About three times the fastest shipped
+ * calm spin (`sakura`'s near petals at 32°/s); confetti tumbling on a
+ * [-220, 220] range averages 110.
+ */
+const CALM_MAX_SPIN = 90;
+
+/** Key boundaries of one window the near-limit flash check resolves: 10 is 5 flashes a second, past the gate's line. */
+const NEAR_FLASH_MAX_BOUNDARIES = 10;
+
 /** True when a region window is butted against an edge on the given axis and
  *  is a band rather than the whole axis — the shape of a deliberate anchor
  *  (a skyline along the bottom, a ceiling of stars along the top). */
@@ -90,6 +103,8 @@ export function adviseSpec(
   // ones; judging those would bury the real advisories. Without `opacity` or
   // `groups` no layer is hidden and every check below runs as it always has.
   const hidden = hiddenLayers(spec);
+  // The timeline as authored, for the checks that read it over time.
+  const authored = spec;
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
@@ -123,7 +138,7 @@ export function adviseSpec(
     if (layer.motion.type !== 'static') motionLayerCount++;
 
     const coh = cohesion[li]!;
-    if (seamsWorthWarning(layer, coh, entities.length)) {
+    if (seamsWorthWarning(layer, coh, entities.length, () => buriedAreaOf(layer, entities, opts.t ?? COHESION_T, w, h))) {
       // A soft or feathered edge has no edge to paint: overlaps pool into
       // smooth lumps, which is a cloud or a haze, not a seam. Measured live
       // (X423): the hard-edged control showed every overlap as an outline,
@@ -198,17 +213,23 @@ export function adviseSpec(
       });
       // A palette layer is visible if ANY of its colours separates — flag only
       // when every colour it can paint with disappears into the plate.
+      // A path drawing is judged by the colours its parts paint (X608); an
+      // entity whose every part is invisible paints nothing to judge.
       const seps = entities.map((e) => {
-        const hex = spriteHex(layer, e);
-        if (hex === null) return Infinity;
-        const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
-        const sep = Math.max(...plates.map((bg) => colourSeparation(layer, ink, bg)));
-        if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
-        // Close to the page colour — but the page may not be what is behind
-        // it. A dark key plate on an opaque yellow panel is judged against the
-        // panel, which is what the eye (and perception's dominance) sees (X388).
-        const under = groundUnder(spec, allEntities, li, hidden, positionAt(e, 0, w, h), w, h);
-        return under ? colourSeparation(layer, ink, under) : sep;
+        const inks = spriteInks(layer, e);
+        if (inks === null || inks.length === 0) return Infinity;
+        return Math.max(...inks.map((hex) => {
+          const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
+          const sep = Math.max(...plates.map((bg) => colourSeparation(layer, ink, bg)));
+          if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
+          // Close to the page colour — but the page may not be what is behind
+          // it. A dark key plate on an opaque yellow panel is judged against the
+          // panel, which is what the eye (and perception's dominance) sees (X388).
+          const at = positionAt(e, 0, w, h);
+          const under = groundUnder(spec, allEntities, li, hidden, at, w, h);
+          const framed = holeFrame(spec, allEntities, li, hidden, at, w, h);
+          return Math.max(under ? colourSeparation(layer, ink, under) : sep, framed ? colourSeparation(layer, ink, framed) : sep);
+        }));
       });
       const best = Math.max(...seps);
       if (best < LOW_CONTRAST_FLOOR) {
@@ -248,8 +269,13 @@ export function adviseSpec(
         pixArea = Math.PI * r * r;
       } else if (layer.sprite.kind === 'polygon') {
         // The outline's own area, not its bounding square (4r²) — a flat band
-        // or ridge fills a fraction of that.
-        pixArea = polygonArea(polygonPoints(layer.sprite, r));
+        // or ridge fills a fraction of that. A path drawing counts what its
+        // parts paint: an unfilled line is its stroke, not the area its
+        // points enclose (X605), and a part at opacity 0 is nothing.
+        if (isPathPolygon(layer.sprite)) {
+          const fr = pathFrame(layer.sprite, r, w, h);
+          pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy, r);
+        } else pixArea = polygonArea(polygonPoints(layer.sprite, r));
       } else if (layer.sprite.kind === 'bar') {
         pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
@@ -347,6 +373,41 @@ export function adviseSpec(
         message: 'most layers are static text — reads as a document, not a screensaver',
       });
     }
+  }
+
+  // `calm` is a promise about tempo, like `density` is one about emptiness —
+  // and spin is motion the eye reads (perception.motion counts it, X607).
+  // Only the turn rate is judged: drift speed cannot tell calm from moderate
+  // (the shipped calm `sakura` gusts outrun the moderate `comets`), while
+  // every shipped calm spin turns at ≤ 32°/s.
+  if (spec.motionIntensity === 'calm') {
+    for (let li = 0; li < spec.layers.length; li++) {
+      if (hidden?.[li]) continue;
+      const layer = spec.layers[li]!;
+      // A disc or ring looks the same turned.
+      if (!layer.spin || layer.sprite.kind === 'circle' || layer.sprite.kind === 'ring') continue;
+      const entities = allEntities[li]!;
+      if (entities.length === 0) continue;
+      const rate = (entities.reduce((s, e) => s + Math.abs(e.spinSpeed), 0) / entities.length) * (180 / Math.PI);
+      if (rate <= CALM_MAX_SPIN) continue;
+      warnings.push({
+        path: `layers[${li}].spin`,
+        code: 'motion-intensity-mismatch',
+        message: `declared motionIntensity: 'calm' but ${layer.key ? `\`${layer.key}\`` : `layers[${li}]`} spins at ~${Math.round(rate)}°/s on average — that reads busy, not calm (calm spins sit at ≤ ${CALM_MAX_SPIN}°/s); slow the spin or declare 'moderate' / 'energetic'`,
+      });
+    }
+  }
+
+  // Flash, near the line: the publish-time gate (`timelineFlashReport`) only
+  // refuses MORE than 3 flashes a second, so a full-frame step keyed at the
+  // 200 ms floor — 2.5 a second, right at the edge — passes it silently (X589).
+  const flicker = nearLimitFlash(authored);
+  if (flicker) {
+    warnings.push({
+      path: 'timeline',
+      code: 'flash-near-limit',
+      message: `the timeline flickers ${flicker.flashesPerSecond} times a second over ${Math.round(flicker.area * 100)}% of the frame around ${Math.round(flicker.at)} ms — at or near WCAG 2.3.1's limit of 3; space opposing luminance changes ≥ 500 ms apart, or lower the contrast between the two states`,
+    });
   }
 
   // Link starvation: links layer where few edges actually form.
@@ -449,10 +510,17 @@ export function adviseSpec(
     const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
-      const raw = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      const unturned = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      // The renderer turns text about its entity by `rotate`: a vertical
+      // caption is tall and narrow, not a long line off the edge (X603).
+      const rot = rotationAt(e, 0);
+      const turn = (q: { x: number; y: number }) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) });
       // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
+      // Both turns compose on the corners before one box is taken, so rotations that cancel don't grow it.
       const map = paintMap(spec, layer, w, h, scale);
-      const box = map ? { ...raw, ...mapBox(map, raw) } : raw;
+      const both = rot && map ? (q: { x: number; y: number }) => map(turn(q)) : rot ? turn : map;
+      const box = both ? { ...unturned, ...mapBox(both, unturned) } : unturned;
+      const raw = rot ? { ...unturned, ...mapBox(turn, unturned) } : unturned;
       // What the layer guarantees it paints, worst case: base alpha minus its
       // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
       // duty cycle is a readability question, not an ink-colour one; sampling
@@ -597,26 +665,46 @@ export function adviseSpec(
       }
       return sourceOverPlate(base, ink, alpha);
     };
-    let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
+    let worst: { ground: number; plate: number; plateLabel: string | null; onSolid: boolean } | null = null;
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const cx = (box.x0 + box.x1) / 2;
-      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
-      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
-      const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
-      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
-      if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
-        worst = { ground, plate, plateLabel: lit?.label ?? null };
+      const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(spec, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+      // The ground is what is painted behind the text, not just the page: a
+      // solid backing chip drawn under a label is the standard remedy, and
+      // the one this message recommends (X562 — the same root cause as X388
+      // on low-contrast-layer). The chip must cover the whole box to replace
+      // the page: centre and corners are probed, and any probe it misses
+      // keeps the page at the box centre in play, judged as before.
+      const ix = (box.x1 - box.x0) * 0.02;
+      const iy = (box.y1 - box.y0) * 0.02;
+      const probes = [[cx, cy], [box.x0 + ix, box.y0 + iy], [box.x1 - ix, box.y0 + iy], [box.x0 + ix, box.y1 - iy], [box.x1 - ix, box.y1 - iy]] as const;
+      const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
+      let bare = false;
+      for (const [x, y] of probes) {
+        const under = groundUnder(spec, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
+        if (under) grounds.push({ rgb: under.rgb, onSolid: true });
+        else bare = true;
+      }
+      if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
+      for (const g of grounds) {
+        const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
+        const lit = brightestAdditivePlate(spec, allEntities, g.rgb, box, w, h);
+        const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+        if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
+          worst = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
+        }
       }
     }
     if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
       const under = worst.plateLabel
         ? ` and ${worst.plate.toFixed(1)}:1 under ${worst.plateLabel} at its brightest`
         : '';
+      const against = worst.onSolid ? 'against the solid layer painted under it' : 'against the background at the box centre';
       warnings.push({
         path: `layers[${b.li}].sprite`,
         code: 'text-legibility',
-        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 against the background at the box centre${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
+        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 ${against}${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
       });
     }
 
@@ -642,6 +730,31 @@ export function adviseSpec(
   }
 
   return warnings;
+}
+
+/**
+ * The densest one-second window of luminance key boundaries in a timeline,
+ * resolved and run through the WCAG analyzer at a stricter rate — a tile
+ * counts once it reaches 2 flashes a second — or null when nothing flickers
+ * that fast over a quarter of the frame. One window, at most
+ * {@link NEAR_FLASH_MAX_BOUNDARIES} boundaries of it: this runs on every
+ * preview, and a window denser than that is the publish gate's to judge.
+ */
+function nearLimitFlash(spec: SaverSpec): { flashesPerSecond: number; area: number; at: number } | null {
+  if (!spec.timeline) return null;
+  const { times, lap } = lumaKeyTimes(spec);
+  // Two flashes are four reversals inside the window.
+  let best: { from: number; n: number } | null = null;
+  for (let i = 0, e = 0; i < times.length; i++) {
+    while (e < times.length && times[e]! < times[i]! + 1000) e++;
+    if (e - i >= 4 && (!best || e - i > best.n)) best = { from: i, n: e - i };
+  }
+  if (!best) return null;
+  const window = times.slice(best.from, best.from + Math.min(best.n, NEAR_FLASH_MAX_BOUNDARIES));
+  const samples = flashSampleTimes(window).map((t) => ({ t, lum: luminanceGrid(spec, { t, cols: 16, rows: 9 }).cells.flat().map((v) => srgbToLinear(v * 255)) }));
+  const r = analyzeFlashes(samples, { maxFlashesPerSecond: 1 }).general;
+  if (!r.fails) return null;
+  return { flashesPerSecond: r.worstTileFlashesPerSecond, area: r.flashingAreaFraction, at: lap ? window[0]! % lap : window[0]! };
 }
 
 /**
@@ -696,8 +809,56 @@ function brightestAdditivePlate(
 }
 
 /**
+ * The colour of a layer ABOVE `li` that frames the point through a hole: a
+ * static, opaque path drawing with more than one subpath whose outline box
+ * holds the point while its fill does not (a window, a slit, a porthole).
+ * What shows through is seen against that frame, not the background (X610).
+ */
+function holeFrame(
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  li: number,
+  hidden: boolean[] | null,
+  pt: { x: number; y: number },
+  w: number,
+  h: number,
+): { rgb: Rgb; luma: number } | null {
+  for (let lj = li + 1; lj < spec.layers.length; lj++) {
+    if (hidden?.[lj]) continue;
+    const layer = spec.layers[lj]!;
+    const sp = layer.sprite;
+    if (sp.kind !== 'polygon' || !isPathPolygon(sp) || sp.soft) continue;
+    if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    if (flattenSprite(sp).subpaths < 2) continue;
+    const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
+    for (const e of allEntities[lj]!) {
+      if (e.spinSpeed !== 0 || e.rotate || e.alpha * a < 0.9) continue;
+      const c = positionAt(e, 0, w, h);
+      // The outline lands through the drawing's frame (span stretches it,
+      // origin anchors it), as the renderer draws it.
+      const fr = pathFrame(sp, e.size / 2, w, h);
+      const pts = flattenSprite(sp).points.map(([u, v]) => ({ x: (u - fr.ox) * fr.sx, y: (v - fr.oy) * fr.sy }));
+      if (pts.length < 3) continue;
+      const dx = pt.x - c.x;
+      const dy = pt.y - c.y;
+      if (dx < Math.min(...pts.map((q) => q.x)) || dx > Math.max(...pts.map((q) => q.x))) continue;
+      if (dy < Math.min(...pts.map((q) => q.y)) || dy > Math.max(...pts.map((q) => q.y))) continue;
+      if (pointInPolygon(dx, dy, pts)) continue;
+      // What the frame paints, not its base colour: parts may override it, and
+      // a frame whose parts are all invisible frames nothing.
+      const ink = spriteInks(layer, e)?.[0];
+      if (ink === undefined) continue;
+      const rgb = hexRgb(ink);
+      return { rgb, luma: 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b };
+    }
+  }
+  return null;
+}
+
+/**
  * What an earlier layer has painted at `pt` (t = 0), composited over the
- * page colour, or null when nothing solid sits there. Conservative on
+ * page colour (or over `base`, the page sampled where `pt` is, when the
+ * caller has it), or null when nothing solid sits there. Conservative on
  * purpose: only static, transform-free, normal-blend, hard-edged shapes
  * count, with exact containment for circles, axis-aligned (or quarter-turned)
  * rects and unrotated polygons — so the low-contrast check can only be
@@ -711,19 +872,25 @@ function groundUnder(
   pt: { x: number; y: number },
   w: number,
   h: number,
+  base: Rgb = backgroundRgb(spec),
 ): { rgb: Rgb; luma: number } | null {
-  let plate: Rgb = backgroundRgb(spec);
+  let plate: Rgb = base;
   let covered = false;
   for (let lj = 0; lj < li; lj++) {
     if (hidden?.[lj]) continue;
     const layer = spec.layers[lj]!;
     const sp = layer.sprite;
     if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    // A chip that is not there for the whole run (lifecycle, sparse emit) is
+    // not a ground the text can lean on.
+    if (layer.life !== undefined || layer.emit !== undefined) continue;
     if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
     if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
+    // A path drawing paints through its parts (own colours, opacity, holes); the base colour is not what lands.
+    if (sp.kind === 'polygon' && isPathPolygon(sp)) continue;
     const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of allEntities[lj]!) {
-      if (e.spinSpeed !== 0 || e.alpha * a <= 0) continue;
+      if (e.spinSpeed !== 0 || e.pulseAmp > 0 || e.growAmp > 0 || e.alpha * a <= 0) continue;
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
       const c = positionAt(e, 0, w, h);
@@ -777,7 +944,10 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
  * The outline / drop-shadow idiom (X416): the SAME string painted twice at the
  * same size, nudged a few px — a dark copy under the fill. That is one title,
  * not two labels colliding. "A few px" is judged against the glyph height, so
- * it holds at every viewport: centres within 15 % of it, sizes within 10 %.
+ * it holds at every viewport: centres within 15 % of it on EACH axis, sizes
+ * within 10 %. Per axis, not by straight-line distance: the four-corner
+ * outline puts copies at (±d, ±d), and the diagonal opposites sit √2 further
+ * apart than the axis neighbours for the same nudge (X611).
  */
 const OUTLINE_STACK_OFFSET = 0.15;
 
@@ -787,7 +957,7 @@ function isOutlineStack(a: TextBoxAt, b: TextBoxAt): boolean {
   if (fs <= 0 || Math.abs(a.fs - b.fs) > 0.1 * Math.max(a.fs, b.fs)) return false;
   const dx = (a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2;
   const dy = (a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2;
-  return Math.hypot(dx, dy) <= OUTLINE_STACK_OFFSET * fs;
+  return Math.max(Math.abs(dx), Math.abs(dy)) <= OUTLINE_STACK_OFFSET * fs;
 }
 
 interface TextBoxAt {

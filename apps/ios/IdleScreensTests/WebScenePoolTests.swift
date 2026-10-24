@@ -64,6 +64,23 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertEqual(host.lastFrame, "{\"t\":1}")
     }
 
+    func testOnlyPlainChannelIdsBecomeLaunchStillFileNames() {
+        XCTAssertTrue(WebScenePool.isSafeFileName("fishtank"))
+        XCTAssertTrue(WebScenePool.isSafeFileName("show-holdfast_2"))
+        for bad in ["", "../etc", "a/b", "a~1", "a.jpg", "é", String(repeating: "a", count: 65)] {
+            XCTAssertFalse(WebScenePool.isSafeFileName(bad), bad)
+        }
+    }
+
+    func testBackgroundingKeepsPicturesButDropsWarmPages() {
+        let pool = WebScenePool.shared
+        park(pool, "studio", 597)
+        pool.storeSnapshot(UIImage(), channelId: "studio", sceneId: nil)
+        pool.drain(keepSnapshots: true)
+        XCTAssertEqual(pool.idleCount, 0)
+        XCTAssertNotNil(pool.snapshot(channelId: "studio", sceneId: nil))
+    }
+
     func testSnapshotsAreBoundedAndForgottenWithTheirChannel() {
         let pool = WebScenePool.shared
         let picture = UIImage()

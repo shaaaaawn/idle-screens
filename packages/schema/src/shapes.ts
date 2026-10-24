@@ -384,6 +384,58 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
 }
 
 /**
+ * What one part of a path drawing paints, in px² for a frame of `sx`·`sy` px
+ * per unit: its fill (holes out) and its stroke (drawn length × width), each
+ * already times its own opacity. The stroke is `width · r` px wide however the
+ * frame stretches (`r` the entity radius, as the renderer draws it). Zero for an invisible part (X609); an open
+ * `fill: false` line is its stroke, not the area its points enclose (X605).
+ */
+export function partInkArea(part: ResolvedPart, sx: number, sy: number, r: number): { fill: number; stroke: number } {
+  if (part.opacity <= 0) return { fill: 0, stroke: 0 };
+  const fill = part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x: x * sx, y: y * sy }))) * part.opacity : 0;
+  let stroke = 0;
+  if (part.stroke && part.stroke.width > 0) {
+    for (const l of part.flat.lines) {
+      const pts = l.points.map(([x, y]) => ({ x: x * sx, y: y * sy }));
+      if (l.closed && pts.length > 1) pts.push(pts[0]!);
+      stroke += pathLength(pts) * part.stroke.width * r;
+    }
+    stroke *= (part.stroke.opacity ?? 1) * part.opacity;
+  }
+  return { fill, stroke };
+}
+
+/**
+ * The share of a gradient's extent each stop's colour governs: the mean colour
+ * of a linear ramp is its stops weighted by the span half-way to each
+ * neighbour (flat beyond the ends). A redundant stop beside another barely
+ * moves it.
+ */
+export function gradientStopWeights(stops: ReadonlyArray<{ at: number }>): number[] {
+  const at = stops.map((st) => Math.min(1, Math.max(0, st.at)));
+  const order = at.map((_, i) => i).sort((a, b) => at[a]! - at[b]!);
+  const out = new Array<number>(stops.length).fill(0);
+  order.forEach((i, rank) => {
+    const prev = rank > 0 ? at[order[rank - 1]!]! : null;
+    const next = rank < order.length - 1 ? at[order[rank + 1]!]! : null;
+    const a = at[i]!;
+    out[i] = (prev === null ? a : (a - prev) / 2) + (next === null ? 1 - a : (next - a) / 2);
+  });
+  const sum = out.reduce((x, y) => x + y, 0);
+  return sum > 0 ? out.map((x) => x / sum) : out.map(() => 1 / Math.max(1, stops.length));
+}
+
+/** The total a path drawing paints (see `partInkArea`). */
+export function pathInkArea(s: PolygonSprite, sx: number, sy: number, r: number): number {
+  let area = 0;
+  for (const part of pathParts(s)) {
+    const a = partInkArea(part, sx, sy, r);
+    area += a.fill + a.stroke;
+  }
+  return area;
+}
+
+/**
  * How a path drawing's −1..1 unit box lands on screen, in px: scale per axis
  * (sx, sy) and the unit-box point (ox, oy) that sits at the entity position.
  *   span 'box' (default): uniform, the entity radius r on both axes — the

@@ -105,6 +105,39 @@ interface Shape {
   area: number;
   contains(x: number, y: number): boolean;
   outline(n: number): Array<{ x: number; y: number }>;
+  /** About `n` points spread over the filled area, for the buried-area read. */
+  interior(n: number): Array<{ x: number; y: number }>;
+}
+
+/**
+ * Golden-angle spiral: `n` points spread evenly over a disc. Shared by circles
+ * and by the buried-area read, which needs area samples rather than outline
+ * ones.
+ */
+function discSamples(cx: number, cy: number, r: number, n: number): Array<{ x: number; y: number }> {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  return Array.from({ length: n }, (_, i) => {
+    const rr = r * Math.sqrt((i + 0.5) / n);
+    return { x: cx + rr * Math.cos(i * golden), y: cy + rr * Math.sin(i * golden) };
+  });
+}
+
+/**
+ * A grid of about `n` cell centres over a `uw` × `vh` box, cells kept near
+ * square so a long thin band is sampled along its length AND across it.
+ * `map` places a local (u, v) point in the frame.
+ */
+function gridSamples(uw: number, vh: number, n: number, map: (u: number, v: number) => { x: number; y: number }): Array<{ x: number; y: number }> {
+  if (!(uw > 0) || !(vh > 0)) return [];
+  // At least 8 across each axis, whichever is the short side, so an overlap of an eighth of a thin
+  // band's height still registers.
+  const nv = Math.min(n, Math.max(8, Math.round(Math.sqrt((n * vh) / uw))));
+  const nu = Math.max(8, Math.round(n / nv));
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < nu; i++) {
+    for (let j = 0; j < nv; j++) out.push(map(((i + 0.5) / nu - 0.5) * uw, ((j + 0.5) / nv - 0.5) * vh));
+  }
+  return out;
 }
 
 /**
@@ -130,6 +163,7 @@ function circleShape(cx: number, cy: number, r: number): Shape {
   return {
     cx, cy, br: r, area: Math.PI * r * r,
     contains: (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < r * r,
+    interior: (n) => discSamples(cx, cy, r, n),
     outline: (n) => Array.from({ length: n }, (_, i) => {
       const a = (i / n) * Math.PI * 2;
       const inner = r * (1 - EDGE_INSET); // inward normal of a circle is its radius
@@ -174,9 +208,13 @@ function polyShape(cx: number, cy: number, raw: Array<{ x: number; y: number }>)
   const step = Math.min(br * EDGE_INSET, shortest * 0.25);
   const area = polygonArea(abs);
   if (!(area > 0)) return null; // collinear vertices enclose nothing
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of abs) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
   return {
     cx, cy, br, area,
     contains: inside,
+    // Its bounding box's grid, kept to the cells inside the outline.
+    interior: (n) => gridSamples(x1 - x0, y1 - y0, n, (u, v) => ({ x: (x0 + x1) / 2 + u, y: (y0 + y1) / 2 + v })).filter((p) => inside(p.x, p.y)),
     /**
      * `n` points spread along the perimeter by ARC LENGTH, not one share per
      * edge — a long skinny rectangle has two edges carrying almost all of its
@@ -226,9 +264,11 @@ function rectShape(cx: number, cy: number, halfW: number, halfH: number, rot: nu
   const cos = Math.cos(rot);
   const sin = Math.sin(rot);
   const corner = (lx: number, ly: number) => ({ x: cx + lx * cos - ly * sin, y: cy + lx * sin + ly * cos });
-  return polyShape(cx, cy, [
+  const shape = polyShape(cx, cy, [
     corner(-halfW, -halfH), corner(halfW, -halfH), corner(halfW, halfH), corner(-halfW, halfH),
   ]);
+  // A rect is sampled in its own frame, so a turned band is covered as evenly as an upright one.
+  return shape && { ...shape, interior: (n) => gridSamples(halfW * 2, halfH * 2, n, corner) };
 }
 
 function polygonShape(cx: number, cy: number, pts: Array<{ x: number; y: number }>, rot: number): Shape | null {
@@ -325,10 +365,7 @@ export function cohesionOf(
     // what it reads as has no answer — same as an unsupported sprite kind.
     if (lifeAlphaAt(layer.life, t) <= 0) return { ...base, overlap: null, reads: null };
 
-    const shapes: Array<Shape | null> = entities.map((e) => shapeOf(layer, e, t, w, h));
-    // A sprite that fills nothing is not a sibling: it cannot cover a
-    // neighbour's outline and it must not make a lone sprite look like a pair.
-    const solid = shapes.filter((x): x is Shape => x !== null && x.area > 0);
+    const solid = solidShapes(layer, entities, t, w, h);
     // A single entity has no sibling to merge with, and unsupported kinds have
     // no fillable outline — in both cases the question does not apply.
     if (solid.length < 2) return { ...base, overlap: null, reads: null };
@@ -363,13 +400,88 @@ export function cohesionOf(
 }
 
 /**
+ * The entities that fill area at `t`. A sprite that fills nothing is not a
+ * sibling: it cannot cover a neighbour's outline and it must not make a lone
+ * sprite look like a pair.
+ */
+function solidShapes(layer: LayerSpec, entities: Entity[], t: number, w: number, h: number): Shape[] {
+  return entities.map((e) => shapeOf(layer, e, t, w, h)).filter((x): x is Shape => x !== null && x.area > 0);
+}
+
+/** Interior samples per entity for {@link buriedAreaOf}. */
+const AREA_SAMPLES = 128;
+
+/**
+ * Below this mean buried-AREA fraction, a layer whose outlines are buried is
+ * a tiling, not a pile: neighbours meet edge to edge and overlap by a hairline
+ * (to hide the gap a fractional pixel would leave), which buries the long
+ * edges without burying the shapes. Calibrated, not picked: Spin's banded
+ * table (7 rows 0.083 tall on a 0.08 pitch, X574 — 0.06 exact) measures
+ * 0.000 at this sample density, the same table with rows 0.1 tall (a fifth of
+ * each row overlapped) 0.43, while a hill of 30 packed hard discs — the
+ * silhouette idiom the advisory is for — measures 0.96, a sparse ridge of 14
+ * 0.69, and `aurora`'s curtains 0.82 to 0.91.
+ */
+const TILED_AREA_MAX = 0.15;
+
+/**
+ * Mean fraction of an entity's filled AREA covered by a same-layer sibling,
+ * 0..1 — the counterpart of `overlap`, which measures outline. Edge contact
+ * buries outline and no area; a real pile buries both. `null` where
+ * `cohesionOf` reports no overlap.
+ */
+export function buriedAreaOf(layer: LayerSpec, entities: Entity[], t: number, w: number, h: number): number | null {
+  if (lifeAlphaAt(layer.life, t) <= 0) return null;
+  const solid = solidShapes(layer, entities, t, w, h);
+  if (solid.length < 2) return null;
+  const stride = Math.max(1, Math.ceil(solid.length / MAX_TRACED));
+  let covered = 0;
+  let traced = 0;
+  for (let i = 0; i < solid.length; i += stride) {
+    const pts = solid[i]!.interior(AREA_SAMPLES);
+    if (pts.length === 0) continue;
+    let hit = 0;
+    for (const p of pts) {
+      for (let j = 0; j < solid.length; j++) {
+        if (j === i) continue;
+        const other = solid[j]!;
+        const dx = p.x - other.cx;
+        const dy = p.y - other.cy;
+        if (dx * dx + dy * dy > other.br * other.br) continue;
+        if (other.contains(p.x, p.y)) { hit++; break; }
+      }
+    }
+    covered += hit / pts.length;
+    traced++;
+  }
+  return traced === 0 ? null : Number((covered / traced).toFixed(4));
+}
+
+/**
  * True when a `seamed` layer is worth warning about: dense enough to be
  * deliberate, and opaque enough that it cannot be an atmospheric wash. Keeps
  * the advisory off the soft low-alpha glow fields the playbook recommends.
+ *
+ * `buriedArea` (lazy, from {@link buriedAreaOf}) lets it also stay off a
+ * TILING whose only seam is its palette: opaque hard tiles of unlike colour
+ * that butt edge to edge show one clean colour boundary per join, which is
+ * the banding the author drew (X574). A translucent tiling is still warned
+ * about — each hairline overlap paints a darker line.
  */
-export function seamsWorthWarning(layer: LayerSpec, c: LayerCohesion, entityCount: number): boolean {
+export function seamsWorthWarning(layer: LayerSpec, c: LayerCohesion, entityCount: number, buriedArea?: () => number | null): boolean {
   if (c.reads !== 'seamed' || entityCount < 6) return false;
   const [lo, hi] = layer.alpha ?? [1, 1];
   if ((lo + hi) / 2 < WASH_ALPHA_MAX) return false;
-  return layer.blend !== 'lighter' && layer.blend !== 'screen';
+  if (layer.blend === 'lighter' || layer.blend === 'screen') return false;
+  if (buriedArea && paletteIsTheOnlySeam(layer)) {
+    const a = buriedArea();
+    if (a !== null && a < TILED_AREA_MAX) return false;
+  }
+  return true;
+}
+
+/** True when the layer would merge seamlessly but for its multi-colour palette. */
+function paletteIsTheOnlySeam(layer: LayerSpec): boolean {
+  if (seamCauseOf(layer) === null) return false;
+  return seamCauseOf({ ...layer, sprite: { ...layer.sprite, colors: undefined } as LayerSpec['sprite'] }) === null;
 }

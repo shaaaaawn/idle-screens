@@ -6,8 +6,8 @@ import SwiftUI
 /// Every tile is a live native render of the channel's scene — the content
 /// showcases itself.
 struct GalleryView: View {
+    @Environment(\.deviceScale) private var scale
     @Environment(AppState.self) private var app
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var query = ""
     @State private var gridWidth: CGFloat = 390
     @State private var filter: ChannelBrowse.Filter = .all
@@ -108,10 +108,8 @@ struct GalleryView: View {
         }
     }
 
-    private var gridColumns: Int { sizeClass == .regular ? 4 : 2 }
-    private var gridCardWidth: CGFloat {
-        max(120, (gridWidth - 32 - CGFloat(gridColumns - 1) * 12) / CGFloat(gridColumns))
-    }
+    private var gridColumns: Int { GalleryGrid.columns(width: gridWidth, scale: scale) }
+    private var gridCardWidth: CGFloat { GalleryGrid.cardWidth(width: gridWidth, columns: gridColumns, scale: scale) }
 
     /// Every shelf, hero included — the chips filter the real category, not
     /// the version with the billboard channel taken out.
@@ -166,7 +164,7 @@ struct GalleryView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, DeviceScale.margin(scale))
         }
     }
 
@@ -209,7 +207,7 @@ struct GalleryView: View {
                 Text(found.count == 1 ? "1 channel" : "\(found.count) channels")
                     .font(.caption)
                     .foregroundStyle(Color.textSecondary)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, DeviceScale.margin(scale))
                 let columns = gridColumns
                 let width = gridCardWidth
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(width), spacing: 12, alignment: .top), count: columns),
@@ -218,7 +216,7 @@ struct GalleryView: View {
                         ChannelCard(channel: channel, width: width, peers: found)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, DeviceScale.margin(scale))
             }
         }
     }
@@ -282,6 +280,7 @@ struct GalleryView: View {
 
 /// The top of the page: tall live tiles, the shape of the feed they open.
 private struct OnNowRail: View {
+    @Environment(\.deviceScale) private var scale
     let channels: [PublicChannel]
     @Environment(AppState.self) private var app
 
@@ -297,14 +296,14 @@ private struct OnNowRail: View {
                     .contextMenu { CardMenu(channel: channel) }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, DeviceScale.margin(scale))
         }
     }
 
     private func tile(_ channel: PublicChannel) -> some View {
         let viewers = channel.viewers ?? 0
         return ChannelPreviewTile(channel: channel)
-            .frame(width: 132, height: 214)
+            .frame(width: 132 * scale, height: 214 * scale)
             .overlay {
                 LinearGradient(colors: [.black.opacity(0.35), .clear, .clear, .black.opacity(0.8)],
                                startPoint: .top, endPoint: .bottom)
@@ -346,12 +345,16 @@ private struct OnNowRail: View {
 // MARK: - Category, two by two
 
 private struct SectionGrid: View {
+    @Environment(\.deviceScale) private var scale
     let shelf: HomeSection
     let columns: Int
     let cardWidth: CGFloat
 
     var body: some View {
-        let shown = Array(shelf.channels.prefix(columns * 2))
+        // Whole rows only: a lone card on a row of four read as a mistake
+        // on iPad. The rest stay one tap away behind "All N".
+        let fit = min(shelf.channels.count, columns * 2)
+        let shown = Array(shelf.channels.prefix(fit >= columns ? fit - fit % columns : fit))
         VStack(alignment: .leading, spacing: 12) {
             NavigationLink {
                 ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
@@ -390,7 +393,7 @@ private struct SectionGrid: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, DeviceScale.margin(scale))
     }
 }
 
@@ -399,6 +402,7 @@ private struct SectionGrid: View {
 /// Everything in one category, as a grid you can sort — the answer to "show
 /// me all of these" that a sideways row never gives.
 private struct ShelfGridView: View {
+    @Environment(\.deviceScale) private var scale
     let title: String
     var subtitle: String?
     var ownedTags: Set<String> = []
@@ -408,7 +412,6 @@ private struct ShelfGridView: View {
     /// the snapshot it was opened with.
     var sectionId: String?
     @Environment(AppState.self) private var app
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var order: Order = .curated
 
     private var channels: [PublicChannel] {
@@ -435,8 +438,8 @@ private struct ShelfGridView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let columns = sizeClass == .regular ? 4 : 2
-            let width = max(120, (geo.size.width - 32 - CGFloat(columns - 1) * 12) / CGFloat(columns))
+            let columns = GalleryGrid.columns(width: geo.size.width, scale: scale)
+            let width = GalleryGrid.cardWidth(width: geo.size.width, columns: columns, scale: scale)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let subtitle {
@@ -476,6 +479,7 @@ private struct ShelfGridView: View {
 // MARK: - Poster card
 
 private struct ChannelCard: View {
+    @Environment(\.deviceScale) private var scale
     @Environment(AppState.self) private var app
     let channel: PublicChannel
     let width: CGFloat
@@ -518,6 +522,9 @@ private struct ChannelCard: View {
                     // Follow without leaving the wall: the cheapest "yes" in
                     // the app, so it is one tap from every card.
                     .overlay(alignment: .topTrailing) { CardFollowButton(channelId: channel.id) }
+                    // A trackpad pointer on iPad: the card lifts under it.
+                    .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 12))
+                    .hoverEffect(.lift)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
@@ -607,6 +614,25 @@ private struct CardMenu: View {
         ShareLink(item: app.gallery.viewerURL(for: channel.id)) {
             Label("Share", systemImage: "square.and.arrow.up")
         }
+    }
+}
+
+/// The wall's grid: two columns on a phone; on an iPad as many cards of
+/// about 180 pt × scale as fit, so a 13-inch screen in landscape gets five
+/// instead of four stretched ones and an iPad mini gets three.
+enum GalleryGrid {
+    static let spacing: CGFloat = 12
+
+    static func columns(width: CGFloat, scale: CGFloat) -> Int {
+        guard scale > 1 else { return 2 }
+        let usable = width - 2 * DeviceScale.margin(scale)
+        let fit = (usable + spacing) / (180 * scale + spacing)
+        return min(6, max(3, Int(fit.rounded())))
+    }
+
+    static func cardWidth(width: CGFloat, columns: Int, scale: CGFloat) -> CGFloat {
+        let usable = width - 2 * DeviceScale.margin(scale) - CGFloat(columns - 1) * spacing
+        return max(120, usable / CGFloat(columns))
     }
 }
 

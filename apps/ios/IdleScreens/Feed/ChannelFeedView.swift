@@ -33,6 +33,12 @@ struct ChannelFeedView: View {
     /// One switch for the whole feed: hide the chrome on one channel and it
     /// stays hidden as you flip, and the status bar goes with it.
     @State private var chromeHidden = false
+    /// A phone turned sideways (compact height): the player's full-screen
+    /// mode. No tab bar, and the controls fade on their own like a video
+    /// player's, back on a tap.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var sideways: Bool { verticalSizeClass == .compact }
+    @State private var autoHide: Task<Void, Never>?
     /// The order the pages are laid out in, by channel id. Held still while
     /// you watch: the caller's list is re-sorted "latest update first" on
     /// every gallery load (cold start swaps the disk cache for fresh data a
@@ -42,6 +48,14 @@ struct ChannelFeedView: View {
     /// and sits there frozen. Re-sorted only on pull-to-refresh or reopening.
     @State private var order: [String] = []
     @Environment(\.scenePhase) private var scenePhase
+    /// Away long enough that the page should let go of its web view and
+    /// socket. A glance at another app, the app switcher or Control Center is
+    /// not that: the page used to be torn down on any of them, and coming
+    /// back reloaded the scene from nothing.
+    @State private var parked = false
+    @State private var parkTask: Task<Void, Never>?
+    /// How long a backgrounded page keeps its scene alive.
+    static let backgroundGrace: Duration = .seconds(120)
 
     /// The caller's channels, in the held order.
     private var pages: [PublicChannel] { FeedOrder.arrange(channels, by: order) }
@@ -66,7 +80,7 @@ struct ChannelFeedView: View {
                     ForEach(pages) { channel in
                         FeedPage(channel: channel,
                                  // Exactly one page holds a web view and a socket.
-                                 isActive: isOnScreen && scenePhase == .active
+                                 isActive: isOnScreen && !parked
                                      && channel.id == selection,
                                  showsBack: showsBack,
                                  refreshToken: refreshToken,
@@ -81,6 +95,10 @@ struct ChannelFeedView: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $selection)
             .scrollIndicators(.hidden)
+            // ↑ ↓ on an iPad keyboard flip channel (the page on screen has
+            // focus and passes these up; it keeps ← → for its history).
+            .onKeyPress(.downArrow) { step(+1, reader: reader); return .handled }
+            .onKeyPress(.upArrow) { step(-1, reader: reader); return .handled }
             // Pulling down past the newest channel asks for newer ones — the
             // gesture every feed has taught. After it, you land on whatever is
             // now first, because that is what you pulled for.
@@ -128,13 +146,40 @@ struct ChannelFeedView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            // Backgrounded: no warm page keeps a socket or a web process.
-            if phase != .active { WebScenePool.shared.drain() }
+            switch phase {
+            case .active:
+                parkTask?.cancel()
+                parkTask = nil
+                parked = false
+            case .background:
+                // Warm neighbours go now; the page on screen stays, so a quick
+                // return is the scene still playing (WebKit suspends it while
+                // we are away). Gone long enough, it is let go — its picture
+                // is kept, so even then it comes back as itself.
+                WebScenePool.shared.drain(keepSnapshots: true)
+                WebScenePool.shared.persistLaunchStills { id in
+                    channels.first { $0.id == id }?.lastEventAt
+                }
+                parkTask?.cancel()
+                parkTask = Task { @MainActor in
+                    try? await Task.sleep(for: Self.backgroundGrace)
+                    if !Task.isCancelled { parked = true }
+                }
+            default:
+                break
+            }
         }
-        .statusBarHidden(chromeHidden)
+        .statusBarHidden(chromeHidden || sideways)
         // Tap-to-hide is "just the scene": the tab bar goes with the rest of
         // the chrome, on the same animation (the tap wraps it in withAnimation).
-        .toolbar(chromeHidden ? .hidden : .visible, for: .tabBar)
+        .toolbar(chromeHidden || sideways ? .hidden : .visible, for: .tabBar)
+        // Turning sideways shows the controls for a moment, then gets out of
+        // the way; any time they come back while sideways, they fade again.
+        .onChange(of: sideways) { _, now in
+            if now { withAnimation(.easeInOut(duration: 0.25)) { chromeHidden = false } }
+            scheduleAutoHide()
+        }
+        .onChange(of: chromeHidden) { _, _ in scheduleAutoHide() }
         .navigationBarBackButtonHidden()
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
@@ -145,11 +190,32 @@ struct ChannelFeedView: View {
             // (see `PreviewBudget.enterFullscreen`), refcounted the same way
             // so an interleaved transition can't wake the device mid-viewing.
             PreviewBudget.shared.enterFullscreen()
+            OrientationPolicy.feedAppeared()
         }
         .onDisappear {
             isOnScreen = false
             WebScenePool.shared.drain()
             PreviewBudget.shared.exitFullscreen()
+            OrientationPolicy.feedDisappeared()
+            autoHide?.cancel()
+        }
+    }
+
+    private func step(_ delta: Int, reader: ScrollViewProxy) {
+        guard let here = pages.firstIndex(where: { $0.id == selection }),
+              pages.indices.contains(here + delta) else { return }
+        select(pages[here + delta].id, reader: reader, animated: true)
+    }
+
+    /// Sideways with the controls showing: fade them in 4 s. Anything else
+    /// cancels a pending fade.
+    private func scheduleAutoHide() {
+        autoHide?.cancel()
+        guard sideways, !chromeHidden else { return }
+        autoHide = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, sideways else { return }
+            withAnimation(.easeInOut(duration: 0.4)) { chromeHidden = true }
         }
     }
 

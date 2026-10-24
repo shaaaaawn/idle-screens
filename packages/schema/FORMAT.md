@@ -490,7 +490,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   across the room, and opts that layer into two advisories:
   `text-legibility` fires when the text colour's WCAG ratio falls below
   **4.5:1** against the background sampled at the box centre (gradient stops
-  interpolated at rest, `band` honoured) **or** against the brightest
+  interpolated at rest, `band` honoured) — or, where an earlier static,
+  hard-edged, unblended layer covers the whole box (a backing chip), against
+  that layer composited over the page — **or** against the brightest
   additive layer (`blend: lighter` / `screen`) whose entities can reach the
   box and are at least a glyph tall, taken at its peak alpha (base + pulse)
   composited over that background — a glow parked under a caption is
@@ -809,7 +811,16 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   Keys are also checked **together**: two keys that are each valid can
   combine past a floor (a `clock.rate` and a `pulse.period` share one), so
   the validator resolves the scene at every key's start, end and glide
-  quarter-points and rejects it there.
+  quarter-points and rejects it there. Paint keys on different paths can
+  also combine into a faster flicker than any one path allows: a top
+  layer's `opacity` switching between its own colour and the colour
+  beneath, each keyed at the floor and out of step, flickers the whole
+  frame 5 times a second. So where any one second holds 7 or more key
+  boundaries on paint paths (opacity, alpha, colours, stops, gradients,
+  strokes), publishing resolves the frame there and refuses more than 3
+  flashes a second over a quarter of the screen (WCAG 2.3.1,
+  `timelineFlashReport`). Keep big brightness changes at least ~170 ms
+  apart across the whole frame, not just per path.
 - A key on a **structural** path rebuilds the scene at that key — a pop, and
   the validator warns `timeline-structural-key`. Animate paint: colours,
   `opacity`, `transform`, polygon `points` (a whole equal-length array
@@ -962,14 +973,25 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   will look wrong on the wall; one that passes may still sit a few px off.
   Two more are **opt-in** through the text sprite's `role: "read"` (see the
   `textBlock` sprite): `text-legibility` (WCAG ratio below 4.5:1 against the
-  background at the box centre or under the brightest additive layer that can
-  sit beneath the line) and `text-safe-area` (the box within 5 % of an edge,
+  background at the box centre, or the solid chip painted under the whole box,
+  or under the brightest additive layer that can sit beneath the line) and `text-safe-area` (the box within 5 % of an edge,
   with its box in `boxes`). Undeclared text is never measured for either.
   `overlap-seams` catches the trap the other channels are blind to: a layer
   whose entities bury each other (so it was drawn as one shape) but whose paint
   settings make every overlap visible. It is gated to stay off deliberate
   washes — it needs at least 6 entities and a mean base alpha of 0.45, and
-  never fires under `blend: lighter` / `screen`. No shipped example trips it.
+  never fires under `blend: lighter` / `screen`. Nor does it fire when the
+  only seam is a multi-colour palette and the shapes bury their neighbours'
+  outlines but under 15 % of their area — rows or tiles butted edge to edge
+  (overlapping by a hairline to hide the gap) are banding, not a pile. No
+  shipped example trips it.
+  `motion-intensity-mismatch` fires when a scene declares
+  `motionIntensity: "calm"` but a layer of shapes, glyphs or text spins
+  faster than 90°/s on average (shipped calm spins stay at or under 32°/s).
+  `flash-near-limit` fires when a timeline's luminance keys, resolved over
+  their densest one-second window, flicker at least 2 times a second over a
+  quarter of the frame — a full-frame step at the 200 ms key floor is 2.5, which
+  the publish-time WCAG gate (more than 3) lets through.
   The two density advisories read the spec's declared `density` first:
   `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
   under `"dense"`, and `density-mismatch` fires instead when the measured
