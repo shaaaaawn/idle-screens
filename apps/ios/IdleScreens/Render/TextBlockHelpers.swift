@@ -17,9 +17,32 @@ private func charWidthEmUnit(_ unit: UInt16) -> Double {
     return 0.55
 }
 
+/// Full-width (East Asian Wide/Fullwidth) scalars advance a whole em: CJK
+/// ideographs, kana, Hangul, CJK punctuation, fullwidth forms. Halfwidth kana
+/// (U+FF61–FFDC) stays narrow. Same ranges as simulate.ts `isFullWidth` (X614).
+func isFullWidth(_ cp: UInt32) -> Bool {
+    if isCombiningKana(cp) { return false }
+    switch cp {
+    case 0x1100...0x115F, 0x2E80...0x303E, 0x3041...0x33FF, 0x3400...0x4DBF,
+         0x4E00...0x9FFF, 0xA000...0xA4CF, 0xA960...0xA97F, 0xAC00...0xD7A3,
+         0xF900...0xFAFF, 0xFE30...0xFE4F, 0xFF01...0xFF60, 0xFFE0...0xFFE6,
+         0x20000...0x3FFFD:
+        return true
+    default:
+        return false
+    }
+}
+
+/// Combining (semi-)voiced sound marks ride on the preceding kana and advance nothing.
+func isCombiningKana(_ cp: UInt32) -> Bool { cp == 0x3099 || cp == 0x309A }
+
 func textWidthEm(_ str: String) -> Double {
     var w = 0.0
-    for unit in str.utf16 { w += charWidthEmUnit(unit) }
+    for scalar in str.unicodeScalars {
+        if isCombiningKana(scalar.value) { continue }
+        if isFullWidth(scalar.value) { w += 1; continue }
+        for unit in String(scalar).utf16 { w += charWidthEmUnit(unit) }
+    }
     return w
 }
 

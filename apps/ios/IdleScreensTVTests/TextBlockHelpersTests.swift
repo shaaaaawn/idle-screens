@@ -3,6 +3,18 @@ import XCTest
 
 final class TextBlockHelpersTests: XCTestCase {
 
+    // MARK: - Full-width metrics (X614, parity with simulate.ts)
+
+    func testFullWidthGlyphsAdvanceAWholeEm() {
+        XCTAssertEqual(textWidthEm("カタカナ"), 4, accuracy: 1e-9)
+        XCTAssertEqual(textWidthEm("漢字かな한글"), 6, accuracy: 1e-9)
+        XCTAssertEqual(textWidthEm("ＡＢ"), 2, accuracy: 1e-9)
+        XCTAssertEqual(textWidthEm("𠀋"), 1, accuracy: 1e-9)
+        XCTAssertEqual(textWidthEm("ｶﾀｶﾅ"), 4 * 0.55, accuracy: 1e-9, "halfwidth kana stays narrow")
+        XCTAssertEqual(textWidthEm("abc"), 3 * 0.55, accuracy: 1e-9)
+        XCTAssertEqual(textWidthEm("か\u{3099}"), 1, accuracy: 1e-9, "a combining sound mark adds no width")
+    }
+
     // MARK: - breakTextBlock
 
     func testSingleWordFits() {

@@ -70,6 +70,16 @@ final class SpecCoverageTests: XCTestCase {
         XCTAssertGreaterThan(curved.map(\.y).max()!, 5)
     }
 
+    func testLinearStrokeKeepsEveryVertex() {
+        // X566: three segments, 24 uniform samples skipped both inner corners.
+        let pts: [[Double]] = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+        let samples = NativeSceneView.strokeSamples(points: pts, halfSize: 100, smooth: false)
+        for p in pts {
+            XCTAssertTrue(samples.contains { abs($0.x - p[0] * 100) < 1e-9 && abs($0.y - p[1] * 100) < 1e-9 },
+                          "vertex \(p) is a sample")
+        }
+    }
+
     func testStrokeTaperThinsEndsAndPeaksMidMark() {
         XCTAssertEqual(NativeSceneView.strokeTaper(0.5), 1, accuracy: 1e-9)
         XCTAssertEqual(NativeSceneView.strokeTaper(0), 0.15, accuracy: 1e-9, "floored, never vanishes")

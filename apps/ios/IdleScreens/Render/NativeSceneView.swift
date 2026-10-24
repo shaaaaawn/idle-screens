@@ -731,6 +731,7 @@ struct NativeSceneView: View {
 
     /// The stroke path, sampled. Smooth strokes run Catmull-Rom through the
     /// control points; enough samples that every segment keeps its curve.
+    /// Linear strokes include every vertex (shapes.ts `strokeSamples`).
     static func strokeSamples(points: [[Double]], halfSize: Double, smooth: Bool) -> [CGPoint] {
         let pts = points.compactMap {
             $0.count >= 2 ? (x: $0[0] * halfSize, y: $0[1] * halfSize) : nil
@@ -739,7 +740,10 @@ struct NativeSceneView: View {
         guard m >= 2 else { return pts.map { CGPoint(x: $0.x, y: $0.y) } }
         let curved = smooth && m >= 3
         let segs = m - 1
-        let n = max(24, segs * 6 + 1)
+        var n = max(24, segs * 6 + 1)
+        // A polyline samples a whole number of steps per segment, so every
+        // authored vertex is a sample and its corners stay sharp (X566).
+        if !curved { n = (n - 1 + segs - 1) / segs * segs + 1 }
         func at(_ k: Int) -> (x: Double, y: Double) { pts[max(0, min(m - 1, k))] }
         return (0..<n).map { i in
             let u = Double(i) / Double(n - 1) * Double(segs)
