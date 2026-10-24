@@ -1352,10 +1352,11 @@ function pathGeometryProblem(d: string, rule: PathFillRule, filled: boolean): st
   const flat = flattenPath(d, rule);
   const inBox = ([x, y]: readonly number[]): boolean => Math.abs(x!) <= 1.0001 && Math.abs(y!) <= 1.0001;
   const problem = flat.error ? `not a usable path: ${flat.error}`
+    : flat.points.length > MAX_PATH_POINTS ? `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`
+    // Bounds first: a keyed path may collapse (NO_AREA/NO_LINE are waived), but its stroke must still stay in the box.
+    : !flat.points.every(inBox) || !flat.lines.every((l) => l.points.every(inBox)) ? 'must stay inside the -1..1 unit box (curves included)'
     : filled && flat.points.length < 3 ? NO_AREA
     : !filled && flat.lines.length === 0 ? NO_LINE
-    : flat.points.length > MAX_PATH_POINTS ? `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`
-    : !flat.points.every(inBox) || !flat.lines.every((l) => l.points.every(inBox)) ? 'must stay inside the -1..1 unit box (curves included)'
     : null;
   if (pathVerdicts.size >= 1024 || pathVerdictBytes + key.length > 2_000_000) {
     pathVerdicts.clear();

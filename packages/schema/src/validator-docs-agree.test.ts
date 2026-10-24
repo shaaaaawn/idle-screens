@@ -165,6 +165,14 @@ describe('X583: a keyed path that collapses draws nothing, it does not reject th
   it('a blink validates', () => {
     expect(validateSpec(blink()).errors).toEqual([]);
   });
+  it('a collapsed key whose stroke leaves the unit box is still rejected', () => {
+    const spec = blink();
+    (spec.layers[1] as { sprite: Record<string, unknown> }).sprite.stroke = { color: '#ffffff', width: 0.05 };
+    (spec as unknown as { timeline: { keys: { value: string }[] } }).timeline.keys[0]!.value = 'M 0 0 L 10 0 Z';
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => e.message.includes('-1..1 unit box'))).toBe(true);
+  });
   it('a base path that draws nothing is still an error', () => {
     const r = validateSpec(blink(false));
     expect(r.valid).toBe(false);
