@@ -259,7 +259,7 @@ export function adviseSpec(
         // points enclose (X605), and a part at opacity 0 is nothing.
         if (isPathPolygon(layer.sprite)) {
           const fr = pathFrame(layer.sprite, r, w, h);
-          pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy);
+          pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy, r);
         } else pixArea = polygonArea(polygonPoints(layer.sprite, r));
       } else if (layer.sprite.kind === 'bar') {
         pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
@@ -464,10 +464,13 @@ export function adviseSpec(
       // The renderer turns text about its entity by `rotate`: a vertical
       // caption is tall and narrow, not a long line off the edge (X603).
       const rot = rotationAt(e, 0);
-      const raw = rot ? { ...unturned, ...mapBox((q) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) }), unturned) } : unturned;
+      const turn = (q: { x: number; y: number }) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) });
       // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
+      // Both turns compose on the corners before one box is taken, so rotations that cancel don't grow it.
       const map = paintMap(spec, layer, w, h, scale);
-      const box = map ? { ...raw, ...mapBox(map, raw) } : raw;
+      const both = rot && map ? (q: { x: number; y: number }) => map(turn(q)) : rot ? turn : map;
+      const box = both ? { ...unturned, ...mapBox(both, unturned) } : unturned;
+      const raw = rot ? { ...unturned, ...mapBox(turn, unturned) } : unturned;
       // What the layer guarantees it paints, worst case: base alpha minus its
       // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
       // duty cycle is a readability question, not an ink-colour one; sampling
@@ -736,13 +739,21 @@ function holeFrame(
     for (const e of allEntities[lj]!) {
       if (e.spinSpeed !== 0 || e.rotate || e.alpha * a < 0.9) continue;
       const c = positionAt(e, 0, w, h);
-      const pts = polygonPoints(sp, e.size / 2);
+      // The outline lands through the drawing's frame (span stretches it,
+      // origin anchors it), as the renderer draws it.
+      const fr = pathFrame(sp, e.size / 2, w, h);
+      const pts = flattenSprite(sp).points.map(([u, v]) => ({ x: (u - fr.ox) * fr.sx, y: (v - fr.oy) * fr.sy }));
+      if (pts.length < 3) continue;
       const dx = pt.x - c.x;
       const dy = pt.y - c.y;
       if (dx < Math.min(...pts.map((q) => q.x)) || dx > Math.max(...pts.map((q) => q.x))) continue;
       if (dy < Math.min(...pts.map((q) => q.y)) || dy > Math.max(...pts.map((q) => q.y))) continue;
       if (pointInPolygon(dx, dy, pts)) continue;
-      const rgb = hexRgb(spriteHex(layer, e) ?? sp.color);
+      // What the frame paints, not its base colour: parts may override it, and
+      // a frame whose parts are all invisible frames nothing.
+      const ink = spriteInks(layer, e)?.[0];
+      if (ink === undefined) continue;
+      const rgb = hexRgb(ink);
       return { rgb, luma: 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b };
     }
   }

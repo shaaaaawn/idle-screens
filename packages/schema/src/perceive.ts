@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -1101,6 +1101,23 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
   const { w, h } = scene;
   const p = posOf(scene, e, t);
   let cx = p.x, cy = p.y, hx = (sz / 2) * k, hy = hx;
+  if (s.kind === 'bar') {
+    // A bar reaches outward from the entity in its direction, not about it:
+    // clip its own box, turned by the entity's rotation (as the luminance map does).
+    const len = sz * barFraction(s, e.barIndex ?? 0);
+    const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+    const b = barBox(s.direction ?? 'right', len * k, th * k);
+    if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
+    const rot = rotationAt(e, t);
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    cx = p.x + b.cx * cr - b.cy * sr;
+    cy = p.y + b.cx * sr + b.cy * cr;
+    const ex = Math.abs(b.halfX * cr) + Math.abs(b.halfY * sr);
+    const ey = Math.abs(b.halfX * sr) + Math.abs(b.halfY * cr);
+    const fx = Math.max(0, Math.min(cx + ex, w) - Math.max(cx - ex, 0)) / (2 * ex);
+    const fy = Math.max(0, Math.min(cy + ey, h) - Math.max(cy - ey, 0)) / (2 * ey);
+    return fx * fy;
+  }
   if (s.kind === 'polygon' && isPathPolygon(s)) {
     const fr = pathFrame(s, sz / 2, w, h);
     cx -= fr.ox * fr.sx * k; cy -= fr.oy * fr.sy * k; hx = fr.sx * k; hy = fr.sy * k;
@@ -1168,7 +1185,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       else if (s.kind === 'polygon') {
         if (isPathPolygon(s)) {
           const fr = pathFrame(s, sz / 2, w, h);
-          entArea = pathInkArea(s, fr.sx, fr.sy);
+          entArea = pathInkArea(s, fr.sx, fr.sy, sz / 2);
         } else entArea = polygonArea(polygonPoints(s, sz / 2));
       }
       else if (s.kind === 'bar') {
@@ -1316,7 +1333,7 @@ export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: numb
       // A spinning shape moves its ink even when its centre stands still:
       // add the turn's speed at the mean ink radius (~1/3 of its size). A
       // circle or ring looks the same turned, so only shapes count (X607).
-      const turn = spinVisible ? Math.abs(rotationAt(entities1[i] ?? e, t + dt) - rotationAt(e, t)) * (sizeAt(e, t) / 3) : 0;
+      const turn = spinVisible ? Math.abs(rotationAt(entities1[i] ?? e, t + dt) - rotationAt(e, t)) * (sizeAt(e, t) / 3) * paintSize(spec, layer) : 0;
       const speed = (Math.sqrt(dist * dist + turn * turn) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
@@ -1427,8 +1444,8 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
         const fr = pathFrame(s, sz / 2, scene.w, scene.h);
         const base = s.colors?.[e.colorIndex] ?? s.color;
         for (const part of pathParts(s)) {
-          const ink = partInkArea(part, fr.sx, fr.sy);
-          if (part.gradient) for (const st of part.gradient.stops) add(st.color, (a * ink.fill * (st.opacity ?? 1)) / part.gradient.stops.length);
+          const ink = partInkArea(part, fr.sx, fr.sy, sz / 2);
+          if (part.gradient) { const gw = gradientStopWeights(part.gradient.stops); part.gradient.stops.forEach((st, i) => add(st.color, a * ink.fill * (st.opacity ?? 1) * gw[i]!)); }
           else add(part.color ?? base, a * ink.fill);
           if (part.stroke) add(part.stroke.color, a * ink.stroke);
         }
