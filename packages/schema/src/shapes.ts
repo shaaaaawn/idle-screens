@@ -100,7 +100,9 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, u: number): 
  * The stroke's path, sampled: `n` points (default STROKE_SAMPLES) centred on
  * (0,0) and scaled so the unit box spans `halfSize` px each way. `curve:
  * 'smooth'` (default) is an open Catmull-Rom through the control points with
- * clamped ends; `'linear'` samples the polyline. Two control points give a
+ * clamped ends; `'linear'` samples the polyline, every vertex among the
+ * samples (so a default `'linear'` count can exceed STROKE_SAMPLES by up to
+ * `segments − 1`). Two control points give a
  * straight segment either way.
  */
 export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Array<{ x: number; y: number }> {
@@ -111,7 +113,13 @@ export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Ar
   const segs = m - 1;
   // Enough samples that every spline segment gets interior points — a
   // 24-point stroke must not collapse to its control polyline.
-  n = n ?? Math.max(STROKE_SAMPLES, segs * 6 + 1);
+  // A polyline's corners are its authored vertices: by default it samples a
+  // whole number of steps per segment, so every vertex is a sample. Uniform
+  // steps that skipped a vertex chamfered each corner by up to half a step (X566).
+  if (n === undefined) {
+    n = Math.max(STROKE_SAMPLES, segs * 6 + 1);
+    if (!smooth) n = Math.ceil((n - 1) / segs) * segs + 1;
+  }
   const at = (k: number): { x: number; y: number } => pts[Math.max(0, Math.min(m - 1, k))]!;
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < n; i++) {

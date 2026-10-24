@@ -56,6 +56,20 @@ describe('stroke geometry', () => {
     }
   });
 
+  it("a linear stroke keeps every authored vertex, so a few long segments keep their corners (X566)", () => {
+    // Three segments: 24 uniform samples put no sample on either inner corner.
+    const pts: Array<[number, number]> = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    const samples = strokeSamples(S({ points: pts, curve: 'linear' }), 100);
+    for (const [x, y] of pts) {
+      expect(samples.some((p) => Math.abs(p.x - x * 100) < 1e-9 && Math.abs(p.y - y * 100) < 1e-9)).toBe(true);
+    }
+    // Every sample lies on the authored polyline (no chord cuts a corner).
+    for (const p of samples) {
+      const onEdge = Math.abs(Math.abs(p.y) - 100) < 1e-9 || Math.abs(p.x - 100) < 1e-9;
+      expect(onEdge).toBe(true);
+    }
+  });
+
   it('a 24-point smooth stroke still gets interior samples per segment (it is a curve, not its control polyline)', () => {
     const pts = Array.from({ length: 24 }, (_, i) => [-1 + (2 * i) / 23, i % 2 ? 0.5 : -0.5] as [number, number]);
     const samples = strokeSamples(S({ points: pts }), 100);
