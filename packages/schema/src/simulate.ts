@@ -936,6 +936,11 @@ const MONO_ADVANCE_EM = 0.6;
 /** Advance of a full-width (East Asian Wide/Fullwidth) glyph: one em, in any face. */
 const FULL_WIDTH_EM = 1;
 
+/** Combining (semi-)voiced sound marks: they ride on the preceding kana and advance nothing. */
+export function isCombiningKana(cp: number): boolean {
+  return cp === 0x3099 || cp === 0x309a;
+}
+
 /**
  * Whether a code point is set full-width — a CJK ideograph, kana, Hangul
  * syllable, CJK punctuation or a fullwidth form — so it advances ~1 em, not
@@ -945,6 +950,7 @@ const FULL_WIDTH_EM = 1;
  * as the buckets below.
  */
 export function isFullWidth(cp: number): boolean {
+  if (isCombiningKana(cp)) return false;
   return (
     (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo leading consonants
     (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK symbols & punctuation
@@ -987,12 +993,16 @@ function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): nu
 export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
   if (metrics === 'mono') {
     let w = 0;
-    for (const c of graphemeClusters(str)) w += isFullWidth(c.codePointAt(0)!) ? FULL_WIDTH_EM : MONO_ADVANCE_EM;
+    for (const c of graphemeClusters(str)) {
+      const cp = c.codePointAt(0)!;
+      if (!isCombiningKana(cp)) w += isFullWidth(cp) ? FULL_WIDTH_EM : MONO_ADVANCE_EM;
+    }
     return w;
   }
   let w = 0;
   for (let i = 0; i < str.length; i++) {
     const cp = str.codePointAt(i)!;
+    if (isCombiningKana(cp)) continue;
     if (isFullWidth(cp)) {
       w += FULL_WIDTH_EM;
       if (cp > 0xffff) i++; // a supplementary ideograph is one glyph, two code units

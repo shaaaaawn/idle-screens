@@ -558,6 +558,12 @@ describe('full-width (CJK) metrics (X614)', () => {
     expect(textWidthEm('ab', 'mono')).toBeCloseTo(1.2, 9);
   });
 
+  it('combining kana marks ride on their base and add no width', () => {
+    expect(textWidthEm('か\u3099')).toBeCloseTo(textWidthEm('か'), 9);
+    expect(textWidthEm('は\u309a')).toBeCloseTo(1, 9);
+    expect(textWidthEm('か\u3099', 'mono')).toBeCloseTo(1, 9);
+  });
+
   it('a centred, anchored katakana line is centred in the luminance grid and stays on the frame', () => {
     // X614's shape: one wide line (13 glyphs × 0.06 = 0.78 of the frame) anchored
     // at the centre. At 0.55 em a glyph the anchor offset was about half what it
