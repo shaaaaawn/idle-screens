@@ -1096,7 +1096,7 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
  * by the text checks, so text counts whole. Only what lands in the frame is
  * the scene's mass or colour (X616).
  */
-function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number): number {
+function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number, paintRot = 0): number {
   if (s.kind === 'text' || s.kind === 'textBlock') return 1;
   const { w, h } = scene;
   const p = posOf(scene, e, t);
@@ -1120,7 +1120,15 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
   }
   if (s.kind === 'polygon' && isPathPolygon(s)) {
     const fr = pathFrame(s, sz / 2, w, h);
-    cx -= fr.ox * fr.sx * k; cy -= fr.oy * fr.sy * k; hx = fr.sx * k; hy = fr.sy * k;
+    // The frame turns with the entity (and its layer/group), origin included.
+    const rot = rotationAt(e, t) + paintRot;
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    const ox = -fr.ox * fr.sx * k, oy = -fr.oy * fr.sy * k;
+    cx += ox * cr - oy * sr;
+    cy += ox * sr + oy * cr;
+    const qx = fr.sx * k, qy = fr.sy * k;
+    hx = Math.abs(qx * cr) + Math.abs(qy * sr);
+    hy = Math.abs(qx * sr) + Math.abs(qy * cr);
   }
   if (!(hx > 0) || !(hy > 0)) return 1;
   const fx = Math.max(0, Math.min(cx + hx, w) - Math.max(cx - hx, 0)) / (2 * hx);
@@ -1206,7 +1214,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
 
       // Only what lands in the frame counts: a layer parked off screen is
       // not the main mass, however big it is (X616).
-      entArea *= onScreenFraction(scene, s, e, sz, painted ? paintSize(spec, layer) : 1, t);
+      entArea *= onScreenFraction(scene, s, e, sz, painted ? paintSize(spec, layer) : 1, t, painted ? paintRotation(spec, layer) : 0);
       area += painted ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
@@ -1436,7 +1444,7 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
     for (const e of entities) {
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      const a = alphaAt(e, t) * lifeA * onScreenFraction(scene, s, e, sz, k, t);
+      const a = alphaAt(e, t) * lifeA * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
       if (a <= 0) continue;
       // A path drawing is the colours its parts paint, by the ink each lays
       // down: a part at opacity 0 adds nothing (X609).

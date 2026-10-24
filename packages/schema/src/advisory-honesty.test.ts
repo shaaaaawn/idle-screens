@@ -245,3 +245,12 @@ describe("motionIntensity: 'calm' is checked against spin (motion-intensity-mism
     for (const s of EXAMPLE_SPECS) expect(codes(s)).not.toContain('motion-intensity-mismatch');
   });
 });
+
+describe('a path-drawn backing chip is not trusted by its base colour', () => {
+  it('white text on a white page is not rescued by a path chip whose base colour is black but paints white; it still fires text-legibility', () => {
+    const sq = 'M -1 -1 L 1 -1 L 1 1 L -1 1 Z';
+    const chip = { key: 'chip', count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, sprite: { kind: 'polygon', radius: [0.4, 0.4], color: '#000000', parts: [{ path: sq, color: '#ffffff' }] } } as unknown as LayerSpec;
+    const text = { key: 'txt', count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, sprite: { kind: 'textBlock', text: 'Hello there', maxWidth: 0.3, fontSize: 0.05, color: '#ffffff', role: 'read' } } as unknown as LayerSpec;
+    expect(codes(scene([chip, text], { units: 'viewport', background: { type: 'solid', color: '#ffffff' } }))).toContain('text-legibility');
+  });
+});

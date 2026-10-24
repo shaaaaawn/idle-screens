@@ -116,4 +116,12 @@ describe('perception reads what is on screen', () => {
     const t = (tf: unknown) => scene('#1c0644', [{ key: 'cap', count: 1, position: { x: 0.5, y: 0.5 }, rotate: 45, alpha: [1, 1], motion: { type: 'static' }, ...(tf ? { transform: tf } : {}), sprite: { kind: 'textBlock', text: 'HELLO WORLD HELLO', maxWidth: 0.9, fontSize: 0.05, color: '#c8a8ff', anchor: 'center', font: 'monospace' } }]);
     expect(codes(t({ rotate: -45, origin: 'anchor' }), 400, 400)).not.toContain('text-off-screen');
   });
+
+  it('a rotated path drawing with an origin offset is clipped where it paints, not unturned', () => {
+    // radius 0.2, origin [1,0], x = -0.1, rotate 180: paints x -0.1..0.3 (on screen).
+    const s = scene('#10082a', [
+      L({ key: 'turned', position: { x: -0.1, y: 0.5 }, rotate: 180, sprite: { kind: 'polygon', radius: [0.2, 0.2], origin: [1, 0], color: '#ff3a4a', path: sq } }),
+    ]);
+    expect(share(s, 'turned', 1000, 1000)).toBeGreaterThan(0);
+  });
 });

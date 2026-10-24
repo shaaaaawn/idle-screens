@@ -88,4 +88,15 @@ describe('timelineFlashReport', () => {
     for (let i = 0; i < 15; i++) moves.push(step(i * 200, 'a.position.x', i % 2 ? 0.4 : 0.6), step(i * 200 + 100, 'b.position.x', i % 2 ? 0.4 : 0.6));
     expect(timelineFlashReport(scene('#000000', [fullFrame('a', '#ffffff'), fullFrame('b', '#ffffff')], moves)).at).toBeNull();
   });
+
+  it('catches a burst that straddles a chunk edge after many harmless boundaries', () => {
+    // 17 harmless boundaries 100 ms apart push the burst's samples across the
+    // 64-sample chunk edge; the chunks must share a full second of time.
+    const keys: Record<string, unknown>[] = [];
+    for (let i = 0; i < 17; i++) keys.push(step(i * 100, 'bottom.sprite.color', i % 2 ? '#000000' : '#000001'));
+    for (let i = 0; i < 8; i++) keys.push(step(1700 + i * 100, 'top.opacity', i % 2 ? 0 : 1));
+    const spec = scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys, 3000);
+    const r = timelineFlashReport(spec);
+    expect(r.fails).toBe(true);
+  });
 });

@@ -886,6 +886,8 @@ function groundUnder(
     if (layer.life !== undefined || layer.emit !== undefined) continue;
     if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
     if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
+    // A path drawing paints through its parts (own colours, opacity, holes); the base colour is not what lands.
+    if (sp.kind === 'polygon' && isPathPolygon(sp)) continue;
     const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of allEntities[lj]!) {
       if (e.spinSpeed !== 0 || e.pulseAmp > 0 || e.growAmp > 0 || e.alpha * a <= 0) continue;

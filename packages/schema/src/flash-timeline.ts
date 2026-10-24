@@ -42,8 +42,6 @@ const MIN_BOUNDARIES = 7;
 export const MAX_SAMPLES = 64;
 /** Frames resolved per scene, at most. Past it the report fails closed rather than pass what it did not look at. */
 export const MAX_TOTAL_SAMPLES = 512;
-/** Frames shared between consecutive chunks so a flash straddling a chunk edge is still seen. */
-const OVERLAP = 8;
 const WINDOW = 1000;
 
 /**
@@ -106,7 +104,9 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
   let worst = pass;
   for (const w of dense) {
     const sampleTimes = flashSampleTimes(times.filter((t) => t >= w.from && t <= w.to));
-    for (let from = 0; from < sampleTimes.length - 1; from += MAX_SAMPLES - OVERLAP) {
+    // Consecutive chunks share a full WINDOW of time, not a fixed sample count,
+    // so a burst straddling a chunk edge is analysed whole however dense the keys.
+    for (let from = 0; from < sampleTimes.length - 1; ) {
       const chunk = sampleTimes.slice(from, from + MAX_SAMPLES);
       if (chunk.length < 2) break;
       if (chunk.length > budget) return { ...worst, fails: true, at: lap ? w.from % lap : w.from, incomplete: true };
@@ -124,6 +124,10 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
       }
       if (worst.fails) return worst;
       if (from + MAX_SAMPLES >= sampleTimes.length) break;
+      const resume = chunk[chunk.length - 1]! - WINDOW;
+      let next = from + 1;
+      while (sampleTimes[next]! < resume) next++;
+      from = next;
     }
   }
   return worst;
