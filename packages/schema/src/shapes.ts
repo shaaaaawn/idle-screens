@@ -718,11 +718,45 @@ function inside(pt: Pt, r: Pt[]): boolean {
   return c;
 }
 
-/** Every vertex of `sub` inside `r` (bbox first): `sub` is nested in `r`, not merely overlapping it. */
+/** How close to an edge counts as on it: twice the flattening tolerance, so a flattened curve still meets the vertex it was drawn through. */
+const ON_EDGE = 2 * PATH_TOLERANCE;
+
+/** `pt` within ON_EDGE of one of `r`'s edges. */
+function onEdge(pt: Pt, r: Pt[]): boolean {
+  for (let k = 0, j = r.length - 1; k < r.length; j = k++) {
+    const a = r[j]!, b = r[k]!;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / len2)) : 0;
+    const ex = a[0] + dx * t - pt[0], ey = a[1] + dy * t - pt[1];
+    if (ex * ex + ey * ey <= ON_EDGE * ON_EDGE) return true;
+  }
+  return false;
+}
+
+/**
+ * Every vertex of `sub` inside `r` or on its edge, and `sub` not lying wholly
+ * on the edge (bbox first): `sub` is nested in `r`, not merely overlapping
+ * it. A vertex ON the edge counts as inside (X585): a hole cut into a wall
+ * from its rim, a notch, a mouth touching the face's outline, is still a
+ * hole. A ray cast decides a point exactly on an edge by which side of the
+ * ray it falls, so a hole touching the top edge used to cut while the same
+ * hole touching the bottom was filled.
+ */
 function containsRing(r: Pt[], rb: Box, sub: Pt[], sb: Box): boolean {
-  if (sb.x0 < rb.x0 || sb.x1 > rb.x1 || sb.y0 < rb.y0 || sb.y1 > rb.y1) return false;
-  for (const p of sub) if (!inside(p, r)) return false;
-  return true;
+  if (sb.x0 < rb.x0 - ON_EDGE || sb.x1 > rb.x1 + ON_EDGE || sb.y0 < rb.y0 - ON_EDGE || sb.y1 > rb.y1 + ON_EDGE) return false;
+  let strictly = false;
+  for (const p of sub) {
+    if (inside(p, r)) strictly = true;
+    else if (!onEdge(p, r)) return false;
+  }
+  if (strictly) return true;
+  // Every vertex on the edge (a triangle notch with its corners on the
+  // rim): nested when its centre is inside.
+  let cx = 0, cy = 0;
+  for (const p of sub) { cx += p[0]; cy += p[1]; }
+  const c: Pt = [cx / sub.length, cy / sub.length];
+  return !onEdge(c, r) && inside(c, r);
 }
 
 interface Box { x0: number; x1: number; y0: number; y1: number }

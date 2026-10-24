@@ -357,14 +357,15 @@ export interface LayerSpec {
     | { type: 'grid'; columns?: number; jitter?: number | { x?: number; y?: number } }
     /**
      * Data layouts — entities in READING ORDER, no scatter. `list` stacks them
-     * in one column `gap` apart (viewport units of min(w,h), default 0.06);
+     * in one column `gap` apart (viewport units of min(w,h), default 0.06;
+     * `{y}` alone also works — a list has no columns, so `x` does nothing);
      * `table` fills `columns` row-major with `gap` `{x, y}` (one number = both).
      * Text and emoji sprites take `strings[i]` / `glyphs[i]` in order instead of
      * a seeded pick, and palette `colors[i]` likewise, so N labels or N bars are
      * ONE layer. `position` (with any count) is the block's top-left anchor;
      * without it the block is centred in `region`.
      */
-    | { type: 'list'; gap?: number }
+    | { type: 'list'; gap?: number | { x?: number; y?: number } }
     | { type: 'table'; columns: number; gap?: number | { x?: number; y?: number } };
   /**
    * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
@@ -608,16 +609,21 @@ export interface CycleSpec {
 
 export type MotionSpec =
   /**
-   * Drift at a per-entity speed picked from `speed` (px/sec) along `angle` degrees
+   * Drift at a per-entity speed picked from `speed` (min(w,h) per second; px/sec under `units: 'px'`) along `angle` degrees
    * (0 = right, 90 = down; default 0). `bidirectional` randomly flips horizontal
    * direction per entity (e.g. fish swimming both ways); `bob` adds a small vertical
-   * wobble amplitude (px). Covers horizontal fields, diagonals (toasters) and rain
-   * (angle 90).
+   * wobble amplitude, in the spec's dimensional unit like `speed` — a fraction of
+   * min(w,h) (0.004 ≈ 4 px at 1080p), px only under `units: 'px'`. Covers
+   * horizontal fields, diagonals (toasters) and rain (angle 90).
    */
   | { type: 'drift'; speed: [number, number]; angle?: number; bidirectional?: boolean; bob?: number; ease?: MotionEase }
-  /** Rise upward (px/sec) with an optional horizontal sway amplitude (px) — bubbles. */
+  /**
+   * Rise upward with an optional horizontal `sway` amplitude — bubbles. Speed
+   * is min(w,h) per second and `sway` a fraction of min(w,h) (px/sec and px
+   * only under `units: 'px'`).
+   */
   | { type: 'rise'; speed: [number, number]; sway?: number; ease?: MotionEase }
-  /** Bounce diagonally at a per-entity speed, reflecting off the edges (px/sec). */
+  /** Bounce diagonally at a per-entity speed, reflecting off the edges (min(w,h) per second; px/sec under `units: 'px'`). */
   | { type: 'bounce'; speed: [number, number] }
   /** Entity stays exactly where placed. No movement. Use with `position` for pinned elements. */
   | { type: 'static' }
@@ -761,6 +767,7 @@ export const LIMITS = {
   minClockedPeriod: 1000, // ms — a `clock`ed layer breathes in unison, so 1 Hz not 2
   minClockRate: 0.1,
   maxClockRate: 4,
+  maxWobble: 0.25, // min(w,h) units — drift `bob` / rise `sway` above this warn `motion-amplitude` (× referenceViewport in px specs)
   defaultListGap: 0.06, // viewport units between list/table cells (40 px in px specs)
   defaultListGapPx: 40,
   minPolygonSides: 3,

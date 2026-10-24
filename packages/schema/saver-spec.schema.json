@@ -705,7 +705,13 @@
               "additionalProperties": false,
               "properties": {
                 "type": { "const": "list" },
-                "gap": { "type": "number", "exclusiveMinimum": 0, "description": "Row pitch in viewport units of min(w,h) (px in px specs). Default 0.06 / 40 px." }
+                "gap": {
+                  "oneOf": [
+                    { "type": "number", "exclusiveMinimum": 0 },
+                    { "type": "object", "additionalProperties": false, "properties": { "x": { "type": "number", "exclusiveMinimum": 0 }, "y": { "type": "number", "exclusiveMinimum": 0 } } }
+                  ],
+                  "description": "Row pitch in viewport units of min(w,h) (px in px specs), a number or {x?, y?} where only y (the row pitch) applies to a one-column list. Default 0.06 / 40 px."
+                }
               },
               "description": "Data layout: entities stacked in one column in reading order; strings[i], glyphs[i] and colors[i] are taken in order. position (any count) anchors the block's top-left; otherwise centred in region."
             },
@@ -1307,7 +1313,7 @@
             },
             "bob": {
               "type": "number",
-              "description": "Vertical wobble amplitude in px."
+              "description": "Vertical wobble amplitude, a fraction of min(w,h) like speed (px only under units: px). Typical 0.002-0.02; above 0.25 warns motion-amplitude."
             }
           }
         },
@@ -1337,7 +1343,7 @@
             },
             "sway": {
               "type": "number",
-              "description": "Horizontal sway amplitude in px (bubbles)."
+              "description": "Horizontal sway amplitude (bubbles), a fraction of min(w,h) like speed (px only under units: px). Typical 0.002-0.02; above 0.25 warns motion-amplitude."
             }
           }
         },

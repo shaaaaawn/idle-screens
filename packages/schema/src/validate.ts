@@ -50,14 +50,30 @@ const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'cen
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
-const KNOWN_DRIFT = new Set(['type', 'speed', 'angle', 'bidirectional', 'bob', 'ease']);
-const KNOWN_RISE = new Set(['type', 'speed', 'sway', 'ease']);
-const KNOWN_BOUNCE = new Set(['type', 'speed']);
-const KNOWN_STATIC = new Set(['type']);
-const KNOWN_ORBIT = new Set(['type', 'speed', 'radius', 'center']);
-const KNOWN_WANDER = new Set(['type', 'speed', 'angle', 'meander', 'coherence', 'ease']);
-const KNOWN_WARP = new Set(['type', 'speed', 'center']);
-const KNOWN_PATH = new Set(['type', 'points', 'duration', 'curve', 'closed', 'scatter']);
+/**
+ * Every motion type's fields besides `type` — the validator's allowlist, and
+ * the source FORMAT.md's motion table is checked against (F74), so the table
+ * cannot drift from what the validator accepts.
+ */
+export const MOTION_FIELDS = {
+  drift: ['speed', 'angle', 'bidirectional', 'bob', 'ease'],
+  rise: ['speed', 'sway', 'ease'],
+  bounce: ['speed'],
+  static: [],
+  orbit: ['speed', 'radius', 'center'],
+  wander: ['speed', 'angle', 'meander', 'coherence', 'ease'],
+  warp: ['speed', 'center'],
+  path: ['points', 'duration', 'curve', 'closed', 'scatter'],
+} as const satisfies Record<string, readonly string[]>;
+const motionKnown = (t: keyof typeof MOTION_FIELDS): Set<string> => new Set(['type', ...MOTION_FIELDS[t]]);
+const KNOWN_DRIFT = motionKnown('drift');
+const KNOWN_RISE = motionKnown('rise');
+const KNOWN_BOUNCE = motionKnown('bounce');
+const KNOWN_STATIC = motionKnown('static');
+const KNOWN_ORBIT = motionKnown('orbit');
+const KNOWN_WANDER = motionKnown('wander');
+const KNOWN_WARP = motionKnown('warp');
+const KNOWN_PATH = motionKnown('path');
 const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
 const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 'bands', 'drift', 'seed']);
@@ -163,8 +179,21 @@ export function ignoredPropertyPaths(spec: unknown): string[] {
  * `validateSpec`. For the timeline's composed-state checks, which run at every
  * key boundary and on every live steer: the whole-spec check costs a
  * full validation per sample, this one a layer or two.
+ *
+ * `keyed`: the spec is a timeline state (a key's value, or mid-glide), where a
+ * path that collapses to nothing draws nothing instead of failing (X583).
  */
-export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boolean {
+export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>, keyed = false): boolean {
+  if (!keyed) return specPathsValid(spec, paths);
+  keyedPathDepth++;
+  try {
+    return specPathsValid(spec, paths);
+  } finally {
+    keyedPathDepth--;
+  }
+}
+
+function specPathsValid(spec: SaverSpec, paths: Iterable<string>): boolean {
   const layers = new Set<number>();
   let background = false;
   let finish = false;
@@ -331,6 +360,15 @@ function validateGroups(groups: unknown, err: (p: string, m: string) => void, wa
  * sequence's 1 s segment minimum for change inside a scene.
  */
 function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn, checkApplied = true): void {
+  keyedPathDepth++;
+  try {
+    validateTimelineKeys(spec, errOuter, warn, checkApplied);
+  } finally {
+    keyedPathDepth--;
+  }
+}
+
+function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn, checkApplied: boolean): void {
   let failed = false;
   const err = (p: string, m: string): void => { failed = true; errOuter(p, m); };
   const tl = spec.timeline as unknown;
@@ -390,6 +428,14 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
         const o0 = isObj(before) ? before.origin ?? 'viewport' : 'viewport';
         const o1 = (key.value as Record<string, unknown>).origin ?? 'viewport';
         if (o0 !== o1) warn(`${p}.value`, 'timeline-origin-steps', `this key changes the transform's origin (${String(o0)} → ${String(o1)}): the pivot switches on the key's first frame, so the layer jumps — keep one origin per layer`);
+      }
+      // A gradient paints over the flat colour, so a `color` key on a part
+      // (or path sprite) that has one changes nothing on screen (X588).
+      if (cp.endsWith('.color')) {
+        const owner = readSpecPath(base, cp.slice(0, -'.color'.length));
+        if (isObj(owner) && owner.gradient !== undefined) {
+          warn(`${p}.path`, 'timeline-key-no-effect', `'${key.path}' is overridden by ${cp.includes('.parts.') ? "that part's" : "the sprite's"} gradient, so this key changes nothing on screen — key its gradient's stops (\`…gradient.stops.N.color\`) instead`);
+        }
       }
       if (structuralSignature(applied) !== baseSig) {
         warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
@@ -738,14 +784,19 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (lay.gap !== undefined) {
         if (isNum(lay.gap)) {
           if (!gapOk(lay.gap)) err(`${path}.layout.gap`, 'must be > 0 (viewport units of min(w,h), or px)');
-        } else if (lay.type === 'table' && isObj(lay.gap)) {
+        } else if (isObj(lay.gap)) {
+          // `{x?, y?}` on both data layouts, as documented (X615). A list is one
+          // column, so only `y` (the row pitch) moves anything there.
           if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
           if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
           for (const k of unknownKeys(lay.gap, new Set(['x', 'y']))) {
             warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored`);
           }
+          if (lay.type === 'list' && lay.gap.x !== undefined) {
+            warn(`${path}.layout.gap.x`, 'no-effect', 'a list is one column, so gap.x has no effect; gap.y is its row pitch (use a table for columns)');
+          }
         } else {
-          err(`${path}.layout.gap`, lay.type === 'table' ? 'must be a number > 0 or { x?, y? }' : 'must be a number > 0');
+          err(`${path}.layout.gap`, 'must be a number > 0 or { x?, y? }');
         }
       }
       for (const k of unknownKeys(lay, new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']))) {
@@ -1136,6 +1187,15 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     else if (v[0] < 0) err(p, 'speed lower bound must be >= 0');
     else if (v[1] > speedCap) err(p, `speed exceeds cap ${isViewport ? speedCap.toFixed(2) + ' viewport-units/sec' : LIMITS.maxSpeed + ' px/sec'}`);
   };
+  // `bob` / `sway` are amplitudes in min(w,h) units, not px (X575): `bob: 4`
+  // swings a layer four screen-heights each way. A warning, not an error —
+  // stored scenes carry px-sized values (8–24) and must still recall.
+  const wobbleCap = isViewport ? LIMITS.maxWobble : LIMITS.maxWobble * refVp;
+  const wobbleCheck = (v: unknown, p: string, name: string, axis: string): void => {
+    if (!isNum(v) || Math.abs(v) <= wobbleCap) return;
+    const px = isViewport ? ` (≈${Math.round(Math.abs(v) * refVp)} px at ${refVp} px)` : '';
+    warn(p, 'motion-amplitude', `${name} ${v} is a ${axis} swing of ${isViewport ? `${Math.abs(v)}× min(w, h)` : `${Math.abs(v)} px`}${px} each way, so entities leave the frame — ${name} is in ${isViewport ? 'min(w, h) units, not px' : 'px'}; typical ${isViewport ? '0.002–0.02' : '2–20 px'}, at most ${isViewport ? wobbleCap : Math.round(wobbleCap) + ' px'} before this warning`);
+  };
 
   let knownSet: Set<string>;
   if (motion.type === 'drift') {
@@ -1144,6 +1204,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.angle !== undefined && !isNum(motion.angle)) err(`${path}.angle`, 'must be a number (degrees)');
     if (motion.bidirectional !== undefined && typeof motion.bidirectional !== 'boolean') err(`${path}.bidirectional`, 'must be a boolean');
     if (motion.bob !== undefined && !isNum(motion.bob)) err(`${path}.bob`, 'must be a number');
+    else wobbleCheck(motion.bob, `${path}.bob`, 'bob', 'vertical');
     validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 10–200 px/sec`);
@@ -1152,6 +1213,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     knownSet = KNOWN_RISE;
     speedOk(motion.speed, `${path}.speed`);
     if (motion.sway !== undefined && !isNum(motion.sway)) err(`${path}.sway`, 'must be a number');
+    else wobbleCheck(motion.sway, `${path}.sway`, 'sway', 'horizontal');
     validateEase(motion.ease, `${path}.ease`, err, warn);
     if (isRange(motion.speed) && motion.speed[1] < 1 && !isViewport) {
       warn(`${path}.speed`, 'near-zero-speed', `max speed is ${motion.speed[1]} px/sec — entities will appear frozen. Typical range: 5–80 px/sec`);
@@ -1273,6 +1335,16 @@ const pathVerdicts = new Map<string, string | null>();
 /** Key bytes held: a morph's in-between paths are each new and up to 64 KB long. */
 let pathVerdictBytes = 0;
 
+const NO_AREA = 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art';
+const NO_LINE = 'must draw at least one line (2+ points)';
+/**
+ * Nesting depth of a timeline check. A path a key sets (or glides through)
+ * may collapse to nothing — an eye that blinks shut, a ring that shrinks to
+ * a point — and draws nothing at that moment rather than rejecting the
+ * scene (X583). The base spec's own paths still must draw something.
+ */
+let keyedPathDepth = 0;
+
 function pathGeometryProblem(d: string, rule: PathFillRule, filled: boolean): string | null {
   const key = `${rule}|${filled ? 1 : 0}|${d}`;
   const hit = pathVerdicts.get(key);
@@ -1280,10 +1352,11 @@ function pathGeometryProblem(d: string, rule: PathFillRule, filled: boolean): st
   const flat = flattenPath(d, rule);
   const inBox = ([x, y]: readonly number[]): boolean => Math.abs(x!) <= 1.0001 && Math.abs(y!) <= 1.0001;
   const problem = flat.error ? `not a usable path: ${flat.error}`
-    : filled && flat.points.length < 3 ? 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art'
-    : !filled && flat.lines.length === 0 ? 'must draw at least one line (2+ points)'
     : flat.points.length > MAX_PATH_POINTS ? `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`
+    // Bounds first: a keyed path may collapse (NO_AREA/NO_LINE are waived), but its stroke must still stay in the box.
     : !flat.points.every(inBox) || !flat.lines.every((l) => l.points.every(inBox)) ? 'must stay inside the -1..1 unit box (curves included)'
+    : filled && flat.points.length < 3 ? NO_AREA
+    : !filled && flat.lines.length === 0 ? NO_LINE
     : null;
   if (pathVerdicts.size >= 1024 || pathVerdictBytes + key.length > 2_000_000) {
     pathVerdicts.clear();
@@ -1299,7 +1372,7 @@ function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p
     err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
   } else {
     const problem = pathGeometryProblem(piece.path, (piece.fillRule as PathFillRule | undefined) ?? 'auto', piece.fill !== false);
-    if (problem) err(`${path}.path`, problem);
+    if (problem && !(keyedPathDepth > 0 && (problem === NO_AREA || problem === NO_LINE))) err(`${path}.path`, problem);
   }
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
