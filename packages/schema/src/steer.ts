@@ -197,6 +197,43 @@ export function applyDeltasToSpec(spec: SaverSpec, deltas: SteerDelta[]): SaverS
   return copy;
 }
 
+/**
+ * `applyDeltasToSpec` for read-only callers: the same result, but every
+ * subtree a delta does not touch is shared with `spec` — only the containers
+ * on each delta's path are copied. The validator checks a timeline by applying
+ * each key, and the composed keys at every sample time, to the whole spec; a
+ * full deep copy per check was most of the cost of validating a long timeline
+ * (a 132 KB scene spent ~60% of its CPU in JSON round-trips). The result
+ * aliases `spec`, so it must never be mutated.
+ */
+export function applyDeltasShared(spec: SaverSpec, deltas: SteerDelta[]): SaverSpec {
+  const out = { ...spec } as Record<string, unknown>;
+  const copied = new WeakSet<object>([out]);
+  for (const d of deltas) {
+    const cp = canonicalSpecPath(out, d.path);
+    if (!cp) continue;
+    const parts = cp.split('.');
+    let node = out as Record<string, unknown>;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const k = parts[i]!;
+      const child = node[k];
+      if (!child || typeof child !== 'object') { node = null as never; break; }
+      if (!copied.has(child)) {
+        const clone = Array.isArray(child) ? child.slice() : { ...(child as Record<string, unknown>) };
+        copied.add(clone);
+        node[k] = clone;
+      }
+      node = node[k] as Record<string, unknown>;
+    }
+    if (node) {
+      // An array's final segment is an index, as in resolveSpecPath ('01' is index 1).
+      const last = parts[parts.length - 1]!;
+      (node as unknown as Record<string | number, unknown>)[Array.isArray(node) ? Number(last) : last] = d.value;
+    }
+  }
+  return out as unknown as SaverSpec;
+}
+
 const HEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 function hexToRgb(hex: string): [number, number, number] {
