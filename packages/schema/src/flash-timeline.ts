@@ -14,11 +14,17 @@
  * not part of `validateSpec`, which runs on every viewer mount. It only looks
  * where some one-second window holds enough key boundaries on
  * luminance-bearing paths to reach more than 3 flashes, so almost every scene
- * costs nothing, and it is capped at {@link MAX_SAMPLES} frames.
+ * costs nothing, and it is capped at {@link MAX_TOTAL_SAMPLES} frames.
+ *
+ * Before sampling a dense window it asks the same question per grid cell:
+ * the analyzer fails only when a quarter of its cells flash, and a cell can
+ * only flash when the paths that paint IT reach the boundary count. A
+ * staggered wave of small static dots is dense across the frame but sparse
+ * in every cell, so it passes without a frame resolved (F125 regression).
  */
 import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
-import { luminanceGrid } from './perceive';
-import { DEFAULT_KEY_DUR, timelineTracks } from './timeline';
+import { layerCellFootprints, luminanceGrid } from './perceive';
+import { DEFAULT_KEY_DUR, timelineTracks, withoutTimeline } from './timeline';
 import type { SaverSpec } from './types';
 
 export interface TimelineFlashReport {
@@ -30,8 +36,16 @@ export interface TimelineFlashReport {
   flashingArea: number;
   /** Start (scene ms, within the lap) of the worst window checked, or null when none was checked. */
   at: number | null;
-  /** Set (with `fails`) when dense sections remained beyond the {@link MAX_TOTAL_SAMPLES} budget: unchecked is never reported as safe. */
+  /**
+   * Set (with `fails`) when dense sections remained beyond the
+   * {@link MAX_TOTAL_SAMPLES} budget: unchecked is never reported as safe.
+   * `flashesPerSecond` and `flashingArea` then describe only what was checked
+   * (often nothing), so a message must say the timeline was too dense to
+   * verify, not quote them as a strobe.
+   */
   incomplete?: true;
+  /** With `incomplete`: the paint-key boundaries in the busiest second of the window left unchecked. */
+  boundariesPerSecond?: number;
 }
 
 /** Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are. */
@@ -43,26 +57,113 @@ export const MAX_SAMPLES = 64;
 /** Frames resolved per scene, at most. Past it the report fails closed rather than pass what it did not look at. */
 export const MAX_TOTAL_SAMPLES = 512;
 const WINDOW = 1000;
+/** The grid the analyzer runs over, and the share of its cells that must flash to fail (WCAG 2.3.1's quarter of the frame). */
+const COLS = 16;
+const ROWS = 9;
+const AREA_THRESHOLD = 0.25;
 
 /**
- * Key boundaries on luminance-bearing paths, sorted and distinct: a step
- * changes at `t`, a glide runs from `t` to `t + dur`. Under `loop`, a second
- * lap so a window can straddle the wrap. `lap` is 0 without `loop`.
+ * Each luminance-bearing path's key boundaries: a step changes at `t`, a
+ * glide runs from `t` to `t + dur`. Under `loop`, a second lap so a window
+ * can straddle the wrap. `lap` is 0 without `loop`.
  */
-export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } {
+function lumaTracks(spec: SaverSpec): { tracks: Array<{ path: string; times: number[] }>; lap: number } {
   const tl = spec.timeline;
-  if (!tl) return { times: [], lap: 0 };
+  if (!tl) return { tracks: [], lap: 0 };
   const lap = tl.loop && tl.duration ? tl.duration : 0;
-  const bounds: number[] = [];
+  const tracks: Array<{ path: string; times: number[] }> = [];
   for (const [path, keys] of timelineTracks(spec)) {
     if (!LUMA_PATH.test(path)) continue;
+    const bounds: number[] = [];
     for (const k of keys) {
       const dur = k.dur ?? DEFAULT_KEY_DUR;
       bounds.push(k.t);
       if (dur > 0) bounds.push(k.t + dur);
     }
+    tracks.push({ path, times: lap ? [...bounds, ...bounds.map((b) => b + lap)] : bounds });
   }
-  return { times: [...new Set(lap ? [...bounds, ...bounds.map((b) => b + lap)] : bounds)].sort((a, b) => a - b), lap };
+  return { tracks, lap };
+}
+
+/** Key boundaries on luminance-bearing paths, sorted and distinct (see `lumaTracks`). */
+export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } {
+  const { tracks, lap } = lumaTracks(spec);
+  return { times: [...new Set(tracks.flatMap((tr) => tr.times))].sort((a, b) => a - b), lap };
+}
+
+/**
+ * Leaves that change how a layer's ink looks without moving, resizing or
+ * reshaping it, or changing how many seeded draws it takes: opacity, colour,
+ * a gradient, a part's fill. `colors` is not one — its length is a draw.
+ */
+const PAINT_LEAF = /(^|\.)(opacity|alpha|color|fill)(\.\d+)?$|(^|\.)gradient(\.|$)/;
+
+/**
+ * Which grid cells each luminance-bearing path can change, or null when some
+ * key cannot be pinned to cells. A layer path reaches its layer's footprint; a
+ * group path its members'; a background path every cell. A key that moves or
+ * resizes a layer makes that layer's footprint the whole grid, and (unless it
+ * is a paint `transform`, which takes no draws) every later layer's too: the
+ * seeded stream is shared, so a count or a range there re-deals them.
+ */
+function pathCells(spec: SaverSpec): Map<string, number[] | null> | null {
+  const layers = spec.layers ?? [];
+  const volatile = new Set<number>();
+  const members = (g: string): number[] => layers.flatMap((l, i) => (l.group === g ? [i] : []));
+  const reach = new Map<string, number[] | 'all'>();
+  for (const path of timelineTracks(spec).keys()) {
+    const [root, id, ...rest] = path.split('.');
+    const leaf = rest.join('.');
+    let to: number[] | 'all';
+    if (root === 'layers' && /^\d+$/.test(id ?? '')) {
+      const n = Number(id);
+      to = [n];
+      if (!PAINT_LEAF.test(leaf)) {
+        if (rest[0] === 'transform') volatile.add(n);
+        else for (let i = n; i < layers.length; i++) volatile.add(i);
+      }
+    } else if (root === 'groups' && id !== undefined) {
+      to = members(id);
+      if (leaf !== 'opacity') for (const i of to) volatile.add(i);
+    } else if (root === 'background') to = 'all';
+    else return null; // a scene-wide field: no cell is safe from it
+    if (LUMA_PATH.test(path)) reach.set(path, to);
+  }
+  if (reach.size === 0) return new Map();
+  const footprints = layerCellFootprints(withoutTimeline(spec), { cols: COLS, rows: ROWS });
+  const out = new Map<string, number[] | null>();
+  for (const [path, to] of reach) {
+    if (to === 'all' || to.some((i) => volatile.has(i) || !footprints[i])) out.set(path, null);
+    else out.set(path, [...new Set(to.flatMap((i) => footprints[i]!))]);
+  }
+  return out;
+}
+
+/**
+ * Grid cells that could flash more than 3 times a second inside `[from, to]`:
+ * a cell's luminance changes only at the boundaries of the paths that paint it
+ * and runs one way between them (the premise the sampling already rests on),
+ * so it needs {@link MIN_BOUNDARIES} of them within a second (2 ms of slack
+ * for the ±1 ms samples). Paths with no cells reach every cell.
+ */
+function cellsThatCanFlash(tracks: Array<{ path: string; times: number[] }>, cellsOf: Map<string, number[] | null>, from: number, to: number): number {
+  const perCell: number[][] = Array.from({ length: COLS * ROWS }, () => []);
+  for (const tr of tracks) {
+    const ts = tr.times.filter((t) => t >= from && t <= to);
+    if (ts.length === 0) continue;
+    const cells = cellsOf.get(tr.path);
+    if (cells === null || cells === undefined) for (const list of perCell) list.push(...ts);
+    else for (const c of cells) perCell[c]!.push(...ts);
+  }
+  let n = 0;
+  for (const list of perCell) {
+    if (list.length < MIN_BOUNDARIES) continue;
+    const ts = [...new Set(list)].sort((a, b) => a - b);
+    for (let i = 0; i + MIN_BOUNDARIES - 1 < ts.length; i++) {
+      if (ts[i + MIN_BOUNDARIES - 1]! - ts[i]! <= WINDOW + 2) { n++; break; }
+    }
+  }
+  return n;
 }
 
 /**
@@ -84,7 +185,8 @@ export function flashSampleTimes(boundaries: number[]): number[] {
 export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
   const pass: TimelineFlashReport = { fails: false, flashesPerSecond: 0, flashingArea: 0, at: null };
   if (!spec.timeline) return pass;
-  const { times, lap } = lumaKeyTimes(spec);
+  const { tracks, lap } = lumaTracks(spec);
+  const times = [...new Set(tracks.flatMap((tr) => tr.times))].sort((a, b) => a - b);
 
   // Dense windows, densest first, merged where they overlap.
   const dense: Array<{ from: number; to: number; n: number }> = [];
@@ -102,14 +204,17 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
 
   let budget = MAX_TOTAL_SAMPLES;
   let worst = pass;
+  const cellsOf = pathCells(spec);
   for (const w of dense) {
+    // Too few cells can flash here for a quarter of the frame to: nothing to resolve.
+    if (cellsOf && cellsThatCanFlash(tracks, cellsOf, w.from, w.to) < Math.ceil(AREA_THRESHOLD * COLS * ROWS)) continue;
     const sampleTimes = flashSampleTimes(times.filter((t) => t >= w.from && t <= w.to));
     // Consecutive chunks share a full WINDOW of time, not a fixed sample count,
     // so a burst straddling a chunk edge is analysed whole however dense the keys.
     for (let from = 0; from < sampleTimes.length - 1; ) {
       const chunk = sampleTimes.slice(from, from + MAX_SAMPLES);
       if (chunk.length < 2) break;
-      if (chunk.length > budget) return { ...worst, fails: true, at: lap ? w.from % lap : w.from, incomplete: true };
+      if (chunk.length > budget) return { ...worst, fails: true, at: lap ? w.from % lap : w.from, incomplete: true, boundariesPerSecond: w.n };
       budget -= chunk.length;
       // The grid carries gamma-encoded luma; WCAG flashes are measured in linear light (exact for greys, close for chroma).
       const samples = chunk.map((t) => ({ t, lum: luminanceGrid(spec, { t, cols: 16, rows: 9 }).cells.flat().map((v) => srgbToLinear(v * 255)) }));

@@ -99,4 +99,82 @@ describe('timelineFlashReport', () => {
     const r = timelineFlashReport(spec);
     expect(r.fails).toBe(true);
   });
+
+  describe('per-cell shortcut (F125 regression)', () => {
+    // 28 small static dots, each opacity keyed 9 times between 1 and 0.2 in a
+    // staggered wave: dense across the frame (56 boundaries a second, past the
+    // sample budget), sparse in every grid cell.
+    const wave = (radius: number, motion: Record<string, unknown> = { type: 'static' }, low = 0.2): SaverSpec => {
+      const layers = Array.from({ length: 28 }, (_, i) => ({
+        key: `dot${i}`, count: 1, motion, position: { x: (i + 0.5) / 28, y: 0.5 + 0.25 * Math.sin(i / 2) },
+        sprite: { kind: 'circle', radius: [radius, radius], color: '#ffffff' },
+      }));
+      const keys = [];
+      for (let i = 0; i < 28; i++) for (let k = 0; k < 9; k++) keys.push({ t: k * 1000 + i * 37, path: `dot${i}.opacity`, value: k % 2 ? 1 : low, dur: 400 });
+      return scene('#000000', layers.map((l) => ({ ...l, opacity: 1 })), keys, 10000);
+    };
+
+    it('passes a staggered wave of small dots without resolving a frame', () => {
+      const spec = wave(0.02);
+      expect(validateSpec(structuredClone(spec)).valid).toBe(true);
+      expect(timelineFlashReport(spec)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
+    });
+
+    it('still reports the three-path full-frame strobe at 5 flashes a second', () => {
+      const keys = [];
+      for (let i = 0; i < 15; i++) {
+        keys.push(step(i * 200, 'top.opacity', i % 2 ? 0 : 1));
+        keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#000000'));
+        keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
+      }
+      const r = timelineFlashReport(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys));
+      expect(r).toMatchObject({ fails: true, flashesPerSecond: 5 });
+      expect(r.incomplete).toBeUndefined();
+    });
+
+    it('counts cells, not pixels: 40 small dots strobing in 40 cells still fail', () => {
+      // The three-path strobe on two 8×5 grids of dots: about 4% of the
+      // pixels, but each dot sits in its own cells, and the analyzer fails on
+      // the share of cells that flash.
+      const grid = (key: string, color: string): Record<string, unknown> => ({
+        key, count: 40, layout: { type: 'grid', columns: 8 }, motion: { type: 'static' }, opacity: 1,
+        sprite: { kind: 'circle', radius: [0.04, 0.04], color },
+      });
+      const keys = [];
+      for (let i = 0; i < 15; i++) {
+        keys.push(step(i * 200, 'top.opacity', i % 2 ? 0 : 1));
+        keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#000000' : '#ffffff'));
+        keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#ffffff' : '#000000'));
+      }
+      const r = timelineFlashReport(scene('#ffffff', [grid('bottom', '#ffffff'), grid('top', '#000000')], keys));
+      expect(r.fails).toBe(true);
+      expect(r.incomplete).toBeUndefined();
+    });
+
+    it('attributes a group opacity key to its member layers', () => {
+      const keys = [];
+      for (let i = 0; i < 15; i++) {
+        keys.push(step(i * 200, 'groups.g.opacity', i % 2 ? 0 : 1));
+        keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#000000'));
+        keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
+      }
+      const spec = { ...scene('#000000', [fullFrame('bottom', '#000000'), { ...fullFrame('top', '#ffffff'), group: 'g' }], keys), groups: { g: { opacity: 1 } } } as SaverSpec;
+      expect(timelineFlashReport(spec)).toMatchObject({ fails: true, flashesPerSecond: 5 });
+    });
+
+    it('treats a moving layer as reaching every cell', () => {
+      // The same wave on drifting dots cannot be pinned to cells, so it is
+      // sampled, runs past the budget and fails closed.
+      const r = timelineFlashReport(wave(0.02, { type: 'drift', speed: [0.02, 0.02] }));
+      expect(r).toMatchObject({ fails: true, incomplete: true });
+    });
+
+    it('fails closed, saying how dense, when a large-area dense window is past the budget', () => {
+      // Discs that cover most of the frame, each barely changing: nothing
+      // flashes, but there is too much to resolve.
+      const r = timelineFlashReport(wave(0.6, { type: 'static' }, 0.97));
+      expect(r).toMatchObject({ fails: true, incomplete: true });
+      expect(r.boundariesPerSecond).toBeGreaterThanOrEqual(50);
+    });
+  });
 });
