@@ -21,7 +21,7 @@
  *   looks exactly like lap 7 (the value depends only on `t mod duration`).
  */
 import type { SaverSpec, Timeline, TimelineKey } from './types';
-import { applyDeltasToSpec, canonicalSpecPath, easeSmooth, lerpValue, readSpecPath } from './steer';
+import { applyDeltasShared, applyDeltasToSpec, canonicalSpecPath, easeSmooth, lerpValue, readSpecPath } from './steer';
 
 /** Default glide length for a key without `dur` — the same as a live steer's. */
 export const DEFAULT_KEY_DUR = 1000;
@@ -98,8 +98,9 @@ function evalTrack(keys: TimelineKey[], start: unknown, tt: number, leaf?: strin
  * The scene at time `t` with every key applied — and without its `timeline`,
  * so the result can be rendered, perceived, lerped or steered like any plain
  * spec. A spec without a timeline comes back as the same object.
+ * `shared` (read-only callers): untouched subtrees alias `spec` — never mutate the result.
  */
-export function resolveTimelineAt(spec: SaverSpec, t: number): SaverSpec {
+export function resolveTimelineAt(spec: SaverSpec, t: number, shared = false): SaverSpec {
   const tl = spec.timeline;
   if (!tl) return spec;
   const base = withoutTimeline(spec);
@@ -111,7 +112,7 @@ export function resolveTimelineAt(spec: SaverSpec, t: number): SaverSpec {
     const start = tl.loop ? keys[keys.length - 1]!.value : readSpecPath(base, path);
     deltas.push({ t: 0, path, value: evalTrack(keys, start, tt, path.slice(path.lastIndexOf('.') + 1)) });
   }
-  return applyDeltasToSpec(base, deltas);
+  return shared ? applyDeltasShared(base, deltas) : applyDeltasToSpec(base, deltas);
 }
 
 /**

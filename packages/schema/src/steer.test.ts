@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, sequenceSteerablePaths, steerablePaths, structuralSignature } from './steer';
+import { applyDeltasShared, applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, sequenceSteerablePaths, steerablePaths, structuralSignature } from './steer';
 import type { SaverSpec } from './types';
 import { validateSpec } from './validate';
 import { resolveTimelineAt } from './timeline';
@@ -279,5 +279,81 @@ describe('field quantize / octaves glide through whole levels (X477)', () => {
   it('authored fractional values are still rejected', () => {
     expect(validateSpec({ ...field, background: { ...(field.background as object), quantize: 2.5 } as SaverSpec['background'] }).valid).toBe(false);
     expect(validateSpec({ ...field, background: { ...(field.background as object), octaves: 1.5 } as SaverSpec['background'] }).valid).toBe(false);
+  });
+});
+
+describe('applyDeltasShared (the validator copy)', () => {
+  const freeze = <T>(v: T): T => {
+    if (v && typeof v === 'object') {
+      Object.values(v as object).forEach(freeze);
+      Object.freeze(v);
+    }
+    return v;
+  };
+  const keyed = (): SaverSpec => ({
+    schemaVersion: 1,
+    id: 'shared',
+    label: 'Shared',
+    background: { type: 'gradient', stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#204060' }] },
+    layers: [
+      { key: 'dots', count: 4, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#ffffff' }, motion: { type: 'drift', speed: [0.02, 0.02] } },
+      {
+        key: 'leaf',
+        count: 1,
+        position: { x: 0.5, y: 0.5 },
+        transform: { rotate: 0 },
+        sprite: {
+          kind: 'polygon',
+          radius: [0.2, 0.2],
+          color: '#80c080',
+          parts: [
+            { path: 'M -0.5 0 L 0 -0.5 L 0.5 0 Z', color: '#80c080' },
+            { path: 'M -0.5 0 L 0 0.5 L 0.5 0 Z', color: '#408040' },
+          ],
+        },
+        motion: { type: 'static' },
+      },
+    ],
+    timeline: {
+      loop: true,
+      duration: 4000,
+      keys: [
+        { t: 0, path: 'leaf.sprite.parts.0.path', value: 'M -0.5 0 L 0 -0.8 L 0.5 0 Z', dur: 1000 },
+        { t: 1000, path: 'leaf.sprite.parts.0.path', value: 'M -0.5 0 L 0 -0.5 L 0.5 0 Z', dur: 1000 },
+        { t: 500, path: 'leaf.sprite.parts.1.color', value: '#204020', dur: 800 },
+        { t: 1500, path: 'leaf.transform', value: { rotate: 30 }, dur: 1000 },
+        { t: 2000, path: 'background.stops.1.color', value: '#602040', dur: 1000 },
+        { t: 2500, path: 'dots.sprite.color', value: '#ffcc00', dur: 500 },
+      ],
+    },
+  }) as unknown as SaverSpec;
+
+  it('resolves every sample time to exactly what the deep copy resolves', () => {
+    const spec = keyed();
+    for (const t of [0, 250, 500, 900, 1500, 2000, 2250, 2750, 3500]) {
+      expect(resolveTimelineAt(spec, t, true)).toEqual(resolveTimelineAt(spec, t));
+    }
+    expect(applyDeltasShared(spec, [{ t: 0, path: 'leaf.position.x', value: 0.25 }])).toEqual(
+      applyDeltasToSpec(spec, [{ t: 0, path: 'leaf.position.x', value: 0.25 }]),
+    );
+  });
+
+  it('never writes to the spec it shares with', () => {
+    const spec = freeze(keyed());
+    expect(() => {
+      for (const t of [0, 750, 1750, 2750]) resolveTimelineAt(spec, t, true);
+      applyDeltasShared(spec, [{ t: 0, path: 'dots.count', value: 9 }, { t: 0, path: 'layers.0.sprite.radius', value: [0.02, 0.02] }]);
+    }).not.toThrow();
+    // Untouched layers are shared; the touched one is a copy.
+    const out = applyDeltasShared(spec, [{ t: 0, path: 'leaf.sprite.parts.1.color', value: '#000000' }]);
+    expect(out.layers[0]).toBe(spec.layers[0]);
+    expect(out.layers[1]).not.toBe(spec.layers[1]);
+    expect((spec.layers[1]!.sprite as { parts: Array<{ color: string }> }).parts[1]!.color).toBe('#408040');
+  });
+
+  it('leaves a keyed spec valid and the validator pure', () => {
+    const spec = freeze(keyed());
+    expect(validateSpec(structuredClone(spec)).valid).toBe(true);
+    expect(steerablePaths(spec)).toContain('layers.1.sprite.parts.0.path');
   });
 });

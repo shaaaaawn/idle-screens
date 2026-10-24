@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
-import { applyDeltasToSpec, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
+import { applyDeltasShared, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, type PathFillRule } from './shapes';
@@ -146,7 +146,9 @@ export function validateSpec(spec: unknown): ValidationResult {
  */
 export function ignoredPropertyPaths(spec: unknown): string[] {
   if (!isObj(spec)) return [];
-  return (validateSpecCore(spec).warnings ?? [])
+  // Unknown/misplaced warnings come from the structure, never from applying a
+  // timeline's keys, so skip those checks: they are most of a long timeline's cost.
+  return (validateSpecCore(spec, false).warnings ?? [])
     .filter((w) => w.code === 'unknown-property' || w.code === 'misplaced-property')
     .map((w) => w.path.replace(/\[(\d+)\]/g, '.$1'));
 }
@@ -204,7 +206,7 @@ export function validateSpecPaths(spec: SaverSpec, paths: Iterable<string>): boo
   return ok;
 }
 
-function validateSpecCore(spec: unknown): ValidationResult {
+function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
   const err = (path: string, message: string): void => void errors.push({ path, message });
@@ -280,7 +282,7 @@ function validateSpecCore(spec: unknown): ValidationResult {
   }
 
   // Keys are checked against the base spec, so only once the base is valid.
-  if (spec.timeline !== undefined && errors.length === 0) validateTimeline(spec as unknown as SaverSpec, err, warn);
+  if (spec.timeline !== undefined && errors.length === 0) validateTimeline(spec as unknown as SaverSpec, err, warn, checkApplied);
 
   return { valid: errors.length === 0, errors, warnings };
 }
@@ -328,7 +330,7 @@ function validateGroups(groups: unknown, err: (p: string, m: string) => void, wa
  * (across the wrap too, under `loop`) — the flash-safety floor that replaces a
  * sequence's 1 s segment minimum for change inside a scene.
  */
-function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn): void {
+function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => void, warn: WarnFn, checkApplied = true): void {
   let failed = false;
   const err = (p: string, m: string): void => { failed = true; errOuter(p, m); };
   const tl = spec.timeline as unknown;
@@ -371,24 +373,27 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
     if (!ok || !cp) return;
     const t = key.t as number;
     latest = Math.max(latest, t);
-    const applied = applyDeltasToSpec(base, [{ t: 0, path: cp, value: key.value }]);
-    // The base is valid, so only the part the key changes can break; the full
-    // validation runs just to name the failure.
-    const r = validateSpecPaths(applied, [cp]) ? { valid: true, errors: [] as SpecError[] } : validateSpec(applied);
-    if (!r.valid) {
-      for (const e of r.errors) err(`${p}.value`, `applied at '${key.path}' → ${e.path || '<root>'}: ${e.message}`);
-      return;
-    }
-    // `origin` is an enum: a whole-`transform` key that changes it switches
-    // the pivot on the key's first frame — a jump, not a glide.
-    if (isObj(key.value) && cp.endsWith('transform')) {
-      const before = readSpecPath(base, cp);
-      const o0 = isObj(before) ? before.origin ?? 'viewport' : 'viewport';
-      const o1 = (key.value as Record<string, unknown>).origin ?? 'viewport';
-      if (o0 !== o1) warn(`${p}.value`, 'timeline-origin-steps', `this key changes the transform's origin (${String(o0)} → ${String(o1)}): the pivot switches on the key's first frame, so the layer jumps — keep one origin per layer`);
-    }
-    if (structuralSignature(applied) !== baseSig) {
-      warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
+    if (checkApplied) {
+      const applied = applyDeltasShared(base, [{ t: 0, path: cp, value: key.value }]);
+      // The base is valid, so only the part the key changes can break; the full
+      // validation runs just to name the failure (on a copy: validateSpec
+      // normalises colours, and `applied` aliases the caller's spec).
+      const r = validateSpecPaths(applied, [cp]) ? { valid: true, errors: [] as SpecError[] } : validateSpec(structuredClone(applied));
+      if (!r.valid) {
+        for (const e of r.errors) err(`${p}.value`, `applied at '${key.path}' → ${e.path || '<root>'}: ${e.message}`);
+        return;
+      }
+      // `origin` is an enum: a whole-`transform` key that changes it switches
+      // the pivot on the key's first frame — a jump, not a glide.
+      if (isObj(key.value) && cp.endsWith('transform')) {
+        const before = readSpecPath(base, cp);
+        const o0 = isObj(before) ? before.origin ?? 'viewport' : 'viewport';
+        const o1 = (key.value as Record<string, unknown>).origin ?? 'viewport';
+        if (o0 !== o1) warn(`${p}.value`, 'timeline-origin-steps', `this key changes the transform's origin (${String(o0)} → ${String(o1)}): the pivot switches on the key's first frame, so the layer jumps — keep one origin per layer`);
+      }
+      if (structuralSignature(applied) !== baseSig) {
+        warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
+      }
     }
     const list = times.get(cp) ?? [];
     list.push(t);
@@ -418,19 +423,19 @@ function validateTimeline(spec: SaverSpec, errOuter: (p: string, m: string) => v
   // combine into an invalid scene (a `clock.rate` and a `pulse.period` share
   // one flash-safety floor). Check the composed scene where it can change:
   // every key's start, end and glide quarter-points.
-  if (failed) return;
+  if (failed || !checkApplied) return;
   // Every key boundary, plus up to 120 in-glide points: this runs at every
   // mount, so the glide sampling is budgeted — the settled states are not.
   const keyed = [...timelineTracks(spec).keys()];
   const seen = new Set<string>();
   for (const t of timelineSampleTimes(spec, true, 120)) {
-    const r = resolveTimelineAt(spec, t);
+    const r = resolveTimelineAt(spec, t, true);
     // Only the keyed values change between samples: skip a state already judged.
     const state = JSON.stringify(keyed.map((p) => readSpecPath(r, p)));
     if (seen.has(state)) continue;
     seen.add(state);
     if (validateSpecPaths(r, keyed)) continue;
-    const e = validateSpec(r).errors[0];
+    const e = validateSpec(structuredClone(r)).errors[0];
     err('timeline', `at t = ${Math.round(t)} ms the keys combine into an invalid scene — ${e ? `${e.path || '<root>'}: ${e.message}` : 'invalid'}`);
     return;
   }
@@ -1259,17 +1264,42 @@ const isPair = (v: unknown, lim = 2): boolean => Array.isArray(v) && v.length ==
 const MAX_PATH_PARTS = 256;
 
 /** A path piece — a path polygon itself, or one of its parts: the d string, fill, fill rule, gradient, stroke. */
+/**
+ * Geometry verdicts by fill rule, fill and d string. A timeline check
+ * re-validates a keyed layer's every part at each sample time, and most of
+ * those parts never change, so the flatten-and-bound walk runs once per path.
+ */
+const pathVerdicts = new Map<string, string | null>();
+/** Key bytes held: a morph's in-between paths are each new and up to 64 KB long. */
+let pathVerdictBytes = 0;
+
+function pathGeometryProblem(d: string, rule: PathFillRule, filled: boolean): string | null {
+  const key = `${rule}|${filled ? 1 : 0}|${d}`;
+  const hit = pathVerdicts.get(key);
+  if (hit !== undefined) return hit;
+  const flat = flattenPath(d, rule);
+  const inBox = ([x, y]: readonly number[]): boolean => Math.abs(x!) <= 1.0001 && Math.abs(y!) <= 1.0001;
+  const problem = flat.error ? `not a usable path: ${flat.error}`
+    : filled && flat.points.length < 3 ? 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art'
+    : !filled && flat.lines.length === 0 ? 'must draw at least one line (2+ points)'
+    : flat.points.length > MAX_PATH_POINTS ? `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`
+    : !flat.points.every(inBox) || !flat.lines.every((l) => l.points.every(inBox)) ? 'must stay inside the -1..1 unit box (curves included)'
+    : null;
+  if (pathVerdicts.size >= 1024 || pathVerdictBytes + key.length > 2_000_000) {
+    pathVerdicts.clear();
+    pathVerdictBytes = 0;
+  }
+  pathVerdicts.set(key, problem);
+  pathVerdictBytes += key.length;
+  return problem;
+}
+
 function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (typeof piece.path !== 'string' || piece.path.length === 0 || piece.path.length > 65536) {
     err(`${path}.path`, 'must be an SVG path d string (1..65536 chars) in the -1..1 unit box');
   } else {
-    const flat = flattenPath(piece.path, (piece.fillRule as PathFillRule | undefined) ?? 'auto');
-    const filled = piece.fill !== false;
-    if (flat.error) err(`${path}.path`, `not a usable path: ${flat.error}`);
-    else if (filled && flat.points.length < 3) err(`${path}.path`, 'must enclose an area (at least 3 points), or set fill: false and a stroke for line art');
-    else if (!filled && flat.lines.length === 0) err(`${path}.path`, 'must draw at least one line (2+ points)');
-    else if (flat.points.length > MAX_PATH_POINTS) err(`${path}.path`, `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`);
-    else if ([...flat.points, ...flat.lines.flatMap((l) => l.points)].some(([x, y]) => Math.abs(x) > 1.0001 || Math.abs(y) > 1.0001)) err(`${path}.path`, 'must stay inside the -1..1 unit box (curves included)');
+    const problem = pathGeometryProblem(piece.path, (piece.fillRule as PathFillRule | undefined) ?? 'auto', piece.fill !== false);
+    if (problem) err(`${path}.path`, problem);
   }
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
