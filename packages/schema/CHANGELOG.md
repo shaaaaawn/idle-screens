@@ -1,5 +1,35 @@
 # @idle-screens/schema
 
+## 3.14.0
+
+### Minor Changes
+
+- 058331c: `timelineFlashReport(spec)` checks a timeline's combined effect on the frame for photosensitive flashing. The validator's timeline rule is per path (keys on one path ≥ 200 ms apart), and paint keys on several paths can still combine past it. A top layer's opacity switching between its own colour and the colour beneath, with all three paths keyed at the floor 67 ms apart, flickers the full frame 5 times a second. That spec was valid.
+  
+  Wherever one second holds 7 or more key boundaries on paint paths, the report resolves the frame just before and after each boundary, at most 64 frames. It runs the WCAG 2.3.1 analyzer from `@idle-screens/validator` over the result: more than 3 flashes a second over a quarter of the frame fails. Most scenes have no such second and cost nothing.
+  
+  It is meant for publish and preview, not `validateSpec`, which runs on every viewer mount. `@idle-screens/schema` now depends on `@idle-screens/validator`.
+
+### Patch Changes
+
+- bf3ee22: Advisories stop flagging correct work, and name two real risks they missed.
+  
+  - `text-overlap` recognises the four-corner outline: copies of one string at (±d, ±d) are one caption, judged per axis rather than by diagonal distance (X611).
+  - `text-legibility` judges the solid chip painted under a `role: "read"` label when it covers the whole box, not only the background (X562).
+  - `overlap-seams` stays off tilings whose only seam is a palette: rows or tiles that overlap by a hairline bury their outlines but almost none of their area (new `buriedAreaOf`, X574). Translucent tilings still warn.
+  - New `motion-intensity-mismatch`: a `motionIntensity: "calm"` scene whose shapes spin faster than 90°/s on average.
+  - New `flash-near-limit`: a timeline that flickers at least 2 times a second over a quarter of the frame, such as a full-frame step at the 200 ms key floor, which the publish-time gate (more than 3) allows (X589).
+- 904c3de: Perception and advisories now read what is actually on screen. Spin's reports X603 and X605–X610, plus X616, each gave a repro that read wrong; all eight now read right.
+  
+  - **Dominance and scene colour** count only the part of each entity inside the viewport (X616). A path drawing counts the ink its parts lay down: a part at opacity 0 adds nothing (X609), and an open `fill: false` line counts its stroke, not the area its points enclose (X605). The same per-part ink feeds `additive-saturation`.
+  - **`low-contrast-layer`** judges a path drawing by the colours its parts paint (fills, gradient stops, strokes), not its base `color` (X608). A layer seen through a hole in an opaque drawing above it is also judged against that frame (X610).
+  - **`perception.motion`** counts `spin`: a turning shape's ink moves even when its centre stands still (X607). Circles and rings are excluded, since they look the same turned.
+  - **The luminance maps and centroid** turn a layer's outline by its paint `transform.rotate` (and its group's), not just its position (X606).
+  - **`text-off-screen`** judges text by its box after the layer's `rotate`, so a vertical caption is no longer flagged (X603).
+- 2a68258: Validating a long timeline is 2–5× cheaper, and `steerablePaths` no longer validates the timeline at all. The validator's per-key and composed-state checks used to deep-copy the whole spec at every key and sample time. They now share every subtree a key doesn't touch (an internal `applyDeltasShared`). Path-geometry verdicts are cached per d string. `ignoredPropertyPaths` (inside `steerablePaths`) skips the applied-key checks, which never produce the unknown-property warnings it reads.
+  
+  Measured on 13 production scenes of 64–132 KB with 48–248 keys: `validateSpec` 50–327 ms → 11–187 ms, and `steerablePaths` 29–294 ms → 1–6 ms. The server ran this work several times per `/state` read, and heavy scenes on idlescreens.com were failing with Cloudflare 1101 (Worker threw an exception); cutting it is the main lever on that.
+
 ## 3.13.0
 
 ### Minor Changes
