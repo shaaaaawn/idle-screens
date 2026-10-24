@@ -25,6 +25,7 @@ import {
   breakTextBlock,
   buildEntities,
   headingAt,
+  isFullWidth,
   lifeAlphaAt,
   linkEdges,
   linkMaxDistPx,
@@ -178,7 +179,10 @@ function textBox(
   const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
   // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
-  const est = Math.max(fh, 0.62 * fh * Math.min(str.length, 48));
+  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614).
+  const head = Array.from(str).slice(0, 48);
+  const wide = head.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
+  const est = Math.max(fh, fh * (0.62 * head.length + 0.38 * wide));
   const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';

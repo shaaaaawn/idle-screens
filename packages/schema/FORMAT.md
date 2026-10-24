@@ -422,7 +422,8 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
 - `{ "kind": "stroke", "length": [0.08, 0.18], "points": [[-1, 0.3], [-0.5, -0.6], [0.3, -0.7], [1, 0.1]], "width": 0.004, "taper": true, "color": "#f2e8c9" }` —
   a freehand mark: a path through 2..24 unit-coordinate points, scaled so the
   unit box spans the seeded `length`, stroked `width` wide with round joins.
-  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline;
+  `curve: "smooth"` (default) is a Catmull-Rom spline, `"linear"` a polyline
+  through every point (its corners stay sharp);
   `taper` thins the mark to almost nothing at both ends (a brush stroke rather
   than a line; it paints as one filled mark, so a translucent stroke has no
   overlap beads); `orient: true` turns the path's +x along the entity's heading,
@@ -441,6 +442,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   wrapping is identical across platforms; note that the table is approximate
   — a painted line may slightly exceed `maxWidth` when the real font is wider
   than the table estimates, so `maxWidth` is a layout target, not a hard clip.
+  Full-width glyphs (CJK ideographs, kana, Hangul, fullwidth forms) count a
+  whole em in every table; lines break only at whitespace, so an unspaced CJK
+  run stays on one line — break it with spaces or `\n`.
   Use with `count: 1`, `motion: { type: "static" }`, and `position`.
 
   `anchor` (one of nine compass points: `top-left`, `top`, `top-right`,
@@ -465,7 +469,7 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   rejected** (`fontSize` owns size, so the block keeps scaling with the
   viewport). A monospace family (`monospace`, `ui-monospace`, Menlo, Courier,
   SF Mono, Fira Code, …) switches the line-breaker to a uniform 0.6 em
-  advance so mono wraps land where the real face puts them; every other
+  advance (1 em for a full-width glyph) so mono wraps land where the real face puts them; every other
   family uses the proportional table. Default `system-ui, sans-serif`.
   **Native clients fall back to the system face** until a face table exists.
   `font` names faces **installed on the viewing device** — nothing is

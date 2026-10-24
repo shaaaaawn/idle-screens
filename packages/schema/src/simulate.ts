@@ -933,6 +933,41 @@ export function textMetricsClassFor(font?: string): TextMetricsClass {
 
 const MONO_ADVANCE_EM = 0.6;
 
+/** Advance of a full-width (East Asian Wide/Fullwidth) glyph: one em, in any face. */
+const FULL_WIDTH_EM = 1;
+
+/** Combining (semi-)voiced sound marks: they ride on the preceding kana and advance nothing. */
+export function isCombiningKana(cp: number): boolean {
+  return cp === 0x3099 || cp === 0x309a;
+}
+
+/**
+ * Whether a code point is set full-width — a CJK ideograph, kana, Hangul
+ * syllable, CJK punctuation or a fullwidth form — so it advances ~1 em, not
+ * the 0.55 of a Latin letter (X614: a centred katakana line measured at half
+ * its real width and spilled off the frame). Halfwidth kana and Hangul
+ * (U+FF61–FFDC) stay narrow. A fixed table, for the same determinism reason
+ * as the buckets below.
+ */
+export function isFullWidth(cp: number): boolean {
+  if (isCombiningKana(cp)) return false;
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo leading consonants
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK symbols & punctuation
+    (cp >= 0x3041 && cp <= 0x33ff) || // kana, Bopomofo, Hangul compat Jamo, enclosed CJK, CJK compat
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Ext A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+    (cp >= 0xa960 && cp <= 0xa97f) || // Hangul Jamo Ext A
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+    (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK compatibility forms
+    (cp >= 0xff01 && cp <= 0xff60) || // fullwidth ASCII variants
+    (cp >= 0xffe0 && cp <= 0xffe6) || // fullwidth signs
+    (cp >= 0x20000 && cp <= 0x3fffd) // CJK Ext B–H (supplementary)
+  );
+}
+
 /**
  * Approximate glyph width as a fraction of em. Uses character-class buckets
  * so line breaks are identical across platforms (no measureText). The average
@@ -952,12 +987,29 @@ function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): nu
  * Em-width of a string under the same character-class table `breakTextBlock`
  * uses. `mono` counts grapheme clusters, not UTF-16 code units — an emoji or
  * combining/ZWJ sequence is one advance-width cell, matching what's painted,
- * not one cell per surrogate half or combining mark.
+ * not one cell per surrogate half or combining mark. Under either table a
+ * full-width (CJK) glyph advances a full em.
  */
 export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
-  if (metrics === 'mono') return graphemeClusters(str).length * MONO_ADVANCE_EM;
+  if (metrics === 'mono') {
+    let w = 0;
+    for (const c of graphemeClusters(str)) {
+      const cp = c.codePointAt(0)!;
+      if (!isCombiningKana(cp)) w += isFullWidth(cp) ? FULL_WIDTH_EM : MONO_ADVANCE_EM;
+    }
+    return w;
+  }
   let w = 0;
-  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!, metrics);
+  for (let i = 0; i < str.length; i++) {
+    const cp = str.codePointAt(i)!;
+    if (isCombiningKana(cp)) continue;
+    if (isFullWidth(cp)) {
+      w += FULL_WIDTH_EM;
+      if (cp > 0xffff) i++; // a supplementary ideograph is one glyph, two code units
+      continue;
+    }
+    w += charWidthEm(str[i]!, metrics);
+  }
   return w;
 }
 

@@ -547,6 +547,47 @@ describe('textBlock anchor in perception and steering', () => {
   });
 });
 
+describe('full-width (CJK) metrics (X614)', () => {
+  it('a full-width glyph advances a whole em; halfwidth kana stays narrow', () => {
+    expect(textWidthEm('カタカナ')).toBeCloseTo(4, 9);
+    expect(textWidthEm('漢字かな한글')).toBeCloseTo(6, 9);
+    expect(textWidthEm('ＡＢ')).toBeCloseTo(2, 9); // fullwidth forms
+    expect(textWidthEm('𠀋')).toBeCloseTo(1, 9); // supplementary ideograph: one glyph, two code units
+    expect(textWidthEm('ｶﾀｶﾅ')).toBeCloseTo(4 * 0.55, 9); // halfwidth katakana
+    expect(textWidthEm('カタカナ', 'mono')).toBeCloseTo(4, 9);
+    expect(textWidthEm('ab', 'mono')).toBeCloseTo(1.2, 9);
+  });
+
+  it('combining kana marks ride on their base and add no width', () => {
+    expect(textWidthEm('か\u3099')).toBeCloseTo(textWidthEm('か'), 9);
+    expect(textWidthEm('は\u309a')).toBeCloseTo(1, 9);
+    expect(textWidthEm('か\u3099', 'mono')).toBeCloseTo(1, 9);
+  });
+
+  it('a centred, anchored katakana line is centred in the luminance grid and stays on the frame', () => {
+    // X614's shape: one wide line (13 glyphs × 0.06 = 0.78 of the frame) anchored
+    // at the centre. At 0.55 em a glyph the anchor offset was about half what it
+    // should be, so the line sat right of centre and ran off the frame.
+    const spec = textBlockSpec({ text: 'アイドルスクリーンの夜明け', maxWidth: 0.95, fontSize: 0.06, anchor: 'center' });
+    spec.layers[0]!.position = { x: 0.5, y: 0.5 };
+    const grid = luminanceGrid(spec, { t: 0, viewport: { width: 1080, height: 1080 } });
+    const cols: number[] = [];
+    for (let r = 0; r < grid.rows; r++)
+      for (let c = 0; c < grid.cols; c++)
+        if (grid.cells[r * grid.cols + c]! > grid.background[r]! + 0.01) cols.push(c);
+    const mid = (Math.min(...cols) + Math.max(...cols) + 1) / 2 / grid.cols;
+    expect(Math.abs(mid - 0.5)).toBeLessThan(0.03);
+    expect(adviseSpec(spec, { width: 1080, height: 1080 }).some((w) => w.code === 'text-off-screen')).toBe(false);
+  });
+
+  it('text-off-screen sees a CJK line that really spills', () => {
+    // 13 glyphs × 0.1 = 1.3 of the short side: off a square frame from the centre.
+    const spec = textBlockSpec({ text: 'アイドルスクリーンの夜明け', maxWidth: 1.4, fontSize: 0.1, anchor: 'center' });
+    spec.layers[0]!.position = { x: 0.5, y: 0.5 };
+    expect(adviseSpec(spec, { width: 1080, height: 1080 }).some((w) => w.code === 'text-off-screen')).toBe(true);
+  });
+});
+
 describe('monospace metrics class (textBlock.font)', () => {
   it('selects mono for monospace families and proportional otherwise', () => {
     for (const f of ['monospace', 'bold monospace', "'SF Mono', monospace", 'Menlo', 'Courier New', 'ui-monospace', 'Fira Code', 'JetBrains Mono', 'SFMono-Regular', '-apple-system, BlinkMacSystemFont, "SFMono-Regular", Menlo, monospace']) {
