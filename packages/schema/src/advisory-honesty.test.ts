@@ -162,6 +162,12 @@ describe('text-legibility judges the backing plate under the text (X562)', () =>
   it('a chip under only part of the label still fires', () => {
     expect(legible([chip(0.72, 0.12, 0.44), label])).toContain('text-legibility');
   });
+  it('a chip that is not on screen yet does not count as the ground', () => {
+    expect(legible([{ ...chip(0.72), life: { enter: 5000 } } as LayerSpec, label])).toContain('text-legibility');
+  });
+  it('a chip that breathes does not count as the ground', () => {
+    expect(legible([{ ...chip(0.72), pulse: { amp: 0.3, period: 4000 } } as LayerSpec, label])).toContain('text-legibility');
+  });
 });
 
 describe('overlap-seams leaves a banded table alone (X574)', () => {
@@ -173,6 +179,10 @@ describe('overlap-seams leaves a banded table alone (X574)', () => {
   });
   it('the same table painted translucent keeps the warning: every hairline paints darker', () => {
     expect(codes(sky({ alpha: [0.8, 0.8] }), { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+  it('tall bands that overlap by a third of their width still warn in a square frame', () => {
+    const bars = scene([{ key: 'bars', count: 7, position: { x: 0.1, y: 0 }, layout: { type: 'table', columns: 7, gap: { x: 0.016, y: 0 } }, sprite: { kind: 'rect', width: [0.02, 0.02], aspect: [64, 64], color: '#0f3d44', colors: ['#0f3d44', '#145056', '#1b6468', '#2a7a78', '#4a9488', '#7ab0a0', '#9cc4b0'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);
+    expect(codes(bars, { width: 1000, height: 1000 })).toContain('overlap-seams');
   });
   it('a multi-colour silhouette of packed hard discs still warns', () => {
     const hill = scene([{ key: 'hill', count: 30, region: { x: [0.3, 0.7], y: [0.55, 0.7] }, sprite: { kind: 'circle', radius: [0.08, 0.12], colors: ['#2a5a30', '#3a7a40'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);

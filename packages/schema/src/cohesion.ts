@@ -129,10 +129,10 @@ function discSamples(cx: number, cy: number, r: number, n: number): Array<{ x: n
  */
 function gridSamples(uw: number, vh: number, n: number, map: (u: number, v: number) => { x: number; y: number }): Array<{ x: number; y: number }> {
   if (!(uw > 0) || !(vh > 0)) return [];
-  // At least 8 across the short side, so an overlap of an eighth of a thin
+  // At least 8 across each axis, whichever is the short side, so an overlap of an eighth of a thin
   // band's height still registers.
   const nv = Math.min(n, Math.max(8, Math.round(Math.sqrt((n * vh) / uw))));
-  const nu = Math.max(1, Math.round(n / nv));
+  const nu = Math.max(8, Math.round(n / nv));
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < nu; i++) {
     for (let j = 0; j < nv; j++) out.push(map(((i + 0.5) / nu - 0.5) * uw, ((j + 0.5) / nv - 0.5) * vh));

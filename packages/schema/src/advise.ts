@@ -881,11 +881,14 @@ function groundUnder(
     const layer = spec.layers[lj]!;
     const sp = layer.sprite;
     if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    // A chip that is not there for the whole run (lifecycle, sparse emit) is
+    // not a ground the text can lean on.
+    if (layer.life !== undefined || layer.emit !== undefined) continue;
     if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
     if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
     const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of allEntities[lj]!) {
-      if (e.spinSpeed !== 0 || e.alpha * a <= 0) continue;
+      if (e.spinSpeed !== 0 || e.pulseAmp > 0 || e.growAmp > 0 || e.alpha * a <= 0) continue;
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
       const c = positionAt(e, 0, w, h);
