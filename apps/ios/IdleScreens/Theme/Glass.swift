@@ -41,13 +41,65 @@ extension View {
     }
 }
 
-extension View {
-    /// Text-heavy pages on a wide screen (iPad, a wide window): one column at
-    /// a readable measure, centred, instead of rows running edge to edge. No
-    /// effect at phone widths.
-    func readableColumn(_ maxWidth: CGFloat = 720) -> some View {
-        frame(maxWidth: maxWidth, alignment: .leading)
+/// How much bigger the chrome is on this window than on a phone. A phone is
+/// 1; an iPad mini / Air 11" (or a mid-size window) 1.15; a 13" iPad, or any
+/// window 900 pt and wider, 1.3. Text grows with it through Dynamic Type
+/// (`typeSteps`, on top of the person's own setting); fixed sizes — margins,
+/// avatars, buttons, card widths — multiply by it. Without it the iPad got
+/// phone-sized type and controls floating on a canvas twice as wide.
+enum DeviceScale {
+    static func forWidth(_ width: CGFloat) -> CGFloat {
+        switch width {
+        case ..<600: return 1
+        case ..<900: return 1.15
+        default: return 1.3
+        }
+    }
+
+    /// Dynamic Type steps that match a scale: 1.15 ≈ one step, 1.3 ≈ two.
+    static func typeSteps(_ scale: CGFloat) -> Int {
+        scale >= 1.3 ? 2 : (scale > 1 ? 1 : 0)
+    }
+
+    /// A screen-edge margin: 16 on a phone, roomier on an iPad.
+    static func margin(_ scale: CGFloat) -> CGFloat {
+        16 + (scale - 1) * 60
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var deviceScale: CGFloat = 1
+}
+
+extension DynamicTypeSize {
+    /// `steps` sizes larger, stopping at xxxLarge. An accessibility size is
+    /// already the person's choice and is left alone.
+    func stepped(_ steps: Int) -> DynamicTypeSize {
+        guard steps > 0, !isAccessibilitySize,
+              let here = DynamicTypeSize.allCases.firstIndex(of: self),
+              let top = DynamicTypeSize.allCases.firstIndex(of: .xxxLarge) else { return self }
+        return DynamicTypeSize.allCases[min(here + steps, top)]
+    }
+}
+
+/// Text-heavy pages on a wide screen (iPad, a wide window): one column at a
+/// readable measure, centred, instead of rows running edge to edge. The
+/// measure grows with `deviceScale`, as the type does. No effect at phone
+/// widths.
+private struct ReadableColumn: ViewModifier {
+    @Environment(\.deviceScale) private var scale
+    let maxWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: maxWidth * scale, alignment: .leading)
             .frame(maxWidth: .infinity)
+    }
+}
+
+extension View {
+    func readableColumn(_ maxWidth: CGFloat = 640) -> some View {
+        modifier(ReadableColumn(maxWidth: maxWidth))
     }
 }
 
