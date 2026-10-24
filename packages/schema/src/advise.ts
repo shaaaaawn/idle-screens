@@ -1,6 +1,6 @@
 import { createRng } from '@idle-screens/core';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
-import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
+import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
 import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
@@ -123,7 +123,7 @@ export function adviseSpec(
     if (layer.motion.type !== 'static') motionLayerCount++;
 
     const coh = cohesion[li]!;
-    if (seamsWorthWarning(layer, coh, entities.length)) {
+    if (seamsWorthWarning(layer, coh, entities.length, () => buriedAreaOf(layer, entities, opts.t ?? COHESION_T, w, h))) {
       // A soft or feathered edge has no edge to paint: overlaps pool into
       // smooth lumps, which is a cloud or a haze, not a seam. Measured live
       // (X423): the hard-edged control showed every overlap as an outline,
@@ -615,26 +615,46 @@ export function adviseSpec(
       }
       return sourceOverPlate(base, ink, alpha);
     };
-    let worst: { ground: number; plate: number; plateLabel: string | null } | null = null;
+    let worst: { ground: number; plate: number; plateLabel: string | null; onSolid: boolean } | null = null;
     for (const box of boxes) {
       const cy = (box.y0 + box.y1) / 2;
       const cx = (box.x0 + box.x1) / 2;
-      const groundRgb = backgroundRgbAt(spec, cy, h, scale, cx, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
-      const ground = legibilityRatio(textPlate(groundRgb, box.alpha), groundRgb);
-      const lit = brightestAdditivePlate(spec, allEntities, groundRgb, box, w, h);
-      const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
-      if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
-        worst = { ground, plate, plateLabel: lit?.label ?? null };
+      const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(spec, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+      // The ground is what is painted behind the text, not just the page: a
+      // solid backing chip drawn under a label is the standard remedy, and
+      // the one this message recommends (X562 — the same root cause as X388
+      // on low-contrast-layer). The chip must cover the whole box to replace
+      // the page: centre and corners are probed, and any probe it misses
+      // keeps the page at the box centre in play, judged as before.
+      const ix = (box.x1 - box.x0) * 0.02;
+      const iy = (box.y1 - box.y0) * 0.02;
+      const probes = [[cx, cy], [box.x0 + ix, box.y0 + iy], [box.x1 - ix, box.y0 + iy], [box.x0 + ix, box.y1 - iy], [box.x1 - ix, box.y1 - iy]] as const;
+      const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
+      let bare = false;
+      for (const [x, y] of probes) {
+        const under = groundUnder(spec, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
+        if (under) grounds.push({ rgb: under.rgb, onSolid: true });
+        else bare = true;
+      }
+      if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
+      for (const g of grounds) {
+        const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
+        const lit = brightestAdditivePlate(spec, allEntities, g.rgb, box, w, h);
+        const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+        if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
+          worst = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
+        }
       }
     }
     if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
       const under = worst.plateLabel
         ? ` and ${worst.plate.toFixed(1)}:1 under ${worst.plateLabel} at its brightest`
         : '';
+      const against = worst.onSolid ? 'against the solid layer painted under it' : 'against the background at the box centre';
       warnings.push({
         path: `layers[${b.li}].sprite`,
         code: 'text-legibility',
-        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 against the background at the box centre${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
+        message: `${b.label} is declared role: 'read' but its colour reads at ${worst.ground.toFixed(1)}:1 ${against}${under} — below ${READ_LEGIBILITY_FLOOR}:1; brighten the text, darken the ground under it, or declare role: 'atmosphere' if it is texture`,
       });
     }
 
@@ -762,7 +782,8 @@ function holeFrame(
 
 /**
  * What an earlier layer has painted at `pt` (t = 0), composited over the
- * page colour, or null when nothing solid sits there. Conservative on
+ * page colour (or over `base`, the page sampled where `pt` is, when the
+ * caller has it), or null when nothing solid sits there. Conservative on
  * purpose: only static, transform-free, normal-blend, hard-edged shapes
  * count, with exact containment for circles, axis-aligned (or quarter-turned)
  * rects and unrotated polygons — so the low-contrast check can only be
@@ -776,8 +797,9 @@ function groundUnder(
   pt: { x: number; y: number },
   w: number,
   h: number,
+  base: Rgb = backgroundRgb(spec),
 ): { rgb: Rgb; luma: number } | null {
-  let plate: Rgb = backgroundRgb(spec);
+  let plate: Rgb = base;
   let covered = false;
   for (let lj = 0; lj < li; lj++) {
     if (hidden?.[lj]) continue;
@@ -842,7 +864,10 @@ function entityReachesBox(e: Entity, r: number, box: TextBoxAt, w: number, h: nu
  * The outline / drop-shadow idiom (X416): the SAME string painted twice at the
  * same size, nudged a few px — a dark copy under the fill. That is one title,
  * not two labels colliding. "A few px" is judged against the glyph height, so
- * it holds at every viewport: centres within 15 % of it, sizes within 10 %.
+ * it holds at every viewport: centres within 15 % of it on EACH axis, sizes
+ * within 10 %. Per axis, not by straight-line distance: the four-corner
+ * outline puts copies at (±d, ±d), and the diagonal opposites sit √2 further
+ * apart than the axis neighbours for the same nudge (X611).
  */
 const OUTLINE_STACK_OFFSET = 0.15;
 
@@ -852,7 +877,7 @@ function isOutlineStack(a: TextBoxAt, b: TextBoxAt): boolean {
   if (fs <= 0 || Math.abs(a.fs - b.fs) > 0.1 * Math.max(a.fs, b.fs)) return false;
   const dx = (a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2;
   const dy = (a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2;
-  return Math.hypot(dx, dy) <= OUTLINE_STACK_OFFSET * fs;
+  return Math.max(Math.abs(dx), Math.abs(dy)) <= OUTLINE_STACK_OFFSET * fs;
 }
 
 interface TextBoxAt {

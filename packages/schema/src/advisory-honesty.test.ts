@@ -125,3 +125,56 @@ describe('overlap-seams tells soft lumps from hard seams (X423)', () => {
     expect(seam(storm(false))!.message).toContain('every overlap paints a visible edge');
   });
 });
+
+describe('text-overlap leaves the four-corner outline alone (X611)', () => {
+  // Spin's meme caption: four black copies at (±d, ±d) under a white one.
+  const block = (key: string, color: string, dx: number, dy: number): LayerSpec =>
+    ({ key, count: 1, position: { x: 0.5, y: 0.5, dx, dy }, sprite: { kind: 'textBlock', text: 'EPIC', maxWidth: 1.6, fontSize: 0.1, lineHeight: 1.1, align: 'center', color, anchor: 'center', font: 'Impact, sans-serif', opacity: 1 }, alpha: [1, 1], motion: { type: 'static' } }) as LayerSpec;
+  const caption = (d: number): SaverSpec => scene([
+    block('o1', '#000000', -d, -d), block('o2', '#000000', d, -d), block('o3', '#000000', -d, d), block('o4', '#000000', d, d),
+    block('w', '#ffffff', 0, 0),
+  ], { background: { type: 'solid', color: '#3a1a6a' } });
+  it('diagonal copies of one caption are one outline, at any resolution', () => {
+    expect(codes(caption(0.0055), { width: 1600, height: 900 })).not.toContain('text-overlap');
+    expect(codes(caption(0.0055), { width: 3840, height: 2160 })).not.toContain('text-overlap');
+  });
+  it('the same copies pushed well past a nudge still clash', () => {
+    expect(codes(caption(0.0165), { width: 1600, height: 900 })).toContain('text-overlap');
+  });
+});
+
+describe('text-legibility judges the backing plate under the text (X562)', () => {
+  const field = { type: 'field', scale: 1.5, octaves: 3, warp: 0.55, quantize: 7, bands: ['#07040f', '#2a0a47', '#661069', '#b51f43', '#ec5a1c', '#ffb238', '#fff3cf'] };
+  const label = { key: 'label', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'THERMAL · 7 BANDS', fontSize: 0.02, maxWidth: 0.5, anchor: 'center', color: '#f4efe6', role: 'read' }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec;
+  const chip = (alpha: number, width = 0.25, x = 0.5): LayerSpec =>
+    ({ key: 'chip', count: 1, position: { x, y: 0.5 }, sprite: { kind: 'rect', width: [width, width], aspect: [0.14, 0.14], color: '#07040f' }, alpha: [alpha, alpha], motion: { type: 'static' } }) as LayerSpec;
+  const legible = (layers: LayerSpec[]) => codes(scene(layers, { seed: 42, background: field } as Partial<SaverSpec>), { width: 960, height: 540 });
+  it('the report: a dark chip under a pale label clears it', () => {
+    expect(legible([chip(0.72), label])).not.toContain('text-legibility');
+  });
+  it('the same label with no chip still fires', () => {
+    expect(legible([label])).toContain('text-legibility');
+  });
+  it('a chip too faint to darken the ground still fires', () => {
+    expect(legible([chip(0.2), label])).toContain('text-legibility');
+  });
+  it('a chip under only part of the label still fires', () => {
+    expect(legible([chip(0.72, 0.12, 0.44), label])).toContain('text-legibility');
+  });
+});
+
+describe('overlap-seams leaves a banded table alone (X574)', () => {
+  const sky = (x: Partial<LayerSpec> = {}): SaverSpec => scene([
+    { key: 'sky', count: 7, position: { x: 0.5, y: 0.5, dx: 0, dy: -0.4 }, layout: { type: 'table', columns: 1, gap: { x: 1, y: 0.08 } }, sprite: { kind: 'rect', width: [1.64, 1.64], aspect: [0.0506, 0.0506], color: '#0f3d44', colors: ['#0f3d44', '#145056', '#1b6468', '#2a7a78', '#4a9488', '#7ab0a0', '#9cc4b0'] }, alpha: [1, 1], motion: { type: 'static' }, ...x } as LayerSpec,
+  ], { background: { type: 'solid', color: '#101a19' } });
+  it('rows of unlike colour that overlap by a hairline are bands, not a seam pile', () => {
+    expect(codes(sky(), { width: 1920, height: 1080 })).not.toContain('overlap-seams');
+  });
+  it('the same table painted translucent keeps the warning: every hairline paints darker', () => {
+    expect(codes(sky({ alpha: [0.8, 0.8] }), { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+  it('a multi-colour silhouette of packed hard discs still warns', () => {
+    const hill = scene([{ key: 'hill', count: 30, region: { x: [0.3, 0.7], y: [0.55, 0.7] }, sprite: { kind: 'circle', radius: [0.08, 0.12], colors: ['#2a5a30', '#3a7a40'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);
+    expect(codes(hill, { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+});
