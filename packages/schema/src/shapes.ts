@@ -384,6 +384,38 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
 }
 
 /**
+ * What one part of a path drawing paints, in px² for a frame of `sx`·`sy` px
+ * per unit: its fill (holes out) and its stroke (drawn length × width), each
+ * already times its own opacity. Zero for an invisible part (X609); an open
+ * `fill: false` line is its stroke, not the area its points enclose (X605).
+ */
+export function partInkArea(part: ResolvedPart, sx: number, sy: number): { fill: number; stroke: number } {
+  if (part.opacity <= 0) return { fill: 0, stroke: 0 };
+  const fill = part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x: x * sx, y: y * sy }))) * part.opacity : 0;
+  let stroke = 0;
+  if (part.stroke && part.stroke.width > 0) {
+    const lin = Math.sqrt(Math.abs(sx * sy));
+    for (const l of part.flat.lines) {
+      const pts = l.points.map(([x, y]) => ({ x: x * sx, y: y * sy }));
+      if (l.closed && pts.length > 1) pts.push(pts[0]!);
+      stroke += pathLength(pts) * part.stroke.width * lin;
+    }
+    stroke *= (part.stroke.opacity ?? 1) * part.opacity;
+  }
+  return { fill, stroke };
+}
+
+/** The total a path drawing paints (see `partInkArea`). */
+export function pathInkArea(s: PolygonSprite, sx: number, sy: number): number {
+  let area = 0;
+  for (const part of pathParts(s)) {
+    const a = partInkArea(part, sx, sy);
+    area += a.fill + a.stroke;
+  }
+  return area;
+}
+
+/**
  * How a path drawing's −1..1 unit box lands on screen, in px: scale per axis
  * (sx, sy) and the unit-box point (ox, oy) that sits at the entity position.
  *   span 'box' (default): uniform, the entity radius r on both axes — the

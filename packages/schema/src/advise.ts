@@ -1,8 +1,8 @@
 import { createRng } from '@idle-screens/core';
-import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, type Rgb } from './luma';
+import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
 import { COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
+import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
@@ -198,17 +198,23 @@ export function adviseSpec(
       });
       // A palette layer is visible if ANY of its colours separates — flag only
       // when every colour it can paint with disappears into the plate.
+      // A path drawing is judged by the colours its parts paint (X608); an
+      // entity whose every part is invisible paints nothing to judge.
       const seps = entities.map((e) => {
-        const hex = spriteHex(layer, e);
-        if (hex === null) return Infinity;
-        const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
-        const sep = Math.max(...plates.map((bg) => colourSeparation(layer, ink, bg)));
-        if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
-        // Close to the page colour — but the page may not be what is behind
-        // it. A dark key plate on an opaque yellow panel is judged against the
-        // panel, which is what the eye (and perception's dominance) sees (X388).
-        const under = groundUnder(spec, allEntities, li, hidden, positionAt(e, 0, w, h), w, h);
-        return under ? colourSeparation(layer, ink, under) : sep;
+        const inks = spriteInks(layer, e);
+        if (inks === null || inks.length === 0) return Infinity;
+        return Math.max(...inks.map((hex) => {
+          const ink = { rgb: hexRgb(hex), luma: hexLuma(hex) };
+          const sep = Math.max(...plates.map((bg) => colourSeparation(layer, ink, bg)));
+          if (sep >= LOW_CONTRAST_FLOOR || layer.blend === 'lighter' || layer.blend === 'screen') return sep;
+          // Close to the page colour — but the page may not be what is behind
+          // it. A dark key plate on an opaque yellow panel is judged against the
+          // panel, which is what the eye (and perception's dominance) sees (X388).
+          const at = positionAt(e, 0, w, h);
+          const under = groundUnder(spec, allEntities, li, hidden, at, w, h);
+          const framed = holeFrame(spec, allEntities, li, hidden, at, w, h);
+          return Math.max(under ? colourSeparation(layer, ink, under) : sep, framed ? colourSeparation(layer, ink, framed) : sep);
+        }));
       });
       const best = Math.max(...seps);
       if (best < LOW_CONTRAST_FLOOR) {
@@ -248,8 +254,13 @@ export function adviseSpec(
         pixArea = Math.PI * r * r;
       } else if (layer.sprite.kind === 'polygon') {
         // The outline's own area, not its bounding square (4r²) — a flat band
-        // or ridge fills a fraction of that.
-        pixArea = polygonArea(polygonPoints(layer.sprite, r));
+        // or ridge fills a fraction of that. A path drawing counts what its
+        // parts paint: an unfilled line is its stroke, not the area its
+        // points enclose (X605), and a part at opacity 0 is nothing.
+        if (isPathPolygon(layer.sprite)) {
+          const fr = pathFrame(layer.sprite, r, w, h);
+          pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy);
+        } else pixArea = polygonArea(polygonPoints(layer.sprite, r));
       } else if (layer.sprite.kind === 'bar') {
         pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
@@ -449,7 +460,11 @@ export function adviseSpec(
     const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
     for (const e of allEntities[li]!) {
       const p = positionAt(e, 0, w, h);
-      const raw = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      const unturned = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      // The renderer turns text about its entity by `rotate`: a vertical
+      // caption is tall and narrow, not a long line off the edge (X603).
+      const rot = rotationAt(e, 0);
+      const raw = rot ? { ...unturned, ...mapBox((q) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) }), unturned) } : unturned;
       // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
       const map = paintMap(spec, layer, w, h, scale);
       const box = map ? { ...raw, ...mapBox(map, raw) } : raw;
@@ -693,6 +708,45 @@ function brightestAdditivePlate(
     }
   }
   return best ? { rgb: best.rgb, label: best.label } : null;
+}
+
+/**
+ * The colour of a layer ABOVE `li` that frames the point through a hole: a
+ * static, opaque path drawing with more than one subpath whose outline box
+ * holds the point while its fill does not (a window, a slit, a porthole).
+ * What shows through is seen against that frame, not the background (X610).
+ */
+function holeFrame(
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  li: number,
+  hidden: boolean[] | null,
+  pt: { x: number; y: number },
+  w: number,
+  h: number,
+): { rgb: Rgb; luma: number } | null {
+  for (let lj = li + 1; lj < spec.layers.length; lj++) {
+    if (hidden?.[lj]) continue;
+    const layer = spec.layers[lj]!;
+    const sp = layer.sprite;
+    if (sp.kind !== 'polygon' || !isPathPolygon(sp) || sp.soft) continue;
+    if (layer.motion.type !== 'static' || layer.blend !== undefined || layer.transform !== undefined || groupOf(spec, layer)?.transform !== undefined) continue;
+    if (flattenSprite(sp).subpaths < 2) continue;
+    const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
+    for (const e of allEntities[lj]!) {
+      if (e.spinSpeed !== 0 || e.rotate || e.alpha * a < 0.9) continue;
+      const c = positionAt(e, 0, w, h);
+      const pts = polygonPoints(sp, e.size / 2);
+      const dx = pt.x - c.x;
+      const dy = pt.y - c.y;
+      if (dx < Math.min(...pts.map((q) => q.x)) || dx > Math.max(...pts.map((q) => q.x))) continue;
+      if (dy < Math.min(...pts.map((q) => q.y)) || dy > Math.max(...pts.map((q) => q.y))) continue;
+      if (pointInPolygon(dx, dy, pts)) continue;
+      const rgb = hexRgb(spriteHex(layer, e) ?? sp.color);
+      return { rgb, luma: 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b };
+    }
+  }
+  return null;
 }
 
 /**
