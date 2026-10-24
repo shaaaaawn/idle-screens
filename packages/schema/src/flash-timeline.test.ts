@@ -30,6 +30,40 @@ describe('timelineFlashReport', () => {
     expect(r.flashingArea).toBeGreaterThanOrEqual(0.25);
   });
 
+  it('still catches a bright strobe (greys that sit above the analyzer\'s dark ceiling in gamma space)', () => {
+    const keys = [];
+    for (let i = 0; i < 15; i++) {
+      keys.push(step(i * 200, 'top.opacity', i % 2 ? 0 : 1));
+      keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#d0d0d0'));
+      keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#d0d0d0' : '#ffffff'));
+    }
+    expect(timelineFlashReport(scene('#d0d0d0', [fullFrame('bottom', '#d0d0d0'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
+  });
+
+  it('counts whole-object `sprite` keys as paint', () => {
+    const sprite = (color: string) => ({ kind: 'polygon', radius: [1.5, 1.5], color, path: square });
+    const keys = [];
+    for (let i = 0; i < 15; i++) {
+      keys.push(step(i * 200, 'top.opacity', i % 2 ? 0 : 1));
+      keys.push(step(i * 200 + 67, 'top.sprite', sprite(i % 2 ? '#ffffff' : '#000000')));
+      keys.push(step(i * 200 + 133, 'bottom.sprite', sprite(i % 2 ? '#000000' : '#ffffff')));
+    }
+    expect(timelineFlashReport(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
+  });
+
+  it('does not let a harmless dense section hide a later strobe', () => {
+    const keys = [];
+    // 0-1 s: eight paths with keys 25 ms apart (each path is 200 ms apart) that change nothing visible.
+    for (let p = 0; p < 8; p++) for (let i = 0; i < 3; i++) keys.push(step(p * 25 + i * 200, `d${p}.opacity`, 0));
+    for (let i = 0; i < 15; i++) {
+      keys.push(step(3000 + i * 200, 'top.opacity', i % 2 ? 0 : 1));
+      keys.push(step(3000 + i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#000000'));
+      keys.push(step(3000 + i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
+    }
+    const decoys = Array.from({ length: 8 }, (_, p) => fullFrame(`d${p}`, '#000000', 0));
+    expect(timelineFlashReport(scene('#000000', [...decoys, fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys, 8000)).fails).toBe(true);
+  });
+
   it('passes X589 as submitted: two white layers 100 ms apart peak at 3 flashes a second', () => {
     const keys = [];
     for (let i = 0; i < 10; i++) {

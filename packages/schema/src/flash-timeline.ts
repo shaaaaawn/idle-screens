@@ -16,7 +16,7 @@
  * luminance-bearing paths to reach more than 3 flashes, so almost every scene
  * costs nothing, and it is capped at {@link MAX_SAMPLES} frames.
  */
-import { analyzeFlashes } from '@idle-screens/validator';
+import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { luminanceGrid } from './perceive';
 import { DEFAULT_KEY_DUR, timelineTracks } from './timeline';
 import type { SaverSpec } from './types';
@@ -30,14 +30,20 @@ export interface TimelineFlashReport {
   flashingArea: number;
   /** Start (scene ms, within the lap) of the worst window checked, or null when none was checked. */
   at: number | null;
+  /** Set (with `fails`) when dense sections remained beyond the {@link MAX_TOTAL_SAMPLES} budget: unchecked is never reported as safe. */
+  incomplete?: true;
 }
 
 /** Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are. */
-const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background)(\.|$)/;
+const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$/;
 /** More than 3 flashes is at least 8 reversals; allow one that starts just before the window. */
 const MIN_BOUNDARIES = 7;
-/** Frames resolved per scene, at most. */
+/** Frames analysed together (one run of the WCAG analyzer). */
 export const MAX_SAMPLES = 64;
+/** Frames resolved per scene, at most. Past it the report fails closed rather than pass what it did not look at. */
+export const MAX_TOTAL_SAMPLES = 512;
+/** Frames shared between consecutive chunks so a flash straddling a chunk edge is still seen. */
+const OVERLAP = 8;
 const WINDOW = 1000;
 
 export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
@@ -74,7 +80,7 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
   if (dense.length === 0) return pass;
   dense.sort((a, b) => b.n - a.n);
 
-  let budget = MAX_SAMPLES;
+  let budget = MAX_TOTAL_SAMPLES;
   let worst = pass;
   for (const w of dense) {
     // Just before and just after every boundary in the window (a step key
@@ -88,20 +94,26 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
       const next = inWindow[i + 1];
       if (next !== undefined && next - t > 4) ts.add((t + next) / 2);
     });
-    const sampleTimes = [...ts].sort((a, b) => a - b).slice(0, budget);
-    if (sampleTimes.length < 2) break;
-    budget -= sampleTimes.length;
-    const samples = sampleTimes.map((t) => ({ t, lum: luminanceGrid(spec, { t, cols: 16, rows: 9 }).cells.flat() }));
-    const r = analyzeFlashes(samples);
-    if (r.general.worstTileFlashesPerSecond > worst.flashesPerSecond || (!worst.fails && r.general.fails)) {
-      worst = {
-        fails: r.general.fails,
-        flashesPerSecond: r.general.worstTileFlashesPerSecond,
-        flashingArea: r.general.flashingAreaFraction,
-        at: lap ? w.from % lap : w.from,
-      };
+    const sampleTimes = [...ts].sort((a, b) => a - b);
+    for (let from = 0; from < sampleTimes.length - 1; from += MAX_SAMPLES - OVERLAP) {
+      const chunk = sampleTimes.slice(from, from + MAX_SAMPLES);
+      if (chunk.length < 2) break;
+      if (chunk.length > budget) return { ...worst, fails: true, at: lap ? w.from % lap : w.from, incomplete: true };
+      budget -= chunk.length;
+      // The grid carries gamma-encoded luma; WCAG flashes are measured in linear light (exact for greys, close for chroma).
+      const samples = chunk.map((t) => ({ t, lum: luminanceGrid(spec, { t, cols: 16, rows: 9 }).cells.flat().map((v) => srgbToLinear(v * 255)) }));
+      const r = analyzeFlashes(samples);
+      if (r.general.worstTileFlashesPerSecond > worst.flashesPerSecond || (!worst.fails && r.general.fails)) {
+        worst = {
+          fails: r.general.fails,
+          flashesPerSecond: r.general.worstTileFlashesPerSecond,
+          flashingArea: r.general.flashingAreaFraction,
+          at: lap ? w.from % lap : w.from,
+        };
+      }
+      if (worst.fails) return worst;
+      if (from + MAX_SAMPLES >= sampleTimes.length) break;
     }
-    if (worst.fails || budget < 2) break;
   }
   return worst;
 }
