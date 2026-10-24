@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { adviseSequence, adviseSpec } from './advise';
 import { perceiveScene } from './perceive';
 import type { IdleSequence, LayerSpec, SaverSpec } from './types';
+import { EXAMPLE_SPECS } from './examples';
 
 const scene = (layers: LayerSpec[], x: Partial<SaverSpec> = {}): SaverSpec =>
   ({ schemaVersion: 1, id: 't', label: 'T', seed: 1, background: { type: 'solid', color: '#101014' }, layers, ...x }) as SaverSpec;
@@ -176,5 +177,61 @@ describe('overlap-seams leaves a banded table alone (X574)', () => {
   it('a multi-colour silhouette of packed hard discs still warns', () => {
     const hill = scene([{ key: 'hill', count: 30, region: { x: [0.3, 0.7], y: [0.55, 0.7] }, sprite: { kind: 'circle', radius: [0.08, 0.12], colors: ['#2a5a30', '#3a7a40'] }, alpha: [1, 1], motion: { type: 'static' } } as LayerSpec]);
     expect(codes(hill, { width: 1920, height: 1080 })).toContain('overlap-seams');
+  });
+});
+
+describe('flash-near-limit: a full-frame strobe at the key floor is named (X589)', () => {
+  const sq = 'M -1 -1 L 1 -1 L 1 1 L -1 1 Z';
+  const panel = (key: string): LayerSpec =>
+    ({ key, count: 1, position: { x: 0.5, y: 0.5 }, opacity: 0, sprite: { kind: 'polygon', radius: [1.5, 1.5], color: '#ffffff', path: sq }, alpha: [1, 1], motion: { type: 'static' } }) as LayerSpec;
+  const strobe = (every: number, n: number, keys: Array<{ t: number; path: string; value: number; dur: number; ease?: string }> = []): SaverSpec => scene([panel('a')], {
+    background: { type: 'solid', color: '#000000' },
+    timeline: { loop: true, duration: 4000, keys: [...Array.from({ length: n }, (_, i) => ({ t: i * every, path: 'a.opacity', value: i % 2 ? 0 : 1, dur: 0, ease: 'step' })), ...keys] },
+  } as Partial<SaverSpec>);
+  it('the report: one layer stepping black↔white every 200 ms', () => {
+    const w = adviseSpec(strobe(200, 10), { width: 960, height: 540 }).find((x) => x.code === 'flash-near-limit');
+    expect(w).toBeDefined();
+    expect(w!.message).toContain('2 times a second');
+  });
+  it('the same steps 600 ms apart are silent', () => {
+    expect(codes(strobe(600, 6))).not.toContain('flash-near-limit');
+  });
+  it('a closet light switching off over 280 ms twice a lap is silent', () => {
+    const closet = scene([{ ...panel('a'), opacity: 0.86, sprite: { kind: 'polygon', radius: [1.5, 1.5], color: '#000000', path: sq } } as LayerSpec], {
+      background: { type: 'solid', color: '#f0e8d0' },
+      timeline: { loop: true, duration: 24000, keys: [
+        { t: 2000, path: 'a.opacity', value: 0, dur: 280 }, { t: 8000, path: 'a.opacity', value: 0.86, dur: 280 },
+        { t: 14000, path: 'a.opacity', value: 0, dur: 280 }, { t: 20000, path: 'a.opacity', value: 0.86, dur: 280 },
+      ] },
+    } as Partial<SaverSpec>);
+    expect(codes(closet)).not.toContain('flash-near-limit');
+  });
+  it('a small blinking light is not a full-frame flash', () => {
+    const blink = scene([{ ...panel('a'), sprite: { kind: 'polygon', radius: [0.05, 0.05], color: '#ffffff', path: sq } } as LayerSpec], {
+      background: { type: 'solid', color: '#000000' },
+      timeline: { loop: true, duration: 4000, keys: Array.from({ length: 10 }, (_, i) => ({ t: i * 200, path: 'a.opacity', value: i % 2 ? 0 : 1, dur: 0, ease: 'step' })) },
+    } as Partial<SaverSpec>);
+    expect(codes(blink)).not.toContain('flash-near-limit');
+  });
+  it('no shipped example trips it', () => {
+    for (const s of EXAMPLE_SPECS) expect(codes(s)).not.toContain('flash-near-limit');
+  });
+});
+
+describe("motionIntensity: 'calm' is checked against spin (motion-intensity-mismatch)", () => {
+  const confetti = (intensity: SaverSpec['motionIntensity'], spin: [number, number]): SaverSpec => scene([
+    { key: 'confetti', count: 150, region: { x: [0, 1], y: [0, 1] }, sprite: { kind: 'rect', width: [0.008, 0.014], aspect: [0.5, 0.6], color: '#ffd070' }, alpha: [0.95, 0.95], motion: { type: 'drift', speed: [0.03, 0.07], angle: 92 }, spin } as LayerSpec,
+  ], { motionIntensity: intensity });
+  it('confetti tumbling at ±220°/s under calm is named', () => {
+    expect(codes(confetti('calm', [-220, 220]))).toContain('motion-intensity-mismatch');
+  });
+  it('the same confetti declared moderate is silent', () => {
+    expect(codes(confetti('moderate', [-220, 220]))).not.toContain('motion-intensity-mismatch');
+  });
+  it('a calm tumble is silent', () => {
+    expect(codes(confetti('calm', [-30, 30]))).not.toContain('motion-intensity-mismatch');
+  });
+  it('no shipped example trips it', () => {
+    for (const s of EXAMPLE_SPECS) expect(codes(s)).not.toContain('motion-intensity-mismatch');
   });
 });

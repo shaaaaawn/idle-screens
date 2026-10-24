@@ -46,15 +46,15 @@ export const MAX_TOTAL_SAMPLES = 512;
 const OVERLAP = 8;
 const WINDOW = 1000;
 
-export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
-  const pass: TimelineFlashReport = { fails: false, flashesPerSecond: 0, flashingArea: 0, at: null };
+/**
+ * Key boundaries on luminance-bearing paths, sorted and distinct: a step
+ * changes at `t`, a glide runs from `t` to `t + dur`. Under `loop`, a second
+ * lap so a window can straddle the wrap. `lap` is 0 without `loop`.
+ */
+export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } {
   const tl = spec.timeline;
-  if (!tl) return pass;
+  if (!tl) return { times: [], lap: 0 };
   const lap = tl.loop && tl.duration ? tl.duration : 0;
-
-  // Key boundaries on luminance-bearing paths: a step changes at `t`, a glide
-  // runs from `t` to `t + dur`. Under `loop`, a second lap so a window can
-  // straddle the wrap.
   const bounds: number[] = [];
   for (const [path, keys] of timelineTracks(spec)) {
     if (!LUMA_PATH.test(path)) continue;
@@ -64,7 +64,29 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
       if (dur > 0) bounds.push(k.t + dur);
     }
   }
-  const times = [...new Set(lap ? [...bounds, ...bounds.map((b) => b + lap)] : bounds)].sort((a, b) => a - b);
+  return { times: [...new Set(lap ? [...bounds, ...bounds.map((b) => b + lap)] : bounds)].sort((a, b) => a - b), lap };
+}
+
+/**
+ * Just before and just after every boundary (a step key changes at its exact
+ * time), plus the middle of each gap (a glide's midpoint): enough to see each
+ * reversal, never every frame.
+ */
+export function flashSampleTimes(boundaries: number[]): number[] {
+  const ts = new Set<number>();
+  boundaries.forEach((t, i) => {
+    ts.add(t - 1);
+    ts.add(t + 1);
+    const next = boundaries[i + 1];
+    if (next !== undefined && next - t > 4) ts.add((t + next) / 2);
+  });
+  return [...ts].sort((a, b) => a - b);
+}
+
+export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
+  const pass: TimelineFlashReport = { fails: false, flashesPerSecond: 0, flashingArea: 0, at: null };
+  if (!spec.timeline) return pass;
+  const { times, lap } = lumaKeyTimes(spec);
 
   // Dense windows, densest first, merged where they overlap.
   const dense: Array<{ from: number; to: number; n: number }> = [];
@@ -83,18 +105,7 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
   let budget = MAX_TOTAL_SAMPLES;
   let worst = pass;
   for (const w of dense) {
-    // Just before and just after every boundary in the window (a step key
-    // changes at its exact time), plus the middle of each gap (a glide's
-    // midpoint): enough to see each reversal, never every frame.
-    const inWindow = times.filter((t) => t >= w.from && t <= w.to);
-    const ts = new Set<number>();
-    inWindow.forEach((t, i) => {
-      ts.add(t - 1);
-      ts.add(t + 1);
-      const next = inWindow[i + 1];
-      if (next !== undefined && next - t > 4) ts.add((t + next) / 2);
-    });
-    const sampleTimes = [...ts].sort((a, b) => a - b);
+    const sampleTimes = flashSampleTimes(times.filter((t) => t >= w.from && t <= w.to));
     for (let from = 0; from < sampleTimes.length - 1; from += MAX_SAMPLES - OVERLAP) {
       const chunk = sampleTimes.slice(from, from + MAX_SAMPLES);
       if (chunk.length < 2) break;

@@ -63,7 +63,7 @@ export interface Entity {
   pulseAmp: number; // opacity breathing amplitude (0 = none)
   pulsePeriod: number; // ms
   pulsePhase: number;
-  spinSpeed: number; // degrees/sec (0 = no rotation)
+  spinSpeed: number; // radians/sec — the spec's deg/sec, converted (0 = no rotation)
   spinPhase: number; // seeded starting angle (radians)
   growAmp: number; // size breathing amplitude as fraction (0 = none)
   growPeriod: number; // ms
