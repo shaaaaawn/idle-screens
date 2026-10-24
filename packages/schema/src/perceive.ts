@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -38,7 +38,7 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { paintMap, paintOpacity, paintSize, type Pt } from './paint';
+import { paintMap, paintOpacity, paintRotation, paintSize, type Pt } from './paint';
 import { resolveTimelineAt } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type PathGradient, type SaverSpec } from './types';
 
@@ -546,7 +546,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
   // that outline, additive or not — nothing reaches past it (perception-lab S1-07).
   const splatPolygonOutline = (layer: LayerSpec, s: PolygonSprite, e: Entity, p: { x: number; y: number }, sz: number, a: number, lum: number, tPass: number): void => {
     const radius = sz / 2;
-    const rot = rotationAt(e, tPass);
+    const rot = rotationAt(e, tPass) + paintRotation(spec, layer);
     const cr = Math.cos(rot);
     const sr = Math.sin(rot);
     // A path drawing lands through its frame (span stretches, origin anchors);
@@ -681,7 +681,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (s.kind === 'stroke') {
         // Stamp along the sampled path, rotated like the renderer does.
         const pts = strokeSamples(s, sz / 2);
-        let angle = rotationAt(e, tPass);
+        let angle = rotationAt(e, tPass) + paintRotation(spec, layer);
         if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
         const ca = Math.cos(angle);
         const sa = Math.sin(angle);
@@ -714,7 +714,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (s.kind === 'streak') {
         // Stamp along the segment from tail to head, like the renderer: motion
         // heading plus the entity's own resolved rotation.
-        const heading = (headingAt(e, tPass, w, h) ?? 0) + rotationAt(e, tPass);
+        const heading = (headingAt(e, tPass, w, h) ?? 0) + (rotationAt(e, tPass) + paintRotation(spec, layer));
         const steps = Math.max(2, Math.ceil(sz / Math.min(cellW, cellH)));
         const wgt = Math.min(1, ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) / cellH);
         for (let i = 0; i <= steps; i++) {
@@ -752,7 +752,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         const box = barBox(s.direction ?? 'right', len, th);
         // The renderer rotates the bar about the entity with `spin`; rotate
         // the box's offset the same way and take the rotated box's AABB.
-        const rot = rotationAt(e, tPass);
+        const rot = rotationAt(e, tPass) + paintRotation(spec, layer);
         const cr = Math.cos(rot);
         const sr = Math.sin(rot);
         centerX = p.x + box.cx * cr - box.cy * sr;
@@ -1089,6 +1089,45 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
     }));
 }
 
+/**
+ * The fraction of an entity's extent inside the viewport. Its box is the
+ * circumradius square (a path drawing's own frame, which `span`/`origin` can
+ * stretch and shift), scaled by the paint transform `k`; a text box is judged
+ * by the text checks, so text counts whole. Only what lands in the frame is
+ * the scene's mass or colour (X616).
+ */
+function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number): number {
+  if (s.kind === 'text' || s.kind === 'textBlock') return 1;
+  const { w, h } = scene;
+  const p = posOf(scene, e, t);
+  let cx = p.x, cy = p.y, hx = (sz / 2) * k, hy = hx;
+  if (s.kind === 'bar') {
+    // A bar reaches outward from the entity in its direction, not about it:
+    // clip its own box, turned by the entity's rotation (as the luminance map does).
+    const len = sz * barFraction(s, e.barIndex ?? 0);
+    const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+    const b = barBox(s.direction ?? 'right', len * k, th * k);
+    if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
+    const rot = rotationAt(e, t);
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    cx = p.x + b.cx * cr - b.cy * sr;
+    cy = p.y + b.cx * sr + b.cy * cr;
+    const ex = Math.abs(b.halfX * cr) + Math.abs(b.halfY * sr);
+    const ey = Math.abs(b.halfX * sr) + Math.abs(b.halfY * cr);
+    const fx = Math.max(0, Math.min(cx + ex, w) - Math.max(cx - ex, 0)) / (2 * ex);
+    const fy = Math.max(0, Math.min(cy + ey, h) - Math.max(cy - ey, 0)) / (2 * ey);
+    return fx * fy;
+  }
+  if (s.kind === 'polygon' && isPathPolygon(s)) {
+    const fr = pathFrame(s, sz / 2, w, h);
+    cx -= fr.ox * fr.sx * k; cy -= fr.oy * fr.sy * k; hx = fr.sx * k; hy = fr.sy * k;
+  }
+  if (!(hx > 0) || !(hy > 0)) return 1;
+  const fx = Math.max(0, Math.min(cx + hx, w) - Math.max(cx - hx, 0)) / (2 * hx);
+  const fy = Math.max(0, Math.min(cy + hy, h) - Math.max(cy - hy, 0)) / (2 * hy);
+  return fx * fy;
+}
+
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
 function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance[] {
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
@@ -1143,7 +1182,12 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
         entArea = sz * h2 * f;
       }
-      else if (s.kind === 'polygon') entArea = polygonArea(polygonPoints(s, sz / 2));
+      else if (s.kind === 'polygon') {
+        if (isPathPolygon(s)) {
+          const fr = pathFrame(s, sz / 2, w, h);
+          entArea = pathInkArea(s, fr.sx, fr.sy, sz / 2);
+        } else entArea = polygonArea(polygonPoints(s, sz / 2));
+      }
       else if (s.kind === 'bar') {
         const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
         entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
@@ -1160,6 +1204,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
         entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
       } else entArea = sz * sz * 0.55; // emoji
 
+      // Only what lands in the frame counts: a layer parked off screen is
+      // not the main mass, however big it is (X616).
+      entArea *= onScreenFraction(scene, s, e, sz, painted ? paintSize(spec, layer) : 1, t);
       area += painted ? entArea * areaScale * a : entArea * a;
 
       // Trail ribbon: dots shrink to 0.3× and fade along the tail, so mean
@@ -1269,6 +1316,7 @@ export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: numb
   const unit = Math.min(w, h);
   return scene0.layers.map(({ layer, entities }, layerIndex) => {
     const entities1 = scene1.layers[layerIndex]?.entities ?? entities;
+    const spinVisible = layer.sprite.kind !== 'circle' && layer.sprite.kind !== 'ring';
     let acc = 0;
     let max = 0;
     let n = 0;
@@ -1282,7 +1330,11 @@ export function motionStats(spec: SaverSpec, opts: PerceiveOptions & { dt?: numb
       const dy = p1.y - p0.y;
       if (Math.abs(dx) > w / 2 || Math.abs(dy) > h / 2) return; // wrap seam
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const speed = (dist / dt) * 1000;
+      // A spinning shape moves its ink even when its centre stands still:
+      // add the turn's speed at the mean ink radius (~1/3 of its size). A
+      // circle or ring looks the same turned, so only shapes count (X607).
+      const turn = spinVisible ? Math.abs(rotationAt(entities1[i] ?? e, t + dt) - rotationAt(e, t)) * (sizeAt(e, t) / 3) * paintSize(spec, layer) : 0;
+      const speed = (Math.sqrt(dist * dist + turn * turn) / dt) * 1000;
       acc += speed;
       max = Math.max(max, speed);
       n++;
@@ -1372,17 +1424,36 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
   for (const { layer, entities } of scene.layers) {
     // Paint opacity (layer × group) weighs like alpha: a hidden prop adds no colour.
     const lifeA = lifeAlphaAt(layer.life, t) * (layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer));
-    for (const e of entities) {
-      const hex = spriteHex(layer, e);
-      if (hex === null) continue;
-      const sz = sizeAt(e, t);
-      const weight = alphaAt(e, t) * lifeA * (layer.sprite.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2) : sz * sz);
-      if (weight <= 0) continue;
+    const k = layer.transform !== undefined || layer.group !== undefined ? paintSize(spec, layer) : 1;
+    const add = (hex: string, weight: number): void => {
+      if (weight <= 0) return;
       const c = hexRgb(hex);
       wr += c.r * weight;
       wg += c.g * weight;
       wb += c.b * weight;
       wsum += weight;
+    };
+    for (const e of entities) {
+      const sz = sizeAt(e, t);
+      const s = layer.sprite;
+      const a = alphaAt(e, t) * lifeA * onScreenFraction(scene, s, e, sz, k, t);
+      if (a <= 0) continue;
+      // A path drawing is the colours its parts paint, by the ink each lays
+      // down: a part at opacity 0 adds nothing (X609).
+      if (s.kind === 'polygon' && isPathPolygon(s)) {
+        const fr = pathFrame(s, sz / 2, scene.w, scene.h);
+        const base = s.colors?.[e.colorIndex] ?? s.color;
+        for (const part of pathParts(s)) {
+          const ink = partInkArea(part, fr.sx, fr.sy, sz / 2);
+          if (part.gradient) { const gw = gradientStopWeights(part.gradient.stops); part.gradient.stops.forEach((st, i) => add(st.color, a * ink.fill * (st.opacity ?? 1) * gw[i]!)); }
+          else add(part.color ?? base, a * ink.fill);
+          if (part.stroke) add(part.stroke.color, a * ink.stroke);
+        }
+        continue;
+      }
+      const hex = spriteHex(layer, e);
+      if (hex === null) continue;
+      add(hex, a * (s.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2) : sz * sz));
     }
   }
   const bg = backgroundRgb(spec);

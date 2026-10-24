@@ -72,6 +72,17 @@ export function paintOpacity(spec: SaverSpec, layer: LayerSpec): number {
 /** Back-compat alias: a layer's own paint opacity (no group). */
 export const layerOpacity = (layer: LayerSpec): number => (layer.opacity === undefined ? 1 : clamp01(layer.opacity));
 
+/**
+ * The angle (radians) a layer's sprites are turned by its paint transforms:
+ * its own `rotate` plus its group's. The renderer rotates the canvas, so the
+ * shapes turn with the positions (X606: perception moved a rotated bar's
+ * centre but left its outline unrotated).
+ */
+export function paintRotation(spec: SaverSpec, layer: LayerSpec): number {
+  const deg = (layer.transform?.rotate ?? 0) + (groupOf(spec, layer)?.transform?.rotate ?? 0);
+  return (deg * Math.PI) / 180;
+}
+
 /** The combined linear size factor of a layer's own and its group's transforms. */
 export function paintSize(spec: SaverSpec, layer: LayerSpec): number {
   return transformSize(layer.transform) * transformSize(groupOf(spec, layer)?.transform);

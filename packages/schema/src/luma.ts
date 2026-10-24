@@ -69,6 +69,31 @@ export function spriteLuma(layer: LayerSpec, e: Entity): number {
   return 0.75; // emoji: mid-bright approximation
 }
 
+/**
+ * Every colour an entity visibly paints: a path drawing's parts at opacity
+ * > 0 (fill, gradient stops, stroke), else the one `spriteHex`; null for
+ * glyph sprites. A drawing whose parts all override the base colour never
+ * paints the base (X608).
+ */
+export function spriteInks(layer: LayerSpec, e: Entity): string[] | null {
+  const s = layer.sprite;
+  if (s.kind === 'polygon' && isPathPolygon(s)) {
+    const base = s.colors?.[e.colorIndex] ?? s.color;
+    const inks: string[] = [];
+    for (const part of pathParts(s)) {
+      if (part.opacity <= 0) continue;
+      if (part.fill) {
+        if (part.gradient) for (const st of part.gradient.stops) { if ((st.opacity ?? 1) > 0) inks.push(st.color); }
+        else inks.push(part.color ?? base);
+      }
+      if (part.stroke && part.stroke.width > 0 && (part.stroke.opacity ?? 1) > 0) inks.push(part.stroke.color);
+    }
+    return inks;
+  }
+  const hex = spriteHex(layer, e);
+  return hex === null ? null : [hex];
+}
+
 /** The hex a given entity actually paints with, or null for glyph sprites. */
 export function spriteHex(layer: LayerSpec, e: Entity): string | null {
   const s = layer.sprite;
