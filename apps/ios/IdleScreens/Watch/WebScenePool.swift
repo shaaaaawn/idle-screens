@@ -21,7 +21,11 @@ import WebKit
 @MainActor
 @Observable
 final class WebScenePool {
-    static let shared = WebScenePool()
+    static let shared: WebScenePool = {
+        let pool = WebScenePool()
+        pool.loadLaunchStills()
+        return pool
+    }()
 
     struct Key: Hashable {
         let channelId: String
@@ -96,13 +100,15 @@ final class WebScenePool {
         park(key, webView: webView, host: host)
     }
 
-    /// Drop warm pages — one channel's, or all.
-    func drain(channelId: String? = nil) {
+    /// Drop warm pages — one channel's, or all. `keepSnapshots` keeps their
+    /// pictures (backgrounding: the channel you return to is the same one).
+    func drain(channelId: String? = nil, keepSnapshots: Bool = false) {
         let (gone, kept) = idle.reduce(into: ([Entry](), [Entry]())) { acc, entry in
             if channelId == nil || entry.key.channelId == channelId { acc.0.append(entry) } else { acc.1.append(entry) }
         }
         idle = kept
         gone.forEach { Self.teardown($0.webView) }
+        if keepSnapshots { return }
         // Pictures only help within one visit; on the next the scene has moved on.
         let stale = snapshotOrder.filter { channelId == nil || $0.hasPrefix("\(channelId!)#") }
         stale.forEach { snapshots[$0] = nil }
@@ -121,6 +127,78 @@ final class WebScenePool {
         while idle.count > maxIdle {
             let victim = idle.firstIndex { $0.key.sceneId != nil } ?? 0
             Self.teardown(idle.remove(at: victim).webView)
+        }
+    }
+
+    // MARK: Launch stills
+
+    /// Live pictures kept across launches, so the app opens onto the channel
+    /// as it last looked rather than onto its background colour. Each is
+    /// filed under the channel's `lastEventAt`: any publish or steer since
+    /// makes it a different scene, and that picture is never shown.
+    @ObservationIgnored private var launchStills: [String: (signature: Int, image: UIImage)] = [:]
+
+    private static var stillsDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("launch-stills", isDirectory: true)
+    }
+
+    /// The picture saved last session for this channel, if its scene is unchanged.
+    func launchStill(channelId: String, signature: Int?) -> UIImage? {
+        guard let signature, let still = launchStills[channelId], still.signature == signature else { return nil }
+        return still.image
+    }
+
+    /// Write the live pictures of this visit to disk (on backgrounding).
+    func persistLaunchStills(signature: (String) -> Int?) {
+        var out: [(String, Int, UIImage)] = []
+        for key in snapshotOrder.reversed() where key.hasSuffix("#live") {
+            let channelId = String(key.dropLast("#live".count))
+            guard Self.isSafeFileName(channelId), let sig = signature(channelId),
+                  let image = snapshots[key] else { continue }
+            out.append((channelId, sig, image))
+            launchStills[channelId] = (sig, image)
+        }
+        guard !out.isEmpty else { return }
+        let dir = Self.stillsDirectory
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            for (channelId, sig, image) in out {
+                // One file per channel: drop its older pictures first.
+                let old = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+                for name in old where name.hasPrefix("\(channelId)~") { try? fm.removeItem(at: dir.appendingPathComponent(name)) }
+                if let data = image.jpegData(compressionQuality: 0.7) {
+                    try? data.write(to: dir.appendingPathComponent("\(channelId)~\(sig).jpg"), options: .atomic)
+                }
+            }
+            // Bounded: the newest few channels only.
+            let files = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                .sorted { a, b in
+                    let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return da > db
+                }
+            for stale in files.dropFirst(8) { try? fm.removeItem(at: stale) }
+        }
+    }
+
+    private func loadLaunchStills() {
+        let dir = Self.stillsDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        for name in names where name.hasSuffix(".jpg") {
+            let stem = name.dropLast(4)
+            guard let tilde = stem.lastIndex(of: "~"),
+                  let sig = Int(stem[stem.index(after: tilde)...]),
+                  let image = UIImage(contentsOfFile: dir.appendingPathComponent(name).path) else { continue }
+            launchStills[String(stem[..<tilde])] = (sig, image)
+        }
+    }
+
+    /// Channel ids are kebab-case; anything else never becomes a file name.
+    static func isSafeFileName(_ id: String) -> Bool {
+        !id.isEmpty && id.count <= 64 && id.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "-" || $0 == "_"
         }
     }
 

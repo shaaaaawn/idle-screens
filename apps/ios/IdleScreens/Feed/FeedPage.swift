@@ -17,6 +17,7 @@ struct FeedPage: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.viewerChromeInsets) private var insets
+    @Environment(\.deviceScale) private var scale
 
     @State private var session = ChannelSession()
     @State private var stops: [ChannelFeed.Stop] = []
@@ -40,6 +41,7 @@ struct FeedPage: View {
     /// Changes when the feed was pulled to refresh.
     var refreshToken: Int = 0
     @Binding var chromeHidden: Bool
+    @FocusState private var keyFocus: Bool
     @State private var showComposer = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
@@ -57,6 +59,11 @@ struct FeedPage: View {
     /// gating on that showed the site's bare black page for ~1 s.
     @State private var liveWebPainted = false
     @State private var liveStillGone = false
+    /// Last session's picture of this channel, chosen once on appearing and
+    /// held until the live scene paints over it. Re-checking it against each
+    /// refresh pulled it mid-launch whenever the channel had been steered
+    /// since — a flat backdrop for ~2 s between two pictures (2026-10-20).
+    @State private var launchPicture: UIImage?
     @State private var toast: String?
     @State private var waking = false
     @State private var recalling = false
@@ -106,6 +113,16 @@ struct FeedPage: View {
     private func isTankMoment(_ key: String?) -> Bool {
         guard let stop = stops.first(where: { Self.key($0) == key }) else { return false }
         return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.isTank == true
+    }
+
+    /// One step through history: +1 older, −1 newer (−1 from the oldest
+    /// loaded moment back toward live).
+    private func stepMoment(_ delta: Int) {
+        let next = (currentIndex ?? -1) + delta
+        guard next >= -1, next < stops.count else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            moment = next == -1 ? Self.liveKey : Self.key(stops[next])
+        }
     }
 
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
@@ -159,6 +176,19 @@ struct FeedPage: View {
                     if value.magnification < 0.82 { showOverview = true }
                 }
             )
+            // A keyboard on iPad: ← → walk the channel's history (→ is older,
+            // as a swipe left is), space hides the chrome. ↑ ↓ fall through
+            // to the feed, which flips channel.
+            .focusable(isActive)
+            .focused($keyFocus)
+            .focusEffectDisabled()
+            .onChange(of: isActive, initial: true) { _, active in keyFocus = active }
+            .onKeyPress(.rightArrow) { stepMoment(+1); return .handled }
+            .onKeyPress(.leftArrow) { stepMoment(-1); return .handled }
+            .onKeyPress(.space) {
+                withAnimation(.easeInOut(duration: 0.25)) { chromeHidden.toggle() }
+                return .handled
+            }
             .task(id: moment) {
                 // Stayed put a moment (not flicking through): load the page a
                 // left swipe lands on, so it arrives already drawn.
@@ -193,7 +223,10 @@ struct FeedPage: View {
         }
         .sheet(isPresented: $showComposer) {
             ComposerSheet(channelId: channelId, session: session)
-                .presentationDetents([.height(150), .medium, .large])
+                // A phone peeks at 150 pt so the scene stays in view; on an
+                // iPad that clipped the controls to a sliver, and there is
+                // room to open at half height with the scene still beside it.
+                .presentationDetents(scale > 1 ? [.medium, .large] : [.height(150), .medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 .presentationDragIndicator(.visible)
         }
@@ -205,7 +238,12 @@ struct FeedPage: View {
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
         }
-        .onAppear { if isActive { activate() } }
+        .onAppear {
+            if launchPicture == nil {
+                launchPicture = WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt)
+            }
+            if isActive { activate() }
+        }
         .onChange(of: refreshToken) { _, _ in
             if isActive { Task { await loadHistory() } }
         }
@@ -413,7 +451,9 @@ struct FeedPage: View {
     /// timeline) shows its background colour — its native still is often black.
     @ViewBuilder
     private var liveHoldingStill: some View {
-        if let picture = WebScenePool.shared.snapshot(channelId: channelId, sceneId: nil) {
+        if let picture = WebScenePool.shared.snapshot(channelId: channelId, sceneId: nil)
+            ?? launchPicture
+            ?? WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt) {
             // How the web engine last drew it, this visit — closer than any
             // native still, and what a sequence has instead of black.
             Image(uiImage: picture).resizable().scaledToFill().ignoresSafeArea()
@@ -542,9 +582,9 @@ struct FeedPage: View {
                 .opacity(phase.isIdentity ? 1 : 0)
                 .blur(radius: phase.isIdentity ? 0 : 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, insets.top + 6)
-        .padding(.bottom, insets.bottom + 14)
+        .padding(.horizontal, DeviceScale.margin(scale))
+        .padding(.top, insets.top + 6 * scale)
+        .padding(.bottom, insets.bottom + 14 * scale)
     }
 
     /// The channel, the way a video app shows one: a face, a name, a Follow
@@ -560,7 +600,7 @@ struct FeedPage: View {
                         Image(systemName: "chevron.left")
                             .font(.headline)
                             .foregroundStyle(Color.primary)
-                            .frame(width: 38, height: 38)
+                            .frame(width: 38 * scale, height: 38 * scale)
                             .glassCapsule(shape: Circle())
                     }
                     .accessibilityLabel("Back")
@@ -604,7 +644,7 @@ struct FeedPage: View {
     private var liveBadge: some View {
         let viewers = session.viewers ?? 0
         return HStack(spacing: 6) {
-            Circle().fill(Color.appSuccess).frame(width: 7, height: 7)
+            Circle().fill(Color.appSuccess).frame(width: 7 * scale, height: 7 * scale)
             if viewers > 0 {
                 Text("\(viewers)")
                     .font(.caption.weight(.semibold))
@@ -613,8 +653,8 @@ struct FeedPage: View {
             }
         }
         .foregroundStyle(Color.primary)
-        .padding(.horizontal, viewers > 0 ? 10 : 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, (viewers > 0 ? 10 : 8) * scale)
+        .padding(.vertical, 8 * scale)
         .glassCapsule(shape: Capsule())
         .animation(.easeInOut(duration: 0.2), value: viewers)
         .accessibilityElement()
@@ -625,7 +665,7 @@ struct FeedPage: View {
     /// has one without anyone uploading anything. A green ring while live.
     private var avatar: some View {
         ProceduralChannelArt(channelId: channelId)
-            .frame(width: 36, height: 36)
+            .frame(width: 36 * scale, height: 36 * scale)
             .clipShape(Circle())
             .overlay {
                 Circle().strokeBorder(
@@ -716,8 +756,11 @@ struct FeedPage: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .padding(captionExpanded ? 16 : 0)
-        .frame(maxWidth: captionExpanded ? .infinity : 280, alignment: .leading)
+        .padding(captionExpanded ? 16 * scale : 0)
+        // Expanded, the card fills a phone's width; on an iPad it stops at a
+        // panel's width rather than spanning a 13-inch screen.
+        .frame(maxWidth: captionExpanded ? (scale > 1 ? 540 * scale : .infinity) : 280 * scale,
+               alignment: .leading)
         .background {
             if captionExpanded {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -894,9 +937,9 @@ struct FeedPage: View {
             }
             ShareLink(item: app.gallery.viewerURL(for: channelId)) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 17 * scale, weight: .medium))
                     .foregroundStyle(Color.primary)
-                    .frame(width: 46, height: 46)
+                    .frame(width: 46 * scale, height: 46 * scale)
                     .glassCapsule(shape: Circle())
             }
             .accessibilityLabel("Share channel")
@@ -906,9 +949,9 @@ struct FeedPage: View {
     private func railButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 17, weight: .medium))
+                .font(.system(size: 17 * scale, weight: .medium))
                 .foregroundStyle(Color.primary)
-                .frame(width: 46, height: 46)
+                .frame(width: 46 * scale, height: 46 * scale)
                 .glassCapsule(shape: Circle())
         }
         .accessibilityLabel(label)

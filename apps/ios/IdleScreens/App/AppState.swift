@@ -23,6 +23,11 @@ final class AppState {
     let follows = FollowStore()
     var isLoadingGallery = false
     var galleryError: String?
+    /// A gallery fetch has come back (either way). Until then an empty list
+    /// means "not asked yet", never "nothing on air" — that screen used to
+    /// flash on every launch before the first fetch had even started.
+    var galleryAttempted = false
+    var galleryLoadedAt: Date?
 
     // MARK: VJ
 
@@ -50,6 +55,11 @@ final class AppState {
         self.store = CredentialStore()
         self.credentials = store.load()
         self.pairedScreens = Self.loadPairedScreens()
+        // The wall as it was last time, on the very first frame: launch opens
+        // onto a channel, not onto a loading state. A small file; reading it
+        // here beats a frame of nothing.
+        self.channels = gallery.cachedChannels() ?? []
+        self.categories = gallery.cachedCategories() ?? []
     }
 
     /// Test-friendly initializer — inject clients backed by a mock transport.

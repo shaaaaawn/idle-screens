@@ -22,6 +22,7 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
+                    ColumnTitleText(title: "settings")
                     screensSection
                     keysSection
                     followingSection
@@ -29,6 +30,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
+                .readableColumn()
             }
             // Screen presence and channel names are the two things here that
             // go stale.
@@ -38,7 +40,7 @@ struct SettingsView: View {
                 _ = await (screens, gallery)
             }
             .background(Color.appBackground.ignoresSafeArea())
-            .navigationTitle("settings")
+            .modifier(ColumnTitle(title: "settings"))
         }
         .sheet(isPresented: $showingAddKey) { AddExistingChannelSheet() }
         .sheet(item: $handoff) { TokenHandoffSheet(handoff: $0) }
@@ -145,7 +147,7 @@ struct SettingsView: View {
             Button("Make the backup") { backupFile = writeBackup() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This makes one private file with every key on this phone. Anyone who has the file controls every channel in it — save it somewhere only you can open.")
+            Text("This makes one private file with every key on this \(ThisDevice.noun). Anyone who has the file controls every channel in it — save it somewhere only you can open.")
         }
         .sheet(item: Binding(get: { backupFile.map(BackupFile.init) }, set: { if $0 == nil { backupFile = nil } })) { file in
             BackupReadySheet(file: file.url, count: backupEntries.count)

@@ -57,7 +57,10 @@ struct IdleScreensApp: App {
                 }
         }
         .onChange(of: scenePhase) {
-            if scenePhase == .active {
+            // Back in front: refresh the wall only if it is stale. Every
+            // return used to refetch it, re-rendering the page you came back to.
+            if scenePhase == .active,
+               appState.galleryLoadedAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
                 Task { await appState.loadGallery() }
             }
         }

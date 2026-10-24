@@ -21,6 +21,7 @@ struct AgentsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
+                    ColumnTitleText(title: "agents")
                     header
                     briefSection
                     connectSection
@@ -28,10 +29,11 @@ struct AgentsView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
+                .readableColumn()
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Color.appBackground.ignoresSafeArea())
-            .navigationTitle("agents")
+            .modifier(ColumnTitle(title: "agents"))
             .overlay(alignment: .bottom) {
                 if let toast {
                     Text(toast)

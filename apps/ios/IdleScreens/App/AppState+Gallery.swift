@@ -12,7 +12,7 @@ extension AppState {
             categories = cached
         }
         isLoadingGallery = true
-        defer { isLoadingGallery = false }
+        defer { isLoadingGallery = false; galleryAttempted = true }
         do {
             // Shelves are an enhancement: a categories failure must never cost
             // the wall itself, so it is fetched alongside and allowed to fail.
@@ -20,6 +20,7 @@ extension AppState {
             channels = try await gallery.fetchChannels()
             if let fresh = await shelves { categories = fresh }
             galleryError = nil
+            galleryLoadedAt = Date()
         } catch {
             if channels.isEmpty { galleryError = error.localizedDescription }
         }

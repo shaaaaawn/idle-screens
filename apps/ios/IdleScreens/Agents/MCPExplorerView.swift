@@ -62,6 +62,7 @@ struct MCPExplorerView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .readableColumn(680)
         .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle("inside the MCP")
         .navigationBarTitleDisplayMode(.inline)
