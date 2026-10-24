@@ -338,6 +338,14 @@ describe('applyDeltasShared (the validator copy)', () => {
     );
   });
 
+  it('writes an array leaf by index, like the deep copy (a padded index)', () => {
+    const spec = keyed();
+    const deltas = [{ t: 0, path: 'dots.sprite.radius.01', value: 0.5 }];
+    const shared = applyDeltasShared(spec, deltas);
+    expect(shared).toEqual(applyDeltasToSpec(spec, deltas));
+    expect((shared.layers[0]!.sprite as { radius: number[] }).radius).toEqual([0.01, 0.5]);
+  });
+
   it('never writes to the spec it shares with', () => {
     const spec = freeze(keyed());
     expect(() => {

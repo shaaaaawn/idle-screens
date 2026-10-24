@@ -225,7 +225,11 @@ export function applyDeltasShared(spec: SaverSpec, deltas: SteerDelta[]): SaverS
       }
       node = node[k] as Record<string, unknown>;
     }
-    if (node) node[parts[parts.length - 1]!] = d.value;
+    if (node) {
+      // An array's final segment is an index, as in resolveSpecPath ('01' is index 1).
+      const last = parts[parts.length - 1]!;
+      (node as unknown as Record<string | number, unknown>)[Array.isArray(node) ? Number(last) : last] = d.value;
+    }
   }
   return out as unknown as SaverSpec;
 }
