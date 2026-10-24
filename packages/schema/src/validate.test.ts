@@ -437,10 +437,12 @@ describe('validateSpec — data layouts and bars (#49)', () => {
     expect(paths(layer({ position: { x: 0.1, y: 0.1 }, layout: { type: 'grid' } }))).toContain('layers[0].position');
   });
 
-  it('table needs integer columns; gap must be positive (number, or {x, y} for table)', () => {
+  it('table needs integer columns; gap must be positive (number, or {x?, y?} on list and table)', () => {
     expect(paths(layer({ layout: { type: 'table', columns: 0 } }))).toContain('layers[0].layout.columns');
     expect(paths(layer({ layout: { type: 'list', gap: 0 } }))).toContain('layers[0].layout.gap');
-    expect(paths(layer({ layout: { type: 'list', gap: { x: 1 } } as never }))).toContain('layers[0].layout.gap');
+    // X615: the object form is documented for both data layouts; on a list only `y` moves anything.
+    expect(paths(layer({ layout: { type: 'list', gap: { y: 0 } } }))).toContain('layers[0].layout.gap.y');
+    expect(validateSpec(layer({ layout: { type: 'list', gap: { x: 1 } } })).valid).toBe(true);
     expect(validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, y: 0.05 } } })).valid).toBe(true);
     const odd = validateSpec(layer({ layout: { type: 'table', columns: 2, gap: { x: 0.1, z: 1 } } as never }));
     expect(odd.valid).toBe(true);

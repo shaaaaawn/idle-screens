@@ -289,14 +289,14 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
-| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}`). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
+| `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` (`gap`: a number or `{x?, y?}`) | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}` — a list is one column, so only its `y`, the row pitch, applies). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
 | `life` | `{enter?, exit?, fade?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit` |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
 | `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
-| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
+| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). **Order:** `scale`/`scaleX` (along the layer's own horizontal) and `rotate` apply about the origin first, then `x`/`y` translate in **screen space** — an offset is never turned or stretched by the layer's own `rotate`/`scale`, so `{ "rotate": 90, "x": 0.2 }` moves the layer right, not down. A group's transform wraps the result (*group(layer(p))*), so a group's `scale` and `rotate` do act on its members' offsets. Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
 | `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** ignored |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
@@ -364,7 +364,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   `parts`).
   - **Holes and pieces.** Several subpaths in one `path` are one drawing.
     `fillRule: "auto"` (default) decides by containment: a subpath lying
-    entirely inside another is a hole; one inside a hole is solid again (a
+    entirely inside another is a hole — touching its container's edge counts
+    as inside, so a notch cut from the rim or a mouth meeting the face's
+    outline is a hole too (a vertex within 0.001 of the edge is on it); one inside a hole is solid again (a
     pupil in an eye-spot ring); pieces that merely overlap merge (branches,
     veins, leaflets on a stem), and a hole cuts through every overlapping
     piece of the layer (a window across two walls). `"nonzero"` /
@@ -411,7 +413,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   - **Steering and morphs.** Part colours, gradient stops, stroke widths
     and opacities glide like any paint. Two paths with the **same commands**
     (same letters, same count of numbers — draw both from one template)
-    morph number by number; any other path change steps.
+    morph number by number; any other path change steps. The full list of
+    what a `setParam` or `timeline` key can address is under **Timeline**
+    ("Path drawings: what a key can address").
   - Drawings are rendered once and reused while they look the same (moving
     copies are resampled), so a detailed still drawing costs about what a
     flat one does per frame.
@@ -552,10 +556,29 @@ and configured the second.
 
 ### `motion` (one of)
 
+Every field each motion type takes — **bold** is required; anything else
+on a motion is an unknown property, ignored with a warning. Lengths are
+fractions of `min(w, h)` like every size (px under `units: "px"`).
+
+| `type` | fields | units and ranges |
+| --- | --- | --- |
+| `drift` | **`speed`**, `angle`, `bidirectional`, `bob`, `ease` | `speed` [min,max] per second; `angle` degrees (0 = right, 90 = down); `bob` vertical wobble amplitude (typ. 0.002–0.02) |
+| `rise` | **`speed`**, `sway`, `ease` | `speed` [min,max] per second, upward; `sway` horizontal amplitude (typ. 0.002–0.02) |
+| `bounce` | **`speed`** | `speed` [min,max] per second, diagonal |
+| `static` | — | none |
+| `orbit` | **`speed`**, **`radius`**, `center` | `speed` [min,max] **degrees** per second (negative turns the other way, ≤ 180); `radius` [min,max]; `center` `{x, y}` 0..1 or `{layer}` |
+| `wander` | **`speed`**, `angle`, `meander`, `coherence`, `ease` | `speed` [min,max] per second; `angle` degrees (omit for a seeded heading); `meander` amplitude ≤ 0.463; `coherence` 0..1 |
+| `warp` | **`speed`**, `center` | `speed` [min,max] **depth-units** per second (≤ 1.5); `center` `{x, y}` 0..1 |
+| `path` | **`points`**, **`duration`**, `curve`, `closed`, `scatter` | `points` 2..24 `{x, y}` 0..1; `duration` ms per lap (≥ 2000); `curve` `"smooth"` \| `"linear"`; `closed` boolean; `scatter` > 0 |
+
+`ease` is `{ "type": "settle" | "buoyant", "tau": ms }` (below). `bob` and
+`sway` warn `motion-amplitude` above 0.25: `bob: 4` swings the layer four
+screen-heights each way, a px value written into a viewport-unit spec.
+
 - `{ "type": "drift", "speed": [0.02, 0.06], "angle": 0, "bidirectional": true, "bob": 0.004 }`
   — heading in degrees (0 = right, 90 = down); `bidirectional` flips horizontal
-  direction per entity (fish); `bob` adds vertical wobble
-- `{ "type": "rise", "speed": [0.01, 0.03], "sway": 0.006 }` — upward, with horizontal sway (bubbles)
+  direction per entity (fish); `bob` adds vertical wobble (0.004 ≈ 4 px at 1080p)
+- `{ "type": "rise", "speed": [0.01, 0.03], "sway": 0.006 }` — upward, with horizontal sway (bubbles; 0.006 ≈ 6 px at 1080p)
 - `{ "type": "bounce", "speed": [0.12, 0.24] }` — diagonal, reflecting off edges
 - `{ "type": "static" }` — stays exactly where placed (use with `position` for HUD text)
 - `{ "type": "orbit", "speed": [10, 40], "radius": [0.05, 0.2], "center": { "x": 0.5, "y": 0.5 } }`
@@ -821,6 +844,21 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   flashes a second over a quarter of the screen (WCAG 2.3.1,
   `timelineFlashReport`). Keep big brightness changes at least ~170 ms
   apart across the whole frame, not just per path.
+- **Path drawings: what a key can address.** Every field of a path
+  polygon is paint, so all of these glide (`N` is a part's index):
+  `sprite.path` and `sprite.parts.N.path` (a morph number by number when the
+  commands match, else a step); `sprite.color` / `sprite.parts.N.color`;
+  `sprite.parts.N.opacity`; `…stroke.width`, `…stroke.color`,
+  `…stroke.opacity`; `…gradient.stops.M.color` / `.opacity` / `.at`; and a
+  gradient's `from` / `to` / `center` / `radius` / `focus`. A key can only
+  address a field the spec **declares** — key `parts.N.opacity` or a
+  stroke's `opacity` only after writing it on the part (`"opacity": 1`).
+  A **gradient paints over the flat colour**: a `color` key on a part (or
+  path sprite) that has a `gradient` changes nothing, and the validator
+  warns `timeline-key-no-effect` — key its stops instead. A keyed path may
+  **collapse to nothing** (an eye blinking shut, a mouth closing to a line):
+  at those moments that part draws nothing, rather than the scene being
+  refused. The base spec's own paths must still draw something.
 - A key on a **structural** path rebuilds the scene at that key — a pop, and
   the validator warns `timeline-structural-key`. Animate paint: colours,
   `opacity`, `transform`, polygon `points` (a whole equal-length array

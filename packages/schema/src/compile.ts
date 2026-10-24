@@ -300,7 +300,7 @@ function overridesStayValid(authored: SaverSpec, overrides: ReadonlyMap<string, 
     const state = JSON.stringify(groups.map((g) => readSpecPath(r, g))) + '|' + [...held.keys()].join(',');
     if (seen.has(state)) continue;
     seen.add(state);
-    if (!validateSpecPaths(r, paths)) return false;
+    if (!validateSpecPaths(r, paths, true)) return false;
   }
   return true;
 }
