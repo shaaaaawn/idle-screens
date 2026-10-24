@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     /// The launch screen, held a beat and lifted: the scene and its chrome rise
@@ -36,3 +37,11 @@ struct ContentView: View {
         .background(Color.appBackground.ignoresSafeArea())
     }
 }
+
+/// What to call the device in copy: "this iPad" reads wrong as "this phone".
+enum ThisDevice {
+    static var noun: String {
+        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "phone"
+    }
+}
+

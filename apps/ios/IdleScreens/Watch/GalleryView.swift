@@ -351,7 +351,10 @@ private struct SectionGrid: View {
     let cardWidth: CGFloat
 
     var body: some View {
-        let shown = Array(shelf.channels.prefix(columns * 2))
+        // Whole rows only: a lone card on a row of four read as a mistake
+        // on iPad. The rest stay one tap away behind "All N".
+        let fit = min(shelf.channels.count, columns * 2)
+        let shown = Array(shelf.channels.prefix(fit >= columns ? fit - fit % columns : fit))
         VStack(alignment: .leading, spacing: 12) {
             NavigationLink {
                 ShelfGridView(title: shelf.title, subtitle: shelf.subtitle,
@@ -518,6 +521,9 @@ private struct ChannelCard: View {
                     // Follow without leaving the wall: the cheapest "yes" in
                     // the app, so it is one tap from every card.
                     .overlay(alignment: .topTrailing) { CardFollowButton(channelId: channel.id) }
+                    // A trackpad pointer on iPad: the card lifts under it.
+                    .contentShape(.hoverEffect, RoundedRectangle(cornerRadius: 12))
+                    .hoverEffect(.lift)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {

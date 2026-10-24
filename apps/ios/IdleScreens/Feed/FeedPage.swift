@@ -40,6 +40,7 @@ struct FeedPage: View {
     /// Changes when the feed was pulled to refresh.
     var refreshToken: Int = 0
     @Binding var chromeHidden: Bool
+    @FocusState private var keyFocus: Bool
     @State private var showComposer = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
@@ -113,6 +114,16 @@ struct FeedPage: View {
         return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.isTank == true
     }
 
+    /// One step through history: +1 older, −1 newer (−1 from the oldest
+    /// loaded moment back toward live).
+    private func stepMoment(_ delta: Int) {
+        let next = (currentIndex ?? -1) + delta
+        guard next >= -1, next < stops.count else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            moment = next == -1 ? Self.liveKey : Self.key(stops[next])
+        }
+    }
+
     private var currentStop: ChannelFeed.Stop? { stops.first { Self.key($0) == moment } }
     private var currentIndex: Int? { stops.firstIndex { Self.key($0) == moment } }
 
@@ -164,6 +175,19 @@ struct FeedPage: View {
                     if value.magnification < 0.82 { showOverview = true }
                 }
             )
+            // A keyboard on iPad: ← → walk the channel's history (→ is older,
+            // as a swipe left is), space hides the chrome. ↑ ↓ fall through
+            // to the feed, which flips channel.
+            .focusable(isActive)
+            .focused($keyFocus)
+            .focusEffectDisabled()
+            .onChange(of: isActive, initial: true) { _, active in keyFocus = active }
+            .onKeyPress(.rightArrow) { stepMoment(+1); return .handled }
+            .onKeyPress(.leftArrow) { stepMoment(-1); return .handled }
+            .onKeyPress(.space) {
+                withAnimation(.easeInOut(duration: 0.25)) { chromeHidden.toggle() }
+                return .handled
+            }
             .task(id: moment) {
                 // Stayed put a moment (not flicking through): load the page a
                 // left swipe lands on, so it arrives already drawn.

@@ -40,3 +40,46 @@ extension View {
         }
     }
 }
+
+extension View {
+    /// Text-heavy pages on a wide screen (iPad, a wide window): one column at
+    /// a readable measure, centred, instead of rows running edge to edge. No
+    /// effect at phone widths.
+    func readableColumn(_ maxWidth: CGFloat = 720) -> some View {
+        frame(maxWidth: maxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+/// A root page's title on a wide screen: in the reading column, not pinned to
+/// the window's far edge where the system large title sits. Narrow screens
+/// keep the system title untouched.
+struct ColumnTitle: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    let title: String
+
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(title)
+            #if os(iOS)
+            .toolbar(sizeClass == .regular ? .hidden : .automatic, for: .navigationBar)
+            #endif
+    }
+}
+
+/// The in-column title `ColumnTitle` pairs with. Empty at compact width.
+struct ColumnTitleText: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    let title: String
+
+    var body: some View {
+        if sizeClass == .regular {
+            Text(title)
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+

@@ -89,6 +89,10 @@ struct ChannelFeedView: View {
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $selection)
             .scrollIndicators(.hidden)
+            // ↑ ↓ on an iPad keyboard flip channel (the page on screen has
+            // focus and passes these up; it keeps ← → for its history).
+            .onKeyPress(.downArrow) { step(+1, reader: reader); return .handled }
+            .onKeyPress(.upArrow) { step(-1, reader: reader); return .handled }
             // Pulling down past the newest channel asks for newer ones — the
             // gesture every feed has taught. After it, you land on whatever is
             // now first, because that is what you pulled for.
@@ -179,6 +183,12 @@ struct ChannelFeedView: View {
             WebScenePool.shared.drain()
             PreviewBudget.shared.exitFullscreen()
         }
+    }
+
+    private func step(_ delta: Int, reader: ScrollViewProxy) {
+        guard let here = pages.firstIndex(where: { $0.id == selection }),
+              pages.indices.contains(here + delta) else { return }
+        select(pages[here + delta].id, reader: reader, animated: true)
     }
 
     private func select(_ id: String?, reader: ScrollViewProxy, animated: Bool) {

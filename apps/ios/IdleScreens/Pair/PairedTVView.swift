@@ -125,7 +125,7 @@ struct PairedTVView: View {
                     Text("Pair a screen")
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(Color.textPrimary)
-                    Text("Steer any Apple TV, Mac, or Linux display from your phone.")
+                    Text("Steer any Apple TV, Mac, or Linux display from your \(ThisDevice.noun).")
                         .font(.subheadline)
                         .foregroundStyle(Color.textSecondary)
                         .multilineTextAlignment(.center)
@@ -151,6 +151,7 @@ struct PairedTVView: View {
                 syncSection
             }
             .padding(20)
+            .readableColumn()
         }
     }
 
@@ -269,6 +270,7 @@ struct PairedTVView: View {
                 syncSection
             }
             .padding(20)
+            .readableColumn()
         }
         .overlay(alignment: .bottom) {
             if let toast {
@@ -314,7 +316,7 @@ struct PairedTVView: View {
 
     private var screensSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("screens", detail: "Apple TV, Mac and Linux displays this phone can steer.")
+            sectionHeader("screens", detail: "Apple TV, Mac and Linux displays this \(ThisDevice.noun) can steer.")
             VStack(spacing: 0) {
                 ForEach(app.pairedScreens) { screen in
                     screenRow(screen)
@@ -395,7 +397,7 @@ struct PairedTVView: View {
             VStack(spacing: 0) {
                 let keyed = app.credentials.filter { app.token(for: $0.channelId) != nil }
                 if keyed.isEmpty {
-                    Text("No keys on this phone yet. Create a channel, or add a key in Settings, and it can be opened on a computer from here.")
+                    Text("No keys on this \(ThisDevice.noun) yet. Create a channel, or add a key in Settings, and it can be opened on a computer from here.")
                         .font(.footnote)
                         .foregroundStyle(Color.textSecondary)
                         .padding(.vertical, 14)
@@ -462,10 +464,10 @@ struct PairedTVView: View {
             VStack(spacing: 12) {
                 syncRow("key.icloud", "Keys", "iCloud Keychain")
                 syncRow("star", "Following", "iCloud Keychain")
-                syncRow("tv", "Paired screens", "this phone only")
+                syncRow("tv", "Paired screens", "this \(ThisDevice.noun) only")
             }
             .cardStyle()
-            Text("Keys and follows reach your other Apple devices through iCloud Keychain, end-to-end encrypted — iOS Settings → your name → iCloud → Passwords. Screens are paired per phone: pair again on another device.")
+            Text("Keys and follows reach your other Apple devices through iCloud Keychain, end-to-end encrypted — iOS Settings → your name → iCloud → Passwords. Screens are paired per device: pair again on another device.")
                 .font(.caption)
                 .foregroundStyle(Color.textTertiary)
         }
