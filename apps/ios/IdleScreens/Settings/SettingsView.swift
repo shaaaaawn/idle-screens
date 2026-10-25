@@ -248,6 +248,7 @@ struct SettingsView: View {
 
     // MARK: About
 
+    @ViewBuilder
     private var aboutSection: some View {
         section("about") {
             row(icon: "info.circle", title: "Version", detail: Self.version)
@@ -258,6 +259,30 @@ struct SettingsView: View {
                 }
             }
         }
+        // Help, reporting and the policies: App Store Connect requires the
+        // privacy and support pages, and App Review expects a way to reach us
+        // and report content from inside the app.
+        section("help & legal") {
+            ForEach(Self.legalLinks, id: \.title) { link in
+                if let url = link.url {
+                    Link(destination: url) { row(icon: link.icon, title: link.title, detail: "") }
+                }
+            }
+        }
+    }
+
+    private struct LegalLink { let icon: String; let title: String; let url: URL? }
+
+    private static var legalLinks: [LegalLink] {
+        let base = Config.baseURL.hasSuffix("/") ? String(Config.baseURL.dropLast()) : Config.baseURL
+        let subject = "idle screens \(version)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return [
+            LegalLink(icon: "questionmark.circle", title: "Support", url: URL(string: "\(base)/support")),
+            LegalLink(icon: "envelope", title: "Email support or report content",
+                      url: URL(string: "mailto:support@idlescreens.com?subject=\(subject)")),
+            LegalLink(icon: "hand.raised", title: "Privacy policy", url: URL(string: "\(base)/privacy")),
+            LegalLink(icon: "doc.text", title: "Terms of use", url: URL(string: "\(base)/terms")),
+        ]
     }
 
     /// A titled card: header, rows separated by hairlines, optional footnote.

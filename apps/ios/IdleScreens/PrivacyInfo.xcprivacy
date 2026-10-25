@@ -4,18 +4,20 @@
 <dict>
 	<!--
 	  Privacy manifest. Required since 2024-05 for any app whose bundle touches a
-	  required-reason API. Audited 2026-09-07 against this target's compiled
-	  sources: UserDefaults is the only required-reason category used. File
-	  timestamps, system boot time, disk space and active-keyboard APIs have no
-	  call sites, so they are deliberately absent rather than forgotten — adding a
-	  category the app does not use is its own review problem.
+	  required-reason API. Re-audited 2026-10-25 against this target's compiled
+	  sources (nm shows _NSURLContentModificationDateKey): UserDefaults and file
+	  timestamps are the required-reason categories used. System boot time, disk
+	  space and active-keyboard APIs have no call sites, so they are deliberately
+	  absent rather than forgotten — adding a category the app does not use is
+	  its own review problem.
 	-->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<!--
 	  No tracking, so no domains. There is no IDFA, no AppTrackingTransparency and
-	  no third-party SDK in either target; the only host contacted is the app's own
-	  backend.
+	  no third-party SDK in either target. The app talks to its own backend; the
+	  channel page in its web view also loads Google Fonts, and the 3D tank can
+	  fall back to IPFS gateways for fish models. None of those track.
 	-->
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
@@ -55,6 +57,20 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!--
+		  C617.1 — timestamps of files inside the app's own container. The launch
+		  stills (Watch/WebScenePool.swift, persistLaunchStills) keep the newest
+		  few by modification date in Caches/launch-stills. Nothing leaves the
+		  device. Without this, App Store Connect flags ITMS-91053.
+		-->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
 			</array>
 		</dict>
 	</array>
