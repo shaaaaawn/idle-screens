@@ -12,7 +12,8 @@ import WebKit
 /// Bounded on purpose: each page is a web process and an open socket (the
 /// server counts sockets as viewers), so the pool holds only the channel you
 /// are on and is drained when you flip channel, change tab or background the
-/// app. A 3D tank is never pooled.
+/// app. A 3D tank is never pooled. Flipping channel spares one page for a few
+/// seconds — the live one you left — for the next channel to `adopt`.
 ///
 /// It also keeps a small picture of each page as last seen (`snapshot`). A
 /// page swiped back into view slides in showing that, not its bare
@@ -77,6 +78,45 @@ final class WebScenePool {
         return (entry.webView, entry.host)
     }
 
+    /// A warm live page of ANOTHER public channel, to be switched in place to
+    /// `channelId` (`WebSceneView.Coordinator.retarget`) — what a channel flip
+    /// does instead of loading a page: a new page waits on a web process and
+    /// a commit (0.4–0.9 s on a loaded simulator, 15 s once, 2026-10-25); a
+    /// switch in place has its first frame in ~0.1 s.
+    /// Public and live only: a keyed page lives in its own store with its own
+    /// token, and a pinned scene is a document of its own.
+    func adopt(forChannel channelId: String) -> (WKWebView, WebSceneView.Coordinator)? {
+        guard let index = idle.lastIndex(where: {
+            $0.key.sceneId == nil && !$0.key.keyed && $0.key.channelId != channelId
+        }) else { return nil }
+        let entry = idle.remove(at: index)
+        return (entry.webView, entry.host)
+    }
+
+    /// Live public pages on screen right now — normally one, the channel you
+    /// are watching. Weak: SwiftUI owns the containers.
+    @ObservationIgnored private let onScreen = NSHashTable<SceneHostView>.weakObjects()
+
+    func showing(_ container: SceneHostView) { onScreen.add(container) }
+    func notShowing(_ container: SceneHostView) { onScreen.remove(container) }
+
+    /// The live page of ANOTHER public channel still on screen, taken out of
+    /// its view for `channelId` to switch in place. Only the page being left
+    /// can be on screen when a new channel's page is built: the app has one
+    /// window (no multi-scene manifest), the feed gives exactly one page the
+    /// engine, and SwiftUI builds the next before it dismantles the last. The view it leaves keeps showing its still, and
+    /// stops keeping pictures of a page that is no longer its channel.
+    func handOver(forChannel channelId: String) -> (WKWebView, WebSceneView.Coordinator)? {
+        guard let donor = onScreen.allObjects.last(where: {
+            $0.webView != nil && $0.coordinator?.host?.channelId != channelId
+        }), let coordinator = donor.coordinator, let host = coordinator.host,
+              let webView = donor.release() else { return nil }
+        onScreen.remove(donor)
+        coordinator.snapshotTask?.cancel()
+        host.sink = nil
+        return (webView, host)
+    }
+
     /// Keep a page that just left the screen.
     func park(_ key: Key, webView: WKWebView, host: WebSceneView.Coordinator) {
         if let stale = idle.firstIndex(where: { $0.key == key }) {
@@ -91,7 +131,7 @@ final class WebScenePool {
         let key = Key(channelId: channelId, sceneId: sceneId, keyed: token != nil)
         guard !idle.contains(where: { $0.key == key }) else { return }
         SwipeTiming.mark("prewarm \(sceneId.map(String.init) ?? "live")")
-        let host = WebSceneView.Coordinator(baseURL: baseURL, onFrame: { _ in }, onFailure: {})
+        let host = WebSceneView.Coordinator(channelId: channelId, baseURL: baseURL, onFrame: { _ in }, onFailure: {})
         let webView = WebSceneView.build(channelId: channelId, token: token, baseURL: baseURL,
                                          sceneId: sceneId, delegate: host)
         // Off-screen views barely run; a real size lets the page lay out and
@@ -100,19 +140,44 @@ final class WebScenePool {
         park(key, webView: webView, host: host)
     }
 
+    /// How long the live page of a channel just left stays connected, waiting
+    /// for the next channel to `adopt` it. Short: until then it is still a
+    /// viewer of the channel you left.
+    @ObservationIgnored var adoptionGrace: Duration = .seconds(3)
+
     /// Drop warm pages — one channel's, or all. `keepSnapshots` keeps their
     /// pictures (backgrounding: the channel you return to is the same one).
+    ///
+    /// Leaving one channel spares its public live page for `adoptionGrace`:
+    /// that is the page the channel flipped to switches in place.
     func drain(channelId: String? = nil, keepSnapshots: Bool = false) {
         let (gone, kept) = idle.reduce(into: ([Entry](), [Entry]())) { acc, entry in
             if channelId == nil || entry.key.channelId == channelId { acc.0.append(entry) } else { acc.1.append(entry) }
         }
         idle = kept
-        gone.forEach { Self.teardown($0.webView) }
+        for entry in gone {
+            if channelId != nil, entry.key.sceneId == nil, !entry.key.keyed {
+                idle.append(entry)
+                expire(entry.webView, after: adoptionGrace)
+            } else {
+                Self.teardown(entry.webView)
+            }
+        }
         if keepSnapshots { return }
         // Pictures only help within one visit; on the next the scene has moved on.
         let stale = snapshotOrder.filter { channelId == nil || $0.hasPrefix("\(channelId!)#") }
         stale.forEach { snapshots[$0] = nil }
         snapshotOrder.removeAll { stale.contains($0) }
+    }
+
+    /// Tear `webView` down after `delay` unless something took it meanwhile.
+    private func expire(_ webView: WKWebView, after delay: Duration) {
+        Task { @MainActor [weak self, weak webView] in
+            try? await Task.sleep(for: delay)
+            guard let self, let webView,
+                  let index = self.idle.firstIndex(where: { $0.webView === webView }) else { return }
+            Self.teardown(self.idle.remove(at: index).webView)
+        }
     }
 
     var idleCount: Int { idle.count }
