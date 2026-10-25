@@ -16,6 +16,8 @@ struct SpriteSceneView: UIViewRepresentable {
     let background: SpecSubset.Background?
     /// Paint no ground (a sequence segment over its bed).
     var transparentGround: Bool = false
+    /// Seconds the scene has already been running (a copy drawn under its replacement).
+    var clockOffset: TimeInterval = 0
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -70,6 +72,7 @@ struct SpriteSceneView: UIViewRepresentable {
         }
         let scene = CompiledSpriteScene(layers: layers, background: background,
                                         transparentGround: transparentGround)
+        scene.clockOffset = clockOffset
         // A recompile of the same channel (keyframes, a steer) keeps the clock:
         // restarting it would snap every entity back to where it was at t=0.
         scene.startTime = (view.scene as? CompiledSpriteScene)?.startTime
@@ -90,6 +93,7 @@ final class CompiledSpriteScene: SKScene {
     private var driven: [(node: SKSpriteNode, entity: CompiledEntity, layer: Int)] = []
     private var textures: [String: SKTexture] = [:]
     fileprivate(set) var startTime: TimeInterval?
+    fileprivate var clockOffset: TimeInterval = 0
     private var builtForSize: CGSize = .zero
 
     private let transparentGround: Bool
@@ -501,7 +505,7 @@ final class CompiledSpriteScene: SKScene {
     // MARK: - Frame update
 
     override func update(_ currentTime: TimeInterval) {
-        let start = startTime ?? currentTime
+        let start = startTime ?? (currentTime - clockOffset)
         if startTime == nil {
             startTime = start
             skLog.notice("first tick scene=\(ObjectIdentifier(self).debugDescription)")

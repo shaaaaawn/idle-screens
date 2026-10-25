@@ -232,7 +232,13 @@ final class TVAppState {
         // animation): keep the one you're leaving drawing under the next.
         if selectedChannelId != nil, selectedChannelId != channelId {
             beginCrossfade(seconds: renderClass == .legacy ? 0.3 : 0.45)
+        } else {
+            // Opened from the grid: nothing to dissolve from, and a copy left
+            // over from the last visit must not draw over this channel.
+            endCrossfade()
         }
+        rendererMountedAt = Date()
+        bedMountedAt = rendererMountedAt
         presentingSurface = surface
         selectedChannelId = channelId
         sleeping = false
@@ -481,6 +487,7 @@ final class TVAppState {
     }
 
     func exitChannel() {
+        endCrossfade()
         selectedChannelId = nil
         overlayText = nil
         stopKeyframes()
@@ -697,32 +704,58 @@ final class TVAppState {
         let layers: [CompiledLayer]
         let background: SpecSubset.Background?
         let ghosting: Double
-        /// Over a bed (or with no ground) the scene is see-through: it must fade
-        /// out too, or it would pop off at the end. Opaque, it holds at full
-        /// opacity under the incoming scene, which is a true crossfade.
+        /// Seconds it had been running, so the copy carries on from there.
+        let elapsed: TimeInterval
+        /// Drawn over a bed, so see-through, as the live renderer paints it.
         let transparent: Bool
+        /// The bed itself, kept only when the whole sequence is being replaced
+        /// (within one sequence the live bed carries on underneath).
+        let bed: Bed?
+
+        struct Bed {
+            let layers: [CompiledLayer]
+            let background: SpecSubset.Background?
+            let ghosting: Double
+            let elapsed: TimeInterval
+        }
     }
     private(set) var outgoing: OutgoingScene?
     private(set) var outgoingOpacity: Double = 1
     private var outgoingTask: Task<Void, Never>?
     private var outgoingSerial = 0
+    /// When the on-screen scene renderer, and the bed under it, last mounted:
+    /// their clocks start there.
+    private var rendererMountedAt = Date()
+    private var bedMountedAt = Date()
+
+    private func endCrossfade() {
+        outgoingTask?.cancel()
+        outgoingTask = nil
+        outgoing = nil
+    }
 
     /// Keep what is on screen drawing under whatever replaces it, for `seconds`.
-    private func beginCrossfade(seconds: TimeInterval) {
-        outgoingTask?.cancel()
+    private func beginCrossfade(seconds: TimeInterval, withBed: Bool = true) {
+        endCrossfade()
+        let now = Date()
+        // Whatever replaces this scene mounts a fresh renderer: its clock starts now.
+        defer { rendererMountedAt = now }
         guard seconds > 0, !compiledScene.isEmpty, !isClassicSpec,
-              effectiveTier == .t3 || effectiveTier == .t2 else {
-            outgoing = nil
-            return
-        }
+              effectiveTier == .t3 || effectiveTier == .t2 else { return }
         outgoingSerial &+= 1
-        let transparent = hasBed || specBackground == nil
+        let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
+                                            elapsed: now.timeIntervalSince(bedMountedAt)) : nil
         outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
-                                 ghosting: specGhosting, transparent: transparent)
+                                 ghosting: specGhosting, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 transparent: hasBed, bed: bed)
         outgoingOpacity = 1
         let serial = outgoingSerial
         outgoingTask = Task { @MainActor [weak self] in
-            if transparent {
+            // Opaque and replaced by an opaque scene, the copy holds at full
+            // opacity under it: a true crossfade. When the incoming scene is
+            // see-through (over a bed) it must fade out too, or it would pop
+            // off at the end. The incoming state is settled by now.
+            if self?.hasBed == true {
                 try? await Task.sleep(for: .milliseconds(30))
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: seconds)) { self?.outgoingOpacity = 0 }
@@ -763,11 +796,12 @@ final class TVAppState {
             bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
             bedBackground = bed.background
             bedGhosting = bed.ghosting ?? 0
+            if !hasBed { bedMountedAt = Date() }
             hasBed = true
         } else {
             clearBed()
         }
-        applySegment(seq, at: 0, fallbackSeed: fallbackSeed)
+        applySegment(seq, at: 0, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
     }
 
@@ -788,14 +822,20 @@ final class TVAppState {
         hasBed = false
     }
 
-    private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
+    /// `advancing` is a step to the next segment of the sequence already on
+    /// screen; the first segment of a new sequence is dissolved in by the scene
+    /// message (or the channel change) that started it.
+    private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?,
+                              advancing: Bool = true) {
         stopKeyframes()
         let resolved = seq.resolve(at: T)
         let segment = seq.segments[resolved.index]
-        sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
+        // Two renderers overlap during a dissolve: same cap as a scene message.
+        let authored = seq.transitionDuration(entering: resolved.index)
+        sequenceCrossfade = renderClass == .legacy ? min(authored, 0.4) : authored
         let nextKey = segment.key ?? "segment-\(resolved.index)"
-        if sequenceSegmentKey != nil, sequenceSegmentKey != nextKey, sequenceCrossfade > 0 {
-            beginCrossfade(seconds: sequenceCrossfade)
+        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey {
+            beginCrossfade(seconds: sequenceCrossfade, withBed: false)
         }
         sequenceSegmentKey = nextKey
         let scene = segment.scene

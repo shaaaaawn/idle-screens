@@ -173,11 +173,26 @@ struct ScreenSaverView: View {
 
     /// The scene being replaced, drawn under the incoming one for the dissolve.
     @ViewBuilder private func outgoingRenderer(_ out: TVAppState.OutgoingScene) -> some View {
-        if app.effectiveTier == .t3 {
-            NativeSceneView(layers: out.layers, background: out.background, ghosting: out.ghosting,
-                            renderClass: app.renderClass, tier: .t3, transparentGround: out.transparent)
-        } else {
-            SpriteSceneView(layers: out.layers, background: out.background, transparentGround: out.transparent)
+        ZStack {
+            // The old sequence's bed goes with it: the incoming scene replaces
+            // or clears the live bed at once, which would pull the ground out
+            // from under the dissolve.
+            if let bed = out.bed {
+                if app.effectiveTier == .t3 {
+                    NativeSceneView(layers: bed.layers, background: bed.background, ghosting: bed.ghosting,
+                                    renderClass: app.renderClass, tier: .t3, clockOffset: bed.elapsed)
+                } else {
+                    SpriteSceneView(layers: bed.layers, background: bed.background, clockOffset: bed.elapsed)
+                }
+            }
+            if app.effectiveTier == .t3 {
+                NativeSceneView(layers: out.layers, background: out.background, ghosting: out.ghosting,
+                                renderClass: app.renderClass, tier: .t3, transparentGround: out.transparent,
+                                clockOffset: out.elapsed)
+            } else {
+                SpriteSceneView(layers: out.layers, background: out.background,
+                                transparentGround: out.transparent, clockOffset: out.elapsed)
+            }
         }
     }
 
