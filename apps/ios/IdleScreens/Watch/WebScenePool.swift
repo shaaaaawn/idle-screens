@@ -37,6 +37,8 @@ final class WebScenePool {
     }
 
     private struct Entry {
+        /// Identity of this parking: taking a page out and parking it again is a new entry.
+        let id = UUID()
         let key: Key
         let webView: WKWebView
         let host: WebSceneView.Coordinator
@@ -88,6 +90,7 @@ final class WebScenePool {
     func adopt(forChannel channelId: String) -> (WKWebView, WebSceneView.Coordinator)? {
         guard let index = idle.lastIndex(where: {
             $0.key.sceneId == nil && !$0.key.keyed && $0.key.channelId != channelId
+            && !$0.webView.isLoading   // a page still booting has no document to switch
         }) else { return nil }
         let entry = idle.remove(at: index)
         return (entry.webView, entry.host)
@@ -108,7 +111,7 @@ final class WebScenePool {
     /// stops keeping pictures of a page that is no longer its channel.
     func handOver(forChannel channelId: String) -> (WKWebView, WebSceneView.Coordinator)? {
         guard let donor = onScreen.allObjects.last(where: {
-            $0.webView != nil && $0.coordinator?.host?.channelId != channelId
+            $0.webView?.isLoading == false && $0.coordinator?.host?.channelId != channelId
         }), let coordinator = donor.coordinator, let host = coordinator.host,
               let webView = donor.release() else { return nil }
         onScreen.remove(donor)
@@ -171,14 +174,14 @@ final class WebScenePool {
     }
 
     /// Tear a spared page down after `delay` unless something took it
-    /// meanwhile. Matched on page AND key: a page adopted and parked again
-    /// under its new channel is a different entry, with a full life ahead.
+    /// meanwhile. Matched on the entry itself: a page taken or adopted and parked again
+    /// (under any key) is a different entry, with a full life ahead.
     private func expire(_ spared: Entry, after delay: Duration) {
-        let key = spared.key
-        Task { @MainActor [weak self, weak webView = spared.webView] in
+        let id = spared.id
+        Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
-            guard let self, let webView,
-                  let index = self.idle.firstIndex(where: { $0.webView === webView && $0.key == key }) else { return }
+            guard let self,
+                  let index = self.idle.firstIndex(where: { $0.id == id }) else { return }
             Self.teardown(self.idle.remove(at: index).webView)
         }
     }
