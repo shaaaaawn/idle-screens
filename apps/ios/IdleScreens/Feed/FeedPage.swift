@@ -994,10 +994,12 @@ struct FeedPage: View {
         Task {
             defer { waking = false }
             do {
-                try await app.mcp.wake(channelId: channelId, token: token)
+                try await app.mcp.wakeChannel(channelId: channelId, token: token)
                 session.optimisticallyAwake()
+            } catch where error.isMCPCancellation {
+                // Said no to the server's question: nothing happened.
             } catch {
-                flash("couldn't wake it — try again")
+                flash("couldn't wake it — \(error.mcpDisplayText)")
             }
         }
     }
@@ -1008,13 +1010,14 @@ struct FeedPage: View {
         Task {
             defer { recalling = false }
             do {
-                try await app.mcp.recall(channelId: channelId, token: token, sceneId: stop.sceneId)
+                try await app.mcp.recallScene(channelId: channelId, token: token, sceneId: stop.sceneId)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 flash("it's on air again")
                 withAnimation(.easeInOut(duration: 0.35)) { moment = Self.liveKey }
+            } catch where error.isMCPCancellation {
             } catch {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                flash("couldn't bring that one back")
+                flash("couldn't bring that one back — \(error.mcpDisplayText)")
             }
         }
     }

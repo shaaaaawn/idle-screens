@@ -140,8 +140,7 @@ extension MCPClient {
         try await callTool("createToken", arguments: [
             "channelId": .string(channelId), "token": .string(token),
             "role": .string(role.rawValue), "label": .string(label),
-            "agent": .string("idle-screens-ios"), "harness": .string("ios-app"),
-        ], as: MintedKey.self)
+        ], intent: "user made a \(role.label) key for “\(label)” from the \(identity.surface) app", as: MintedKey.self)
     }
 
     func listTokens(channelId: String, token: String) async throws -> [KeyGrant] {
@@ -150,11 +149,13 @@ extension MCPClient {
         ], as: KeyGrantList.self).tokens
     }
 
-    /// Ends exactly one relationship. Every other key keeps working.
-    func revokeToken(channelId: String, token: String, id: String) async throws {
+    /// Ends exactly one relationship. Every other key keeps working. The
+    /// server asks first (`confirmation_required`); `callTool` puts its
+    /// sentence to the person and repeats the call only on yes.
+    func revokeToken(channelId: String, token: String, id: String, label: String? = nil) async throws {
+        let whose = label.map { " for “\($0)”" } ?? ""
         try await callTool("revokeToken", arguments: [
             "channelId": .string(channelId), "token": .string(token), "id": .string(id),
-            "agent": .string("idle-screens-ios"), "harness": .string("ios-app"),
-        ])
+        ], intent: "user revoked the key\(whose) from the \(identity.surface) app")
     }
 }

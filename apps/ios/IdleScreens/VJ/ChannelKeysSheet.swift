@@ -152,7 +152,7 @@ struct ChannelKeysSheet: View {
                 await load()
             } catch {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                problem = error.localizedDescription
+                problem = error.mcpDisplayText
             }
         }
     }
@@ -161,10 +161,14 @@ struct ChannelKeysSheet: View {
         guard let token = app.token(for: channelId) else { return }
         Task {
             do {
-                try await app.mcp.revokeToken(channelId: channelId, token: token, id: grant.id)
+                // The server asks first; MCPClient shows its sentence and
+                // revokes only on yes.
+                try await app.mcp.revokeToken(channelId: channelId, token: token, id: grant.id,
+                                              label: grant.label)
                 grants.removeAll { $0.id == grant.id }
+            } catch where error.isMCPCancellation {
             } catch {
-                problem = "Couldn't revoke that key: \(error.localizedDescription)"
+                problem = "Couldn't revoke that key: \(error.mcpDisplayText)"
             }
         }
     }

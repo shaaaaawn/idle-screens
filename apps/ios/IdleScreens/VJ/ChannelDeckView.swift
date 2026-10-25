@@ -164,8 +164,10 @@ struct ChannelDeckView: View {
             defer { isSending = false }
             do {
                 try await action()
+            } catch where error.isMCPCancellation {
+                // The person said no to the server's confirmation: not a failure.
             } catch {
-                actionError = error.localizedDescription
+                actionError = error.mcpDisplayText
             }
         }
     }

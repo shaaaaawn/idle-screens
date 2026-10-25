@@ -113,7 +113,8 @@ extension AppState {
         defer { isWorking = false }
         try await mcp.publishSpec(
             channelId: channelId, token: token, spec: spec,
-            seed: Self.randomSeed(), intent: "mixed in the scene from \(sourceChannelId)")
+            seed: Self.randomSeed(),
+            intent: "user mixed in the scene from \(sourceChannelId) on the \(mcp.identity.surface) app")
     }
 
     /// The gallery payload carries each channel's spec verbatim — publish
@@ -187,8 +188,7 @@ extension AppState {
             channelId: channelId,
             token: token,
             saverId: saver.id,
-            seed: Self.randomSeed(),
-            intent: "published from iOS VJ remote"
+            seed: Self.randomSeed()
         )
     }
 
@@ -204,16 +204,16 @@ extension AppState {
     func setSleeping(_ sleeping: Bool, for channelId: String) async throws {
         let token = try requireToken(for: channelId)
         if sleeping {
-            try await mcp.sleep(channelId: channelId, token: token)
+            try await mcp.sleepChannel(channelId: channelId, token: token)
         } else {
-            try await mcp.wake(channelId: channelId, token: token)
+            try await mcp.wakeChannel(channelId: channelId, token: token)
         }
     }
 
     /// Flash ephemeral text over the channel — tag "vj", 4s on screen.
     func sendOverlay(_ text: String, to channelId: String) async throws {
         let token = try requireToken(for: channelId)
-        try await mcp.overlay(channelId: channelId, token: token, text: text, tag: "vj", ttl: 4000)
+        try await mcp.showOverlay(channelId: channelId, token: token, text: text, tag: "vj", ttl: 4000)
     }
 
     /// Public read-only state for the deck's status header.

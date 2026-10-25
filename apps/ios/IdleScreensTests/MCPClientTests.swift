@@ -40,7 +40,7 @@ final class MCPClientTests: XCTestCase {
             try await client.setSeed(channelId: "test-chan", token: "isk_wrong", seed: 1)
             XCTFail("Expected toolError")
         } catch let error as MCPError {
-            XCTAssertEqual(error, .toolError(tool: "setSeed", message: "bad token"))
+            XCTAssertEqual(error, .tool(MCPToolFailure(tool: "setSeed", message: "bad token")))
         } catch {
             XCTFail("Wrong error type: \(error)")
         }
@@ -52,7 +52,7 @@ final class MCPClientTests: XCTestCase {
         }
 
         do {
-            try await client.wake(channelId: "test-chan", token: "isk_abc")
+            try await client.wakeChannel(channelId: "test-chan", token: "isk_abc")
             XCTFail("Expected httpError")
         } catch let error as MCPError {
             XCTAssertEqual(error, .httpError(status: 500, body: "server exploded"))

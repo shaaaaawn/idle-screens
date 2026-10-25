@@ -169,7 +169,7 @@ final class TVAppState {
         let transport = URLSessionTransport()
         self.init(
             gallery: GalleryClient(baseURL: baseURL, transport: transport),
-            mcp: MCPClient(baseURL: baseURL, transport: transport),
+            mcp: MCPClient(baseURL: baseURL, transport: transport, confirmer: MCPConfirmPrompt.confirmer),
             ws: ChannelWSClient(),
             pair: PairClient(baseURL: baseURL, transport: transport),
             baseURL: baseURL

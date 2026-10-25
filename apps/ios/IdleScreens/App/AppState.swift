@@ -49,7 +49,10 @@ final class AppState {
     init() {
         let baseURL = URL(string: Config.baseURL)!
         let transport = URLSessionTransport()
-        self.mcp = MCPClient(baseURL: baseURL, transport: transport)
+        // Every write is attributed (intent + harness) and any server
+        // confirmation is put to the person — see MCPClient.callTool.
+        self.mcp = MCPClient(baseURL: baseURL, transport: transport,
+                             identity: .current(), confirmer: MCPConfirmPrompt.confirmer)
         self.gallery = GalleryClient(baseURL: baseURL, transport: transport)
         self.pairClient = PairClient(baseURL: baseURL, transport: transport)
         self.store = CredentialStore()
