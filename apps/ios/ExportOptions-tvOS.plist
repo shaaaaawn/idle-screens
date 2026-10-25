@@ -13,9 +13,9 @@
   <key>provisioningProfiles</key>
   <dict>
     <key>com.hermosalabs.idlescreens</key>
-    <string>Idle Screens tvOS App Store</string>
+    <string>Idle Screens tvOS App Store 2026-10</string>
     <key>com.hermosalabs.idlescreens.topshelf</key>
-    <string>Idle Screens TopShelf App Store</string>
+    <string>Idle Screens TopShelf App Store 2026-10</string>
   </dict>
   <key>destination</key>
   <string>export</string>

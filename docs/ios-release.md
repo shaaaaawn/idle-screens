@@ -11,9 +11,10 @@ Generic root-cause reference: user skill `testflight-cli-upload-fresh-org`; sibl
 |---|---|
 | Org / Team ID | `Z4P3N45225` (Hermosa Labs, LLC) |
 | App bundle ID | `com.hermosalabs.idlescreens` (ASC bundleId resource `9B2CMN8834`) |
-| App Store profile | `Idle Screens App Store v3` (adds Associated Domains for `/pair/` universal links; v1 references the marco cert, v2 predates the entitlement — both unused) |
-| Distribution identity | `Apple Distribution: Hermosa Labs, LLC (Z4P3N45225)` cert `HT5T6FN8ZK`, private key lives ONLY in `~/Library/Keychains/idle-build.keychain-db` |
-| Keychain password | `IDLE_BUILD_KEYCHAIN_PASSWORD` in the **farco-bolo repo-root `.env`** (gitignored; never commit the value) |
+| App Store profiles | `Idle Screens iOS App Store 2026-10`, `Idle Screens tvOS App Store 2026-10`, `Idle Screens TopShelf App Store 2026-10` (all expire 2027-10-25). Older `… v1/v2/v3`, `Idle Screens tvOS App Store` and `… TopShelf App Store` are retired. |
+| Distribution identity | `Apple Distribution: Hermosa Labs, LLC (Z4P3N45225)` cert `X2MG4UQZ6V` (expires 2027-10-25), in `~/Library/Keychains/idle-build-2026-10.keychain-db`. Backup: `idle-mono/secrets/idle-build-2026-10/dist.p12`. |
+| Keychain + p12 passwords | `idle-mono/secrets/idle-build.env` (never committed; back it up with the p12). Old cert `HT5T6FN8ZK` lives in `idle-build.keychain-db`, which stopped accepting its password on 2026-10-25 — that is why signing was rebuilt. |
+| Rebuild signing | `node idle-mono/scripts/apple-signing-rotate.mjs <tag>` — new keychain, cert and the three profiles, from the API key alone; then update the profile names in `project.yml` and `ExportOptions-*.plist`. |
 | App Store Connect app ID | `6794709335` (Idle Screens) |
 | Issuer ID | `9b6efc9b-9a0b-46f5-82a3-40970ac04822` |
 | API key | `G59H5KV568` ("claude code", Admin), `.p8` at `~/.appstoreconnect/private_keys/AuthKey_G59H5KV568.p8` |
@@ -21,27 +22,34 @@ Generic root-cause reference: user skill `testflight-cli-upload-fresh-org`; sibl
 
 ## Recipe
 
+The normal path is one command from the mono root, which runs the unit suite, picks the next build
+number from App Store Connect, archives, exports, validates and uploads:
+
+```sh
+LANE=<x> make app ios ship     # or: make app tvos ship
+```
+
+By hand (what `scripts/app.sh` does):
+
 ```sh
 cd apps/ios
+KC=$HOME/Library/Keychains/idle-build-2026-10.keychain-db
 
-# 1. Bump CURRENT_PROJECT_VERSION (and MARKETING_VERSION if new version) in project.yml, then:
+# 1. Bump CURRENT_PROJECT_VERSION in project.yml (app.sh picks it from ASC), then:
 xcodegen generate
 
-# 2. Unlock the signing keychain (password from farco-bolo/.env, do not echo it)
-set -a; . /Users/shawn/code/farco-bolo/.env; set +a
-security unlock-keychain -p "$IDLE_BUILD_KEYCHAIN_PASSWORD" ~/Library/Keychains/idle-build.keychain-db
-security find-identity -v -p codesigning ~/Library/Keychains/idle-build.keychain-db  # expect 1 valid identity
+# 2. Unlock the signing keychain (password in idle-mono/secrets/idle-build.env; do not echo it)
+security unlock-keychain -p "$(grep '^IDLE_BUILD_KEYCHAIN_PASSWORD=' ~/code/idle-mono/secrets/idle-build.env | cut -d= -f2-)" "$KC"
+security find-identity -v -p codesigning "$KC"  # expect 1 valid identity
 
 # 3. Archive (Release, manual)
 xcodebuild archive -project IdleScreens.xcodeproj -scheme IdleScreens -configuration Release \
   -destination 'generic/platform=iOS' -archivePath /tmp/IdleScreens.xcarchive \
-  OTHER_CODE_SIGN_FLAGS="--keychain $HOME/Library/Keychains/idle-build.keychain-db"
+  OTHER_CODE_SIGN_FLAGS="--keychain $KC"
 
-# 4. Export (ExportOptions.plist: method app-store-connect, teamID Z4P3N45225, signingStyle manual,
-#    signingCertificate Apple Distribution, provisioningProfiles { com.hermosalabs.idlescreens: Idle Screens App Store v2 })
+# 4. Export with the committed ExportOptions-iOS.plist
 xcodebuild -exportArchive -archivePath /tmp/IdleScreens.xcarchive -exportPath /tmp/idle-export \
-  -exportOptionsPlist /tmp/IdleScreens-ExportOptions.plist \
-  OTHER_CODE_SIGN_FLAGS="--keychain $HOME/Library/Keychains/idle-build.keychain-db"
+  -exportOptionsPlist ExportOptions-iOS.plist OTHER_CODE_SIGN_FLAGS="--keychain $KC"
 
 # 5. ALWAYS validate, then upload
 xcrun altool --validate-app -f /tmp/idle-export/IdleScreens.ipa -t ios --apiKey G59H5KV568 --apiIssuer 9b6efc9b-9a0b-46f5-82a3-40970ac04822
@@ -73,17 +81,17 @@ xcrun altool --upload-app   -f /tmp/idle-export/IdleScreens.ipa -t ios --apiKey 
 
 ## tvOS (added 2026-07-25)
 
-Same app record (Apple ID `6794709335`), same bundle id, same dist cert + `idle-build.keychain-db`.
+Same app record (Apple ID `6794709335`), same bundle id, same dist cert + keychain.
 First tvOS upload: build `2026072501` (1.0.0), Delivery UUID `55935a1f-7325-4dcf-a105-5542320cd0c5`.
 
 | Thing | Value |
 |---|---|
 | Target / scheme | `IdleScreensTV` (tvOS 17.0, device family 3) |
-| Profile | `Idle Screens tvOS App Store` (`TVOS_APP_STORE` — iOS profiles can't sign tvOS) |
+| Profiles | `Idle Screens tvOS App Store 2026-10` + `Idle Screens TopShelf App Store 2026-10` (`TVOS_APP_STORE` — iOS profiles can't sign tvOS) |
 | Icon | `App Icon & Top Shelf Image.brandassets` (layered imagestack — **required** on tvOS) |
 
 Recipe: same as iOS but `-scheme IdleScreensTV -destination 'generic/platform=tvOS'`,
-ExportOptions profile `Idle Screens tvOS App Store`, and `altool -t appletvos`.
+`ExportOptions-tvOS.plist`, and `altool -t appletvos`.
 TestFlight on tvOS needs **no device registration**; a direct-from-Xcode debug run would need
 the Apple TV UDID registered (`POST /v1/devices`).
 
