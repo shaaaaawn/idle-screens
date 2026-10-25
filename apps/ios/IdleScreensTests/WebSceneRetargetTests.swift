@@ -18,6 +18,16 @@ final class WebSceneRetargetTests: XCTestCase {
     private var webView: WKWebView!
     private var host: WebSceneView.Coordinator!
     private var frames: [String] = []
+    /// The view the page is handed to on a retarget, as `WebSceneView` does.
+    private var sink: WebSceneView.Coordinator!
+    private var sinkFrames: [String] = []
+
+    private func handToSink() {
+        sinkFrames = []
+        sink = WebSceneView.Coordinator(channelId: "beta", baseURL: base,
+                                        onFrame: { [weak self] in self?.sinkFrames.append($0) }, onFailure: {})
+        host.sink = sink
+    }
 
     private let fakeSocket = """
     window.WebSocket = function (url) {
@@ -40,8 +50,11 @@ final class WebSceneRetargetTests: XCTestCase {
       openChannel('alpha');
       window.addEventListener('popstate', () => {
         const id = location.pathname.split('/')[2];
-        document.getElementById('screen').replaceChildren(document.createElement('canvas'));
+        // As the site does: the socket opens at once, the canvas mounts once
+        // its scene has arrived.
+        document.getElementById('screen').replaceChildren();
         openChannel(id);
+        if (!window.noCanvas) setTimeout(() => document.getElementById('screen').append(document.createElement('canvas')), 300);
       });
     </script></body></html>
     """
@@ -113,22 +126,58 @@ final class WebSceneRetargetTests: XCTestCase {
     /// is told the page is reused only once the new canvas has drawn.
     func testNativeRetargetSwitchesInPlaceAndDropsTheOldSocket() async throws {
         var reused = false
-        host.onReused = { reused = true }
         // Keep alpha's socket alive past the switch, as a closing socket is.
         _ = try await webView.callAsyncJavaScript("window.openChannel = (id) => { new WebSocket('ws://localhost:9/c/' + id + '/ws'); }; return true",
                                                   contentWorld: .page)
+        handToSink()
+        var framesWhenDrawn = -1
+        sink.onReused = { reused = true; framesWhenDrawn = self.sinkFrames.count }
         host.retarget(webView, to: "beta")
         XCTAssertEqual(host.channelId, "beta")
         XCTAssertNil(host.lastFrame, "alpha's state is forgotten, never replayed as beta's")
-        frames = []
-        try await waitFor("beta's frames") { self.frames.count >= 3 }
         try await waitFor("the switch to report drawn") { reused }
-        XCTAssertTrue(frames.allSatisfy { $0 == "frame from /c/beta/ws" }, "\(frames)")
+        // A view reveals a beat after its first frame: mid-switch that beat
+        // must not start before the new canvas has drawn. So beta's first
+        // frame arrives together with "drawn", not ahead of it.
+        XCTAssertEqual(framesWhenDrawn, 1, "frames held until the new canvas drew, then the latest one")
+        try await waitFor("beta's frames") { self.sinkFrames.count >= 3 }
+        XCTAssertTrue(sinkFrames.allSatisfy { $0 == "frame from /c/beta/ws" }, "\(sinkFrames)")
         let path = try await webView.evaluateJavaScript("location.pathname + location.search") as? String
         XCTAssertEqual(path, "/channel/beta?chrome=off")
     }
 
-    /// A reload after a switch boots for the channel it is on now.
+    /// A scene that mounts no new canvas (asleep, a gate) still reaches the
+    /// chrome: the hold gives up after `switchHoldMax`, well before the
+    /// switch's own 2.5 s timeout.
+    func testHeldFramesAreReleasedWhenNoCanvasComes() async throws {
+        _ = try await webView.callAsyncJavaScript("window.noCanvas = true; return true", contentWorld: .page)
+        handToSink()
+        let start = Date()
+        host.retarget(webView, to: "beta")
+        try await waitFor("beta's frame without a canvas") { !self.sinkFrames.isEmpty }
+        let waited = Date().timeIntervalSince(start)
+        XCTAssertLessThan(waited, 2.2, "released by the hold's own bound, not the switch timeout")
+        XCTAssertEqual(sinkFrames.first, "frame from /c/beta/ws")
+    }
+
+    /// Once moved off its first channel, a page with no view showing it says
+    /// nothing: its own callbacks belong to the first channel's page, which
+    /// must never hear the new channel's frames.
+    func testARetargetedPageWithNoViewTellsTheOldPageNothing() async throws {
+        handToSink()
+        var reused = false
+        sink.onReused = { reused = true }
+        host.retarget(webView, to: "beta")
+        try await waitFor("the switch") { reused }
+        frames = []
+        host.sink = nil                     // parked, or spared for adoption
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(frames, [], "alpha's page heard beta: \(frames.prefix(3))")
+    }
+
+    /// Retarget replaces the page's scripts with one fresh bootstrap, so a
+    /// later load (process restart, retry) boots the tap again. (A public
+    /// bootstrap names no channel; the URL a reload uses is the pushed one.)
     func testRetargetRewritesTheBootstrapForLaterLoads() {
         host.retarget(webView, to: "beta")
         let scripts = webView.configuration.userContentController.userScripts
