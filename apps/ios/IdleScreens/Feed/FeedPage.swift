@@ -416,6 +416,7 @@ struct FeedPage: View {
                 }
                 .onChange(of: liveWebPainted) { _, painted in
                     guard painted else { liveStillGone = false; return }
+                    SwipeTiming.mark("live revealing")
                     Task { @MainActor in
                         try? await Task.sleep(for: .seconds(0.5))
                         if liveWebPainted { liveStillGone = true }

@@ -180,6 +180,7 @@
 		DAF53EE2FBE295964F3FD6C7 /* ChannelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAB9A024E1DD1E74FF1607B8 /* ChannelSession.swift */; };
 		DCD1BEC449A2A8D13CB856CC /* AquariumField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E10925C4120BAB0BA07888 /* AquariumField.swift */; };
 		DD03C6F087E55B9994741FB3 /* HomeSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71EDB676A59798A0FAB07300 /* HomeSections.swift */; };
+		DD7E18BA8F4C363872657B86 /* WebSceneRetargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB1411138F04EDA172DF5D8 /* WebSceneRetargetTests.swift */; };
 		DF8A7035A12B4E95BFF21BD8 /* PreviewBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EA16DECCBE319A1BBDEC0E /* PreviewBudget.swift */; };
 		DFB9C1F3E2E9B38962D65457 /* TankLoadStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA07A29CBBAE70666F7B22A7 /* TankLoadStateTests.swift */; };
 		E0B44B30A86B89BAE7187B4B /* PairClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9290BC579DBCC0BF2ED620D /* PairClient.swift */; };
@@ -309,6 +310,7 @@
 		4A0FD8A32D296A30EDC867CE /* WatchFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchFeedView.swift; sourceTree = "<group>"; };
 		4A88C730E2ED055EB1FB0901 /* PairCodeField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairCodeField.swift; sourceTree = "<group>"; };
 		4B196648F747F39DE5CCAC24 /* ChannelSurfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSurfTests.swift; sourceTree = "<group>"; };
+		4BB1411138F04EDA172DF5D8 /* WebSceneRetargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSceneRetargetTests.swift; sourceTree = "<group>"; };
 		4C408BF670E35B5612FAB86D /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
 		4D7E436C9C0F1504197A67E9 /* ChannelFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelFeed.swift; sourceTree = "<group>"; };
 		4E7F929E9D6DB9F6B7C78FA6 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -500,6 +502,7 @@
 				8D65D00811C93D1EB5088770 /* WebHostedViewerTests.swift */,
 				817AF4C5394F2B7E6090588F /* WebRemoteLinkTests.swift */,
 				25991C9226373806DB93E2A6 /* WebScenePoolTests.swift */,
+				4BB1411138F04EDA172DF5D8 /* WebSceneRetargetTests.swift */,
 			);
 			path = IdleScreensTests;
 			sourceTree = "<group>";
@@ -1193,6 +1196,7 @@
 				48EAD1116ADD5778FCFD709C /* WebHostedViewerTests.swift in Sources */,
 				FA5E3F955BEEA636034A423B /* WebRemoteLinkTests.swift in Sources */,
 				FA741F1B3125A9D0E8985480 /* WebScenePoolTests.swift in Sources */,
+				DD7E18BA8F4C363872657B86 /* WebSceneRetargetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

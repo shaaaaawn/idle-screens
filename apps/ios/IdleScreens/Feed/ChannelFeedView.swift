@@ -115,6 +115,7 @@ struct ChannelFeedView: View {
             // selected page the same page again. `scrollPosition(id:)` alone
             // does not: an id set before its row is laid out is dropped.
             .onChange(of: order) { _, _ in resync(reader) }
+            .onChange(of: selection) { _, id in SwipeTiming.start("channel \(id ?? "-")") }
             .onChange(of: channels) { _, refreshed in
                 if order.isEmpty { order = refreshed.map(\.id) }
                 if selection == nil || !refreshed.contains(where: { $0.id == selection }) {

@@ -157,7 +157,7 @@ final class HostedSessionTests: XCTestCase {
 final class WebSceneDelegateConformanceTests: XCTestCase {
     func testWebKitCanActuallyCallTheNavigationPolicy() {
         let coordinator = WebSceneView.Coordinator(
-            baseURL: URL(string: "https://idlescreens.com")!, onFrame: { _ in }, onFailure: {})
+            channelId: "lobby", baseURL: URL(string: "https://idlescreens.com")!, onFrame: { _ in }, onFailure: {})
         let policy = NSSelectorFromString("webView:decidePolicyForNavigationAction:decisionHandler:")
         XCTAssertTrue(coordinator.responds(to: policy),
                       "navigation policy is not visible to WebKit — check the handler's exact type")
