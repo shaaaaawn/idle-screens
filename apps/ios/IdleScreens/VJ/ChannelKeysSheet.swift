@@ -88,7 +88,15 @@ struct ChannelKeysSheet: View {
                                 }
                             }
                             .swipeActions {
-                                Button("Revoke", role: .destructive) { revoke(grant) }
+                                // Not `role: .destructive`: that makes the List
+                                // drop the row the moment it's tapped, before
+                                // the server's confirm is answered — and a
+                                // later removeAll then deletes it a second
+                                // time (UICollectionView "invalid number of
+                                // items" crash). The confirm alert is the
+                                // destructive gate; the row goes on success.
+                                Button("Revoke") { revoke(grant) }
+                                    .tint(Color.appDanger)
                             }
                         }
                     }
