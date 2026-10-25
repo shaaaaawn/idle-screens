@@ -694,6 +694,12 @@ struct WebSceneView: UIViewRepresentable {
         /// WebKit renders out of process. A scene heavy enough to kill its
         /// renderer kills THAT process — the app survives, and asks again.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The reload boots a new document: what the old one drew is gone,
+            // so a view coming back must wait for the new first frame
+            // (`cameBack` reads `lastFrame`) instead of revealing a blank page.
+            sawFrame = false
+            lastFrame = nil
+            painted = false
             webView.reload()
         }
     }

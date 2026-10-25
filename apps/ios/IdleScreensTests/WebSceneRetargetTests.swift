@@ -261,6 +261,20 @@ final class WebSceneRetargetTests: XCTestCase {
         XCTAssertEqual(reused, 1)
     }
 
+    /// The renderer died and the page reloads: it has drawn nothing yet, so a
+    /// return must not report it drawn.
+    func testRendererRestartForgetsWhatWasDrawn() async throws {
+        host.receive(["kind": "frame", "body": "x", "socket": WebSceneView.Coordinator.socketPath("alpha")])
+        XCTAssertNotNil(host.lastFrame)
+        host.webViewWebContentProcessDidTerminate(webView)
+        XCTAssertNil(host.lastFrame)
+        var reused = false
+        host.onReused = { reused = true }
+        host.cameBack(1, in: webView)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(reused, "revealed a reloading page")
+    }
+
     /// Retarget replaces the page's scripts with one fresh bootstrap, so a
     /// later load (process restart, retry) boots the tap again. (A public
     /// bootstrap names no channel; the URL a reload uses is the pushed one.)
