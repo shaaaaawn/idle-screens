@@ -59,6 +59,12 @@ struct WebSceneView: UIViewRepresentable {
     /// Reusing an already-loaded page from `WebScenePool`: it has painted
     /// before this view ever appeared, so nothing needs to wait for it.
     var onReused: (() -> Void)? = nil
+    /// Bump each time this view comes back on screen while its web view never
+    /// left (a lazy stack keeps a page mounted one swipe away). A page that has
+    /// already drawn says so again (`onReused`), once it is back on screen and
+    /// composited — otherwise nothing re-reveals it until its socket next
+    /// sends a frame, 9 s+ on a quiet channel (2026-10-25).
+    var returnCount: Int = 0
     /// Keep this page warm in `WebScenePool` when it leaves the screen. Off
     /// for a 3D tank — one of those running at a time is the rule.
     var poolable: Bool = true
@@ -80,6 +86,7 @@ struct WebSceneView: UIViewRepresentable {
         coordinator.onAssets = onAssets
         coordinator.onPinned = onPinned
         coordinator.onFish = onFish
+        coordinator.returned = returnCount
         return coordinator
     }
 
@@ -109,17 +116,9 @@ struct WebSceneView: UIViewRepresentable {
             SwipeTiming.mark("web view reused from pool")
             host.sink = coordinator
             coordinator.host = host
-            // Replay what it already said once it is back on screen and drawn:
-            // a re-attached web view shows black until its layer composites
-            // again (caught at 30 fps, 2026-10-16), and revealing it sooner
-            // flashed a dark frame.
-            // So: ask the page. Two of ITS animation frames after it is back in
-            // a window, it has composited; a guessed 0.12 s was not enough.
+            // Replay what it already said once it is back on screen and drawn.
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(16))   // let it attach
-                _ = try? await webView.callAsyncJavaScript(
-                    "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
-                    contentWorld: .page)
+                await Self.composited(webView)
                 // Parked mid-switch: the switch itself reports, once drawn.
                 if host.switching { return }
                 if let frame = host.lastFrame { coordinator.onFrame(frame) }
@@ -153,6 +152,18 @@ struct WebSceneView: UIViewRepresentable {
                                  sceneId: sceneId, delegate: coordinator)
         if poolable { coordinator.startSnapshots(of: webView, channelId: channelId, sceneId: sceneId) }
         return webView
+    }
+
+    /// Returns once a web view just back on screen has composited again: a
+    /// re-attached web view shows black until its layer draws (caught at 30
+    /// fps, 2026-10-16), and revealing it sooner flashed a dark frame. So: ask
+    /// the page. Two of ITS animation frames after it is back, it has drawn; a
+    /// guessed 0.12 s was not enough.
+    static func composited(_ webView: WKWebView) async {
+        try? await Task.sleep(for: .milliseconds(16))   // let it attach
+        _ = try? await webView.callAsyncJavaScript(
+            "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
+            contentWorld: .page)
     }
 
     /// One configured, loading web view for a channel page. Shared by the
@@ -201,6 +212,7 @@ struct WebSceneView: UIViewRepresentable {
         context.coordinator.onFish = onFish
         context.coordinator.onReused = onReused
         context.coordinator.onFailure = onFailure
+        if let webView = container.webView { context.coordinator.cameBack(returnCount, in: webView) }
         guard let webView = container.webView,
               context.coordinator.loaded != (channelId, reloadCount) else { return }
         context.coordinator.loaded = (channelId, reloadCount)
@@ -498,6 +510,33 @@ struct WebSceneView: UIViewRepresentable {
 
         static func socketPath(_ channelId: String) -> String { "/c/\(channelId)/ws" }
 
+        /// The view's `returnCount` last seen.
+        var returned = 0
+
+        /// The view came back on screen with this page still in it (a new
+        /// `returnCount`). Nothing was rebuilt, so nothing else would tell it
+        /// the page is drawn: say so again (`onReused`) once the page has
+        /// composited — if it had drawn this channel BEFORE it came back, and
+        /// is not mid-switch (the switch reports itself). A page still
+        /// loading is left to its first frame (`onFrame`), which waits for the
+        /// canvas: two frames of a page that is still booting would reveal
+        /// the bare page. A later return supersedes this one.
+        func cameBack(_ count: Int, in webView: WKWebView) {
+            guard count != returned else { return }
+            returned = count
+            let host = self.host ?? self
+            guard host.lastFrame != nil, !host.switching else { return }
+            Task { @MainActor [weak self, weak webView] in
+                guard let webView else { return }
+                await WebSceneView.composited(webView)
+                guard let self, count == self.returned else { return }
+                let host = self.host ?? self
+                guard host.lastFrame != nil, !host.switching else { return }
+                SwipeTiming.mark("back on screen, drawn")
+                self.onReused?()
+            }
+        }
+
         /// Move this page to another channel without loading anything: the
         /// site switches channel on `popstate` (ChannelViewer), dropping the
         /// old channel's socket and opening the new one's in the same
@@ -655,6 +694,12 @@ struct WebSceneView: UIViewRepresentable {
         /// WebKit renders out of process. A scene heavy enough to kill its
         /// renderer kills THAT process — the app survives, and asks again.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The reload boots a new document: what the old one drew is gone,
+            // so a view coming back must wait for the new first frame
+            // (`cameBack` reads `lastFrame`) instead of revealing a blank page.
+            sawFrame = false
+            lastFrame = nil
+            painted = false
             webView.reload()
         }
     }
