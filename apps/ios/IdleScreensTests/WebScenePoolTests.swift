@@ -80,6 +80,19 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertFalse(pool.has(channelId: "studio", sceneId: nil))
     }
 
+    /// Adopted and parked again under its new channel, the page is not the
+    /// spare any more: the old timer must not take it.
+    func testAReParkedPageOutlivesTheGraceItWasSparedWith() async throws {
+        let pool = WebScenePool.shared
+        pool.adoptionGrace = .milliseconds(50)
+        park(pool, "studio", nil)
+        pool.drain(channelId: "studio")
+        let (webView, host) = try XCTUnwrap(pool.adopt(forChannel: "lobby"))
+        pool.park(.init(channelId: "lobby", sceneId: nil, keyed: false), webView: webView, host: host)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(pool.has(channelId: "lobby", sceneId: nil))
+    }
+
     /// Leaving the feed (drain all) spares nothing.
     func testDrainingEverythingSparesNothing() {
         let pool = WebScenePool.shared
@@ -105,7 +118,8 @@ final class WebScenePoolTests: XCTestCase {
     /// so the page being left is taken straight out of its (still mounted)
     /// view. That view is left empty, and never hands over its own channel.
     func testHandOverTakesThePageOnScreenOutOfItsView() {
-        let pool = WebScenePool.shared
+        // Its own pool: the test host's feed has a live page on screen in the shared one.
+        let pool = WebScenePool()
         let coordinator = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
         coordinator.host = coordinator
         let container = SceneHostView()

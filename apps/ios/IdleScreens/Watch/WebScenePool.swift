@@ -158,7 +158,7 @@ final class WebScenePool {
         for entry in gone {
             if channelId != nil, entry.key.sceneId == nil, !entry.key.keyed {
                 idle.append(entry)
-                expire(entry.webView, after: adoptionGrace)
+                expire(entry, after: adoptionGrace)
             } else {
                 Self.teardown(entry.webView)
             }
@@ -170,12 +170,15 @@ final class WebScenePool {
         snapshotOrder.removeAll { stale.contains($0) }
     }
 
-    /// Tear `webView` down after `delay` unless something took it meanwhile.
-    private func expire(_ webView: WKWebView, after delay: Duration) {
-        Task { @MainActor [weak self, weak webView] in
+    /// Tear a spared page down after `delay` unless something took it
+    /// meanwhile. Matched on page AND key: a page adopted and parked again
+    /// under its new channel is a different entry, with a full life ahead.
+    private func expire(_ spared: Entry, after delay: Duration) {
+        let key = spared.key
+        Task { @MainActor [weak self, weak webView = spared.webView] in
             try? await Task.sleep(for: delay)
             guard let self, let webView,
-                  let index = self.idle.firstIndex(where: { $0.webView === webView }) else { return }
+                  let index = self.idle.firstIndex(where: { $0.webView === webView && $0.key == key }) else { return }
             Self.teardown(self.idle.remove(at: index).webView)
         }
     }

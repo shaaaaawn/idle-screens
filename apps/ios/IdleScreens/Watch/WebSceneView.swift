@@ -516,6 +516,11 @@ struct WebSceneView: UIViewRepresentable {
                 if drawn as? Bool == true || self.sawFrame {
                     SwipeTiming.mark("switched in place, drawn")
                     self.out.onReused?()
+                } else if webView.isLoading {
+                    // The page answered by navigating itself (an old site's
+                    // reload): that load is already the channel, booted by
+                    // the bootstrap above. Loading again would race it.
+                    SwipeTiming.mark("switch in place became a reload")
                 } else {
                     // The page never switched (a site too old to, or a broken
                     // page): load the channel the ordinary way.
