@@ -66,6 +66,15 @@ struct ScreenSaverView: View {
                         .id("\(app.selectedChannelId ?? "")|bed|\(timelineKey)")
                         .transition(.opacity)
                 }
+                // The scene being replaced keeps drawing (over the bed, under
+                // the incoming scene) for the length of the dissolve
+                // (TVAppState.OutgoingScene).
+                if let out = app.outgoing {
+                    outgoingRenderer(out)
+                        .opacity(app.outgoingOpacity)
+                        .id("outgoing|\(out.id)")
+                        .transition(.identity)
+                }
                 Group {
                     switch app.effectiveTier {
                     case .t3:
@@ -101,8 +110,11 @@ struct ScreenSaverView: View {
                 // crossfade — true spec-lerp morph is a follow-up).
                 // …and a channel change dissolves too, so surfing reads as
                 // turning a dial rather than a hard reload.
-                .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")|\(timelineKey)")
-                .transition(.opacity)
+                .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")|\(timelineKey)|\(app.sceneRevision)")
+                // In: fade up over the outgoing scene. Out: gone at once — a
+                // renderer being removed stops drawing, so the outgoing copy
+                // underneath carries the old picture instead.
+                .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
 
             if let overlay = app.overlayText {
@@ -123,6 +135,10 @@ struct ScreenSaverView: View {
         .animation(.easeInOut(duration: max(0.001, app.sequenceCrossfade)),
                    value: app.sequenceSegmentKey)
         .animation(.easeInOut(duration: 0.45), value: app.selectedChannelId)
+        // A new scene on the same channel dissolves too (sceneRevision is in the
+        // renderer id above), over the agent's transition, default 0.8 s.
+        .animation(app.sceneCrossfade > 0 ? .easeInOut(duration: app.sceneCrossfade) : nil,
+                   value: app.sceneRevision)
         .animation(.easeInOut(duration: 0.45), value: app.timeline)
         // Stepping through time is slower than reading a label: keep the
         // chrome up while the viewer is in the past, so "this is not live"
@@ -153,6 +169,31 @@ struct ScreenSaverView: View {
         .onTapGesture { revealChrome() }
         .onAppear { revealChrome() }
         .onDisappear { chromeTask?.cancel() }
+    }
+
+    /// The scene being replaced, drawn under the incoming one for the dissolve.
+    @ViewBuilder private func outgoingRenderer(_ out: TVAppState.OutgoingScene) -> some View {
+        ZStack {
+            // The old sequence's bed goes with it: the incoming scene replaces
+            // or clears the live bed at once, which would pull the ground out
+            // from under the dissolve.
+            if let bed = out.bed {
+                if app.effectiveTier == .t3 {
+                    NativeSceneView(layers: bed.layers, background: bed.background, ghosting: bed.ghosting,
+                                    renderClass: app.renderClass, tier: .t3, clockOffset: bed.elapsed)
+                } else {
+                    SpriteSceneView(layers: bed.layers, background: bed.background, clockOffset: bed.elapsed)
+                }
+            }
+            if app.effectiveTier == .t3 {
+                NativeSceneView(layers: out.layers, background: out.background, ghosting: out.ghosting,
+                                renderClass: app.renderClass, tier: .t3, transparentGround: out.transparent,
+                                clockOffset: out.elapsed)
+            } else {
+                SpriteSceneView(layers: out.layers, background: out.background,
+                                transparentGround: out.transparent, clockOffset: out.elapsed)
+            }
+        }
     }
 
     /// The bed's renderer: the same tier ladder as a scene, opaque ground,

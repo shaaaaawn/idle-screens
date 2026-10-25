@@ -38,6 +38,9 @@ struct NativeSceneView: View {
     /// Paint no ground: the view composites over whatever is beneath it —
     /// a sequence segment over its bed.
     var transparentGround: Bool = false
+    /// Seconds the scene has already been running: a copy kept drawing under
+    /// its replacement carries the original's clock instead of restarting at 0.
+    var clockOffset: TimeInterval = 0
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -57,7 +60,7 @@ struct NativeSceneView: View {
         TimelineView(.animation(minimumInterval: tier == .t3 ? nil : 1.0 / 30.0,
                                 paused: paused)) { context in
             Canvas { ctx, size in
-                let t = context.date.timeIntervalSince(start)
+                let t = context.date.timeIntervalSince(start) + clockOffset
                 draw(into: &ctx, size: size, t: t)
             }
             .onChange(of: context.date) { _, newDate in
