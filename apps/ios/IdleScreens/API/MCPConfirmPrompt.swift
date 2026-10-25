@@ -33,8 +33,35 @@ enum MCPConfirmPrompt {
     /// The confirmer the apps install on their `MCPClient`.
     static let confirmer: MCPConfirmer = { request in await ask(request) }
 
+    /// One alert at a time. Two server replies can land back to back (two
+    /// revokes started in the keyring); presenting the second while the first
+    /// is still opening makes UIKit drop it, and its continuation would never
+    /// resume. Later asks wait here until the earlier alert has been answered.
+    @MainActor private static var busy = false
+    @MainActor private static var waiters: [CheckedContinuation<Void, Never>] = []
+
+    @MainActor
+    private static func acquire() async {
+        if busy {
+            await withCheckedContinuation { waiters.append($0) }
+        } else {
+            busy = true
+        }
+    }
+
+    @MainActor
+    private static func release() {
+        if waiters.isEmpty {
+            busy = false
+        } else {
+            waiters.removeFirst().resume()   // hand off; `busy` stays true
+        }
+    }
+
     @MainActor
     static func ask(_ request: MCPConfirmationRequest) async -> Bool {
+        await acquire()
+        defer { release() }
         guard let presenter = topViewController() else { return false }
         let (title, action) = labels(for: request.tool)
         return await withCheckedContinuation { continuation in
