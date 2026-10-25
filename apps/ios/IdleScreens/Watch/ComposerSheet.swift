@@ -102,13 +102,28 @@ struct ComposerSheet: View {
             Spacer()
             if canSteer {
                 action("shuffle") {
-                    _ = try? await app.shuffleSeed(for: channelId)
-                    note = "reseeded"
+                    await attempt(done: "reseeded") { _ = try await app.shuffleSeed(for: channelId) }
                 }
                 action(session.sleeping ? "play.fill" : "pause.fill") {
-                    try? await app.setSleeping(!session.sleeping, for: channelId)
+                    let sleeping = !session.sleeping
+                    await attempt(done: sleeping ? "paused" : "playing") {
+                        try await app.setSleeping(sleeping, for: channelId)
+                    }
                 }
             }
+        }
+    }
+
+    /// Run one write and say how it went in `note`. A refusal shows the
+    /// server's own sentence (never swallowed); a confirmation the person
+    /// declined shows nothing, because nothing happened.
+    private func attempt(done: String?, _ op: () async throws -> Void) async {
+        do {
+            try await op()
+            if let done { note = done }
+        } catch where error.isMCPCancellation {
+        } catch {
+            note = error.mcpDisplayText
         }
     }
 
@@ -188,10 +203,11 @@ struct ComposerSheet: View {
         Task {
             defer { busy = false }
             do {
-                try await app.mcp.recall(channelId: channelId, token: token, presetName: name)
+                try await app.mcp.recallScene(channelId: channelId, token: token, presetName: name)
                 note = "recalled “\(name)”"
+            } catch where error.isMCPCancellation {
             } catch {
-                note = "couldn't recall “\(name)”"
+                note = "couldn't recall “\(name)”: \(error.mcpDisplayText)"
             }
         }
     }
@@ -206,8 +222,9 @@ struct ComposerSheet: View {
             do {
                 try await app.mcp.savePreset(channelId: channelId, token: token, name: name)
                 note = "saved “\(name)”"
+            } catch where error.isMCPCancellation {
             } catch {
-                note = "couldn't save “\(name)”"
+                note = "couldn't save “\(name)”: \(error.mcpDisplayText)"
             }
         }
     }
@@ -223,8 +240,9 @@ struct ComposerSheet: View {
                         Button {
                             busy = true
                             Task {
-                                try? await app.adoptScene(from: channel.id, into: channelId)
-                                note = "now playing \(channel.displayLabel)"
+                                await attempt(done: "now playing \(channel.displayLabel)") {
+                                    try await app.adoptScene(from: channel.id, into: channelId)
+                                }
                                 busy = false
                             }
                         } label: {
@@ -267,7 +285,7 @@ struct ComposerSheet: View {
                     overlayText = ""
                     busy = true
                     Task {
-                        try? await app.sendOverlay(text, to: channelId)
+                        await attempt(done: nil) { try await app.sendOverlay(text, to: channelId) }
                         busy = false
                     }
                 }
@@ -293,10 +311,11 @@ struct ComposerSheet: View {
             Button {
                 busy = true
                 Task {
-                    if let credential = try? await app.remix(channelId) {
+                    do {
+                        let credential = try await app.remix(channelId)
                         note = "created \(credential.label) — steer it from Create"
-                    } else {
-                        note = "couldn't remix — try again"
+                    } catch {
+                        note = "couldn't remix: \(error.mcpDisplayText)"
                     }
                     busy = false
                 }

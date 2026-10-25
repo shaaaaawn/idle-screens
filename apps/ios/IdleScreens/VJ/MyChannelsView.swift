@@ -344,7 +344,7 @@ private struct NewChannelSheet: View {
                     onCreated("")
                 }
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.mcpDisplayText
             }
         }
     }

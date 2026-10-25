@@ -302,6 +302,58 @@ struct MCPResponse: Decodable {
     struct Result: Decodable {
         let content: [Content]
         let isError: Bool?
+        /// Only `structuredContent.error` is read. Every success carries a
+        /// `structuredContent` of the tool's own shape too, so this decodes
+        /// leniently: an object it doesn't recognise is nil, never a failure
+        /// of the whole response.
+        let structuredContent: Structured?
+
+        private enum CodingKeys: String, CodingKey { case content, isError, structuredContent }
+
+        init(content: [Content], isError: Bool?, structuredContent: Structured? = nil) {
+            self.content = content
+            self.isError = isError
+            self.structuredContent = structuredContent
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            content = try c.decode([Content].self, forKey: .content)
+            isError = try? c.decodeIfPresent(Bool.self, forKey: .isError)
+            structuredContent = (try? c.decodeIfPresent(Structured.self, forKey: .structuredContent)) ?? nil
+        }
+    }
+
+    struct Structured: Decodable {
+        let error: ErrorEnvelope?
+
+        private enum CodingKeys: String, CodingKey { case error }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            error = (try? c.decodeIfPresent(ErrorEnvelope.self, forKey: .error)) ?? nil
+        }
+    }
+
+    /// The server's one error shape: `{code, message, retryable, hint, docs}`,
+    /// plus `requestState` on `confirmation_required`.
+    struct ErrorEnvelope: Decodable {
+        let code: String?
+        let message: String?
+        let hint: String?
+        let retryable: Bool?
+        let requestState: String?
+
+        private enum CodingKeys: String, CodingKey { case code, message, hint, retryable, requestState }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            code = try? c.decodeIfPresent(String.self, forKey: .code)
+            message = try? c.decodeIfPresent(String.self, forKey: .message)
+            hint = try? c.decodeIfPresent(String.self, forKey: .hint)
+            retryable = try? c.decodeIfPresent(Bool.self, forKey: .retryable)
+            requestState = try? c.decodeIfPresent(String.self, forKey: .requestState)
+        }
     }
 
     struct Content: Decodable {
