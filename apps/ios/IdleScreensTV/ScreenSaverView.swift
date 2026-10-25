@@ -171,8 +171,7 @@ struct ScreenSaverView: View {
         .onDisappear { chromeTask?.cancel() }
     }
 
-    /// The bed's renderer: the same tier ladder as a scene, opaque ground,
-    /// its own ghosting, and no watchdog — the segment over it reports.
+    /// The scene being replaced, drawn under the incoming one for the dissolve.
     @ViewBuilder private func outgoingRenderer(_ out: TVAppState.OutgoingScene) -> some View {
         if app.effectiveTier == .t3 {
             NativeSceneView(layers: out.layers, background: out.background, ghosting: out.ghosting,
@@ -182,6 +181,8 @@ struct ScreenSaverView: View {
         }
     }
 
+    /// The bed's renderer: the same tier ladder as a scene, opaque ground,
+    /// its own ghosting, and no watchdog — the segment over it reports.
     @ViewBuilder private var bedRenderer: some View {
         if app.effectiveTier == .t3 {
             NativeSceneView(layers: app.bedScene, background: app.bedBackground,
