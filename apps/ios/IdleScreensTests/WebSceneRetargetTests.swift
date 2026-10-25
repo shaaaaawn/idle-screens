@@ -160,6 +160,22 @@ final class WebSceneRetargetTests: XCTestCase {
         XCTAssertEqual(sinkFrames.first, "frame from /c/beta/ws")
     }
 
+    /// Held frames carry different news (a snapshot, then a sleep): all of
+    /// them reach the chrome, in order, when the switch draws.
+    func testEveryHeldFrameIsDeliveredInOrder() async throws {
+        _ = try await webView.callAsyncJavaScript("window.noCanvas = true; return true", contentWorld: .page)
+        handToSink()
+        host.retarget(webView, to: "beta")
+        let socket = WebSceneView.Coordinator.socketPath("beta")
+        for body in ["snapshot", "sleep"] {
+            host.receive(["kind": "frame", "body": body, "socket": socket])
+        }
+        XCTAssertEqual(sinkFrames, [], "held while the switch is in flight")
+        try await waitFor("the hold to release") { self.sinkFrames.contains("sleep") }
+        let mine = sinkFrames.filter { $0 == "snapshot" || $0 == "sleep" }
+        XCTAssertEqual(mine, ["snapshot", "sleep"], "\(sinkFrames)")
+    }
+
     /// Once moved off its first channel, a page with no view showing it says
     /// nothing: its own callbacks belong to the first channel's page, which
     /// must never hear the new channel's frames.

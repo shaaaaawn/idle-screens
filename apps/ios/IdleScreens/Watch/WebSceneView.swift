@@ -452,6 +452,17 @@ struct WebSceneView: UIViewRepresentable {
         /// Mid-switch frames are held (see `receive`); never longer than this.
         static let switchHoldMax: Duration = .seconds(1)
         private var holdRelease: Task<Void, Never>?
+        /// Every frame held mid-switch, in order: they carry different news (a
+        /// snapshot, then a sleep or overlay), so the chrome gets all of them,
+        /// not just the latest. Bounded; past it the middle is dropped, never
+        /// the first (the snapshot) or the newest.
+        private var heldFrames: [String] = []
+        private static let heldFramesMax = 64
+        private func flushHeldFrames() {
+            let frames = heldFrames
+            heldFrames = []
+            for frame in frames { out?.onFrame(frame) }
+        }
         var snapshotTask: Task<Void, Never>?
 
         /// Keep `WebScenePool`'s picture of this page fresh while it is on
@@ -510,6 +521,7 @@ struct WebSceneView: UIViewRepresentable {
             retargeted = true
             holdRelease?.cancel()
             holdRelease = nil
+            heldFrames = []
             switchGeneration += 1
             let generation = switchGeneration
             // A later load of this view (process restart, the native retry, the
@@ -527,11 +539,10 @@ struct WebSceneView: UIViewRepresentable {
                 guard let self, let webView, generation == self.switchGeneration else { return }
                 self.holdRelease?.cancel()
                 self.holdRelease = nil
-                let held = self.switching ? self.lastFrame : nil
                 self.switching = false
                 if drawn as? Bool == true || self.sawFrame {
                     SwipeTiming.mark("switched in place, drawn")
-                    if let held { self.out?.onFrame(held) }
+                    self.flushHeldFrames()
                     self.out?.onReused?()
                 } else if webView.isLoading {
                     // The page answered by navigating itself (an old site's
@@ -556,7 +567,7 @@ struct WebSceneView: UIViewRepresentable {
                       self.switching else { return }
                 SwipeTiming.mark("switch hold released")
                 self.switching = false
-                if let frame = self.lastFrame { self.out?.onFrame(frame) }
+                self.flushHeldFrames()
             }
         }
 
@@ -587,6 +598,8 @@ struct WebSceneView: UIViewRepresentable {
                 // a gate) would otherwise keep the chrome deaf for the whole
                 // switch timeout.
                 if switching {
+                    if heldFrames.count >= Self.heldFramesMax { heldFrames.remove(at: 1) }
+                    heldFrames.append(body)
                     if holdRelease == nil { releaseHeldFrame(after: Self.switchHoldMax) }
                     return
                 }
