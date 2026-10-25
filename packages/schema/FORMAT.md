@@ -903,9 +903,12 @@ mount: a steer on an animated path shows there until that path's next key
 after the mount, while screens that saw it live have already moved on. Inside
 a `sync: 'epoch'` sequence every viewer shares the channel's clock (the
 idlescreens.com viewer passes `sequenceBaseT` from idle-server PR 247 on), so
-the screens agree. A timed scene on its own, or a `mount` sequence, runs on
-each screen's own clock, so screens mounted at different times can briefly
-disagree on such a path.
+playback lines up. That aligns playback, not steers: a steer is still armed at
+the receiving screen's current time rather than the server stamp, so a stored
+track replayed at a later mount can still hold a path until a different key
+than a screen that saw it live. A timed scene on its own, or a `mount`
+sequence, runs on each screen's own clock, so screens mounted at different
+times can briefly disagree on such a path.
 
 **One format for both use cases.** An ambient scene is a SaverSpec without a
 timeline — nothing about it changes. A timed piece (an ident, a film, a
