@@ -201,6 +201,66 @@ final class WebSceneRetargetTests: XCTestCase {
         XCTAssertEqual(frames, [], "alpha's page heard beta: \(frames.prefix(3))")
     }
 
+    // MARK: Back on screen (`returnCount`)
+
+    /// A page that stayed mounted while its view was off screen (a lazy stack
+    /// one swipe away) says it is drawn again when the view comes back — once
+    /// per return, after the page has composited.
+    func testComingBackOnScreenSaysDrawnAgain() async throws {
+        var reused = 0
+        host.onReused = { reused += 1 }
+        host.cameBack(1, in: webView)
+        try await waitFor("the return to report drawn") { reused == 1 }
+        host.cameBack(1, in: webView)       // an ordinary update: not a return
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(reused, 1)
+        host.cameBack(2, in: webView)
+        try await waitFor("the next return") { reused == 2 }
+    }
+
+    /// Nothing drawn yet (a page still loading, as on a view's very first
+    /// appearance): a return says nothing, even when the first frame lands
+    /// during the wait — that frame comes a beat before the canvas paints,
+    /// and the first-frame path (`onFrame`) is what waits for it.
+    func testComingBackBeforeAnyFrameSaysNothing() async throws {
+        var reused = false
+        let fresh = WebSceneView.Coordinator(channelId: "gamma", baseURL: base, onFrame: { _ in }, onFailure: {})
+        fresh.onReused = { reused = true }
+        fresh.cameBack(1, in: webView)
+        fresh.receive(["kind": "frame", "body": "first", "socket": WebSceneView.Coordinator.socketPath("gamma")])
+        XCTAssertNotNil(fresh.lastFrame)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(reused, "revealed on a frame that arrived after the return")
+    }
+
+    /// Mid-switch the page still shows the channel it left: the return stays
+    /// quiet, and the switch reports once the new canvas has drawn.
+    func testComingBackMidSwitchLeavesItToTheSwitch() async throws {
+        _ = try await webView.callAsyncJavaScript("window.noCanvas = true; return true", contentWorld: .page)
+        handToSink()
+        sink.host = host
+        var reused = false
+        sink.onReused = { reused = true }
+        host.retarget(webView, to: "beta")
+        try await waitFor("beta's first (held) frame") { self.host.lastFrame != nil }
+        sink.cameBack(1, in: webView)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(host.switching, "still inside the hold")
+        XCTAssertFalse(reused, "revealed the page before the new channel drew")
+    }
+
+    /// Back and away and back again before the page answers: only the latest
+    /// return reports.
+    func testALaterReturnSupersedesAnEarlierOne() async throws {
+        var reused = 0
+        host.onReused = { reused += 1 }
+        host.cameBack(1, in: webView)
+        host.cameBack(2, in: webView)
+        try await waitFor("the latest return") { reused >= 1 }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(reused, 1)
+    }
+
     /// Retarget replaces the page's scripts with one fresh bootstrap, so a
     /// later load (process restart, retry) boots the tap again. (A public
     /// bootstrap names no channel; the URL a reload uses is the pushed one.)

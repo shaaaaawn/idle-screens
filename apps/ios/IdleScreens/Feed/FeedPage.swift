@@ -59,6 +59,11 @@ struct FeedPage: View {
     /// gating on that showed the site's bare black page for ~1 s.
     @State private var liveWebPainted = false
     @State private var liveStillGone = false
+    /// The live web view is on screen, and how many times it has come back.
+    /// Swiping into a past scene native draws keeps it mounted one page away,
+    /// so a return builds nothing: the count is what has it re-reveal.
+    @State private var liveOnScreen = false
+    @State private var liveReturns = 0
     /// Last session's picture of this channel, chosen once on appearing and
     /// held until the live scene paints over it. Re-checking it against each
     /// refresh pulled it mid-launch whenever the channel had been steered
@@ -398,21 +403,27 @@ struct FeedPage: View {
                     },
                     onAssets: { liveTank.report($0) },
                     onFish: { liveTank.reportFish($0, want: $1) },
-                    onReused: { liveWebPainted = true },
+                    // Never off screen: a reveal that lands after a swipe away
+                    // would come back already revealed (see onDisappear).
+                    onReused: { if liveOnScreen { liveWebPainted = true } },
+                    returnCount: liveReturns,
                     poolable: !isTank,
                     onFailure: { session.hostFailed() }
                 )
                 .ignoresSafeArea()
                 // Hidden until the first frame proves the page is live, so a
                 // slow load shows the channel's colour, not a blank sheet.
-                .onAppear { liveWebPainted = false; liveStillGone = false }
+                .onAppear {
+                    liveWebPainted = false; liveStillGone = false
+                    liveOnScreen = true; liveReturns &+= 1
+                }
                 // Reset on the way OUT too. Left set, the next return mounted
                 // the web view already "revealed" with the still removed, and a
                 // re-attached web view draws black for a frame before onAppear
                 // runs — the dark frame on every swipe back to live.
                 .onDisappear {
                     var quiet = Transaction(); quiet.disablesAnimations = true
-                    withTransaction(quiet) { liveWebPainted = false; liveStillGone = false; liveTankRevealed = false; liveTankStandInGone = false }
+                    withTransaction(quiet) { liveOnScreen = false; liveWebPainted = false; liveStillGone = false; liveTankRevealed = false; liveTankStandInGone = false }
                 }
                 .onChange(of: liveWebPainted) { _, painted in
                     guard painted else { liveStillGone = false; return }
