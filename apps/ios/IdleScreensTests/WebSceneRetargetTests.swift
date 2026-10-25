@@ -131,15 +131,25 @@ final class WebSceneRetargetTests: XCTestCase {
                                                   contentWorld: .page)
         handToSink()
         var framesWhenDrawn = -1
-        sink.onReused = { reused = true; framesWhenDrawn = self.sinkFrames.count }
+        var drawnAt: Date?
+        sink.onReused = { reused = true; framesWhenDrawn = self.sinkFrames.count; drawnAt = Date() }
+        // Stamp the sink's first frame: held frames are flushed in the same
+        // turn as "drawn", so the two stamps coincide; unheld, the first
+        // frame lands a whole canvas delay (300 ms) earlier.
+        var firstFrameAt: Date?
+        let record = sink.onFrame
+        sink.onFrame = { if firstFrameAt == nil { firstFrameAt = Date() }; record($0) }
         host.retarget(webView, to: "beta")
         XCTAssertEqual(host.channelId, "beta")
         XCTAssertNil(host.lastFrame, "alpha's state is forgotten, never replayed as beta's")
         try await waitFor("the switch to report drawn") { reused }
         // A view reveals a beat after its first frame: mid-switch that beat
-        // must not start before the new canvas has drawn. So beta's first
-        // frame arrives together with "drawn", not ahead of it.
-        XCTAssertEqual(framesWhenDrawn, 1, "frames held until the new canvas drew, then the latest one")
+        // must not start before the new canvas has drawn. So beta's frames
+        // (every one held, in order) arrive together with "drawn", not ahead
+        // of it: the sink hears nothing until then, then the whole backlog.
+        XCTAssertGreaterThanOrEqual(framesWhenDrawn, 1, "the held frames are delivered with drawn")
+        let lead = try XCTUnwrap(drawnAt).timeIntervalSince(try XCTUnwrap(firstFrameAt))
+        XCTAssertLessThan(lead, 0.1, "the sink's first frame came \(lead)s ahead of drawn")
         try await waitFor("beta's frames") { self.sinkFrames.count >= 3 }
         XCTAssertTrue(sinkFrames.allSatisfy { $0 == "frame from /c/beta/ws" }, "\(sinkFrames)")
         let path = try await webView.evaluateJavaScript("location.pathname + location.search") as? String
