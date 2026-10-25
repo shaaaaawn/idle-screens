@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// Root state for the tvOS viewer: gallery, channel selection, WS lifecycle,
 /// capability tier, and the latest scene data.
@@ -227,6 +228,11 @@ final class TVAppState {
     // MARK: WS lifecycle
 
     func selectChannel(_ channelId: String, from surface: ChannelSurface = .grid) {
+        // Surfing dissolves channel into channel (0.45 s, the selectedChannelId
+        // animation): keep the one you're leaving drawing under the next.
+        if selectedChannelId != nil, selectedChannelId != channelId {
+            beginCrossfade(seconds: renderClass == .legacy ? 0.3 : 0.45)
+        }
         presentingSurface = surface
         selectedChannelId = channelId
         sleeping = false
@@ -542,8 +548,16 @@ final class TVAppState {
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed):
+        case .scene(let spec, let seed, let transition):
             if let spec {
+                // A new scene on the channel: the renderer identity changes, so
+                // the player dissolves old into new instead of swapping layers
+                // in place at the old clock (a hard cut).
+                if timeline == .live {
+                    sceneCrossfade = Self.crossfadeSeconds(transition, renderClass: renderClass)
+                    beginCrossfade(seconds: sceneCrossfade)
+                    sceneRevision &+= 1
+                }
                 applySpec(spec, fallbackSeed: seed)
             }
         case .sleep:
@@ -667,6 +681,65 @@ final class TVAppState {
     private(set) var activeSequence: SequenceSubset?
     private var sequenceEpoch: Date?
     private var sequenceTask: Task<Void, Never>?
+    /// Bumps on every live scene message (publish, recall, scheduled entry):
+    /// part of the renderer identity, so a new scene dissolves in.
+    private(set) var sceneRevision = 0
+    /// How long that dissolve takes (0 = a cut).
+    private(set) var sceneCrossfade: TimeInterval = SceneTransition.defaultSeconds
+
+    /// The scene being replaced, still drawing (and animating) UNDER the
+    /// incoming one until the dissolve ends. A renderer SwiftUI is removing
+    /// stops drawing at once, so a plain `.transition(.opacity)` dissolved
+    /// through black (measured on the simulator: the old scene went to black
+    /// in one frame, the new one rose from it). Native tiers only.
+    struct OutgoingScene {
+        let id: Int
+        let layers: [CompiledLayer]
+        let background: SpecSubset.Background?
+        let ghosting: Double
+        /// Over a bed (or with no ground) the scene is see-through: it must fade
+        /// out too, or it would pop off at the end. Opaque, it holds at full
+        /// opacity under the incoming scene, which is a true crossfade.
+        let transparent: Bool
+    }
+    private(set) var outgoing: OutgoingScene?
+    private(set) var outgoingOpacity: Double = 1
+    private var outgoingTask: Task<Void, Never>?
+    private var outgoingSerial = 0
+
+    /// Keep what is on screen drawing under whatever replaces it, for `seconds`.
+    private func beginCrossfade(seconds: TimeInterval) {
+        outgoingTask?.cancel()
+        guard seconds > 0, !compiledScene.isEmpty, !isClassicSpec,
+              effectiveTier == .t3 || effectiveTier == .t2 else {
+            outgoing = nil
+            return
+        }
+        outgoingSerial &+= 1
+        let transparent = hasBed || specBackground == nil
+        outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
+                                 ghosting: specGhosting, transparent: transparent)
+        outgoingOpacity = 1
+        let serial = outgoingSerial
+        outgoingTask = Task { @MainActor [weak self] in
+            if transparent {
+                try? await Task.sleep(for: .milliseconds(30))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: seconds)) { self?.outgoingOpacity = 0 }
+            }
+            try? await Task.sleep(for: .seconds(seconds + 0.15))
+            guard !Task.isCancelled, self?.outgoingSerial == serial else { return }
+            self?.outgoing = nil
+        }
+    }
+
+    /// Two renderers are alive while one dissolves into the other: keep it
+    /// short on the oldest hardware we support.
+    nonisolated static func crossfadeSeconds(_ transition: SceneTransition?, renderClass: RenderClass) -> TimeInterval {
+        let want = SceneTransition.seconds(for: transition)
+        return renderClass == .legacy ? min(want, 0.4) : want
+    }
+
     /// Key of the on-screen segment — the player crossfades on change.
     private(set) var sequenceSegmentKey: String?
     /// Crossfade duration entering the current segment (0 = hard cut).
@@ -720,7 +793,11 @@ final class TVAppState {
         let resolved = seq.resolve(at: T)
         let segment = seq.segments[resolved.index]
         sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
-        sequenceSegmentKey = segment.key ?? "segment-\(resolved.index)"
+        let nextKey = segment.key ?? "segment-\(resolved.index)"
+        if sequenceSegmentKey != nil, sequenceSegmentKey != nextKey, sequenceCrossfade > 0 {
+            beginCrossfade(seconds: sequenceCrossfade)
+        }
+        sequenceSegmentKey = nextKey
         let scene = segment.scene
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)

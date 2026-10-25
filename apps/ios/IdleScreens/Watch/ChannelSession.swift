@@ -154,7 +154,7 @@ final class ChannelSession {
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 decode(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed):
+        case .scene(let spec, let seed, _):
             if let spec { decode(spec, fallbackSeed: seed) }
         case .sleep:
             sleeping = true
