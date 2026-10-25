@@ -120,6 +120,8 @@ struct WebSceneView: UIViewRepresentable {
                 _ = try? await webView.callAsyncJavaScript(
                     "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
                     contentWorld: .page)
+                // Parked mid-switch: the switch itself reports, once drawn.
+                if host.switching { return }
                 if let frame = host.lastFrame { coordinator.onFrame(frame) }
                 if let assets = host.lastAssets { coordinator.onAssets?(assets) }
                 if let fish = host.lastFish { coordinator.onFish?(fish, host.lastWant) }
@@ -441,7 +443,26 @@ struct WebSceneView: UIViewRepresentable {
         /// shows is still the channel it left (or nothing).
         private(set) var switching = false
         private var switchGeneration = 0
-        private var out: Coordinator { sink ?? self }
+        /// Moved to another channel at least once (`retarget`). Its own
+        /// callbacks then belong to the view it was built for — a different
+        /// channel's page — so with no view showing it (parked, spared) it
+        /// says nothing, rather than telling that page another channel's news.
+        private var retargeted = false
+        private var out: Coordinator? { sink ?? (retargeted ? nil : self) }
+        /// Mid-switch frames are held (see `receive`); never longer than this.
+        static let switchHoldMax: Duration = .seconds(1)
+        private var holdRelease: Task<Void, Never>?
+        /// Every frame held mid-switch, in order: they carry different news (a
+        /// snapshot, then a sleep or overlay), so the chrome gets all of them,
+        /// not just the latest. Bounded; past it the middle is dropped, never
+        /// the first (the snapshot) or the newest.
+        private var heldFrames: [String] = []
+        private static let heldFramesMax = 64
+        private func flushHeldFrames() {
+            let frames = heldFrames
+            heldFrames = []
+            for frame in frames { out?.onFrame(frame) }
+        }
         var snapshotTask: Task<Void, Never>?
 
         /// Keep `WebScenePool`'s picture of this page fresh while it is on
@@ -497,6 +518,10 @@ struct WebSceneView: UIViewRepresentable {
             lastWant = nil
             painted = false
             switching = true
+            retargeted = true
+            holdRelease?.cancel()
+            holdRelease = nil
+            heldFrames = []
             switchGeneration += 1
             let generation = switchGeneration
             // A later load of this view (process restart, the native retry, the
@@ -512,10 +537,13 @@ struct WebSceneView: UIViewRepresentable {
                 let drawn = try? await webView?.callAsyncJavaScript(
                     WebSceneView.switchScript, arguments: ["path": path], in: nil, contentWorld: .page)
                 guard let self, let webView, generation == self.switchGeneration else { return }
+                self.holdRelease?.cancel()
+                self.holdRelease = nil
                 self.switching = false
                 if drawn as? Bool == true || self.sawFrame {
                     SwipeTiming.mark("switched in place, drawn")
-                    self.out.onReused?()
+                    self.flushHeldFrames()
+                    self.out?.onReused?()
                 } else if webView.isLoading {
                     // The page answered by navigating itself (an old site's
                     // reload): that load is already the channel, booted by
@@ -527,6 +555,19 @@ struct WebSceneView: UIViewRepresentable {
                     SwipeTiming.mark("switch in place failed, loading")
                     webView.load(URLRequest(url: url))
                 }
+            }
+        }
+
+        /// Give up holding: stop switching and say what the page last said.
+        private func releaseHeldFrame(after delay: Duration) {
+            let generation = switchGeneration
+            holdRelease = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled, generation == self.switchGeneration,
+                      self.switching else { return }
+                SwipeTiming.mark("switch hold released")
+                self.switching = false
+                self.flushHeldFrames()
             }
         }
 
@@ -548,20 +589,34 @@ struct WebSceneView: UIViewRepresentable {
                 guard payload["socket"] as? String == Self.socketPath(channelId) else { return }
                 if !sawFrame { sawFrame = true; SwipeTiming.mark("first socket frame") }
                 lastFrame = body
-                out.onFrame(body)
+                // Mid-switch, the frame waits for the new canvas (delivered with
+                // `onReused`): a view reveals a beat after its first frame, and
+                // in a switched page that beat can land before the canvas has
+                // drawn — a fade over the bare page, a dark dip (caught at 30
+                // fps, 2026-10-25).
+                // Bounded, though: a scene that mounts no new canvas (asleep,
+                // a gate) would otherwise keep the chrome deaf for the whole
+                // switch timeout.
+                if switching {
+                    if heldFrames.count >= Self.heldFramesMax { heldFrames.remove(at: 1) }
+                    heldFrames.append(body)
+                    if holdRelease == nil { releaseHeldFrame(after: Self.switchHoldMax) }
+                    return
+                }
+                out?.onFrame(body)
             // A count, clamped: the page is untrusted, and this only ever
             // decides how long a loading animation plays.
             case "assets":
-                if let n = Int(body) { lastAssets = max(0, min(n, 99)); SwipeTiming.mark("assets pending \(n)"); out.onAssets?(lastAssets!) }
+                if let n = Int(body) { lastAssets = max(0, min(n, 99)); SwipeTiming.mark("assets pending \(n)"); out?.onAssets?(lastAssets!) }
             case "fish", "want":
                 guard let n = Int(body) else { break }
                 if kind == "fish" { lastFish = max(0, min(n, 999)) } else { lastWant = max(0, min(n, 999)) }
                 SwipeTiming.mark("fish \(lastFish ?? 0)/\(lastWant.map(String.init) ?? "?")")
-                out.onFish?(lastFish ?? 0, lastWant)
+                out?.onFish?(lastFish ?? 0, lastWant)
             case "pinned":
                 SwipeTiming.mark("pinned scene painted")
                 painted = true
-                out.onPinned?()
+                out?.onPinned?()
             default: break
             }
         }
@@ -589,10 +644,10 @@ struct WebSceneView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
-                     withError error: Error) { out.onFailure() }
+                     withError error: Error) { out?.onFailure() }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!,
-                     withError error: Error) { out.onFailure() }
+                     withError error: Error) { out?.onFailure() }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { SwipeTiming.mark("page committed") }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { SwipeTiming.mark("page loaded") }
