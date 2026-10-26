@@ -1441,5 +1441,9 @@ layers); and `lobby-talk` (one screen of a quarter-in-review, every text
 layer `role: "read"`, zero advisories — readable copy over additive
 atmosphere); and `thermal-field` (a `field` background in six riso inks,
 `quantize: 6`, warped and drifting, under a handful of screened motes, with
-a grain-and-dither `finish` — the ground is the piece and the paper shows). See [`src/examples/`](./src/examples/). The dashboard exercises the
+a grain-and-dither `finish` — the ground is the piece and the paper shows); and
+`ink-tide` (the motion vocabulary in one scene: a pen line that draws itself
+on with `stroke.draw` eased `out` and erases eased `in`, a boat that `rock`s on
+a clock, and a caption that lifts in with `reveal.rise` — its rock period
+divides the 30 s lap, so `loop-seam` stays quiet). See [`src/examples/`](./src/examples/). The dashboard exercises the
 static/HUD subset at scale (34 layers of keyed, positioned text).
