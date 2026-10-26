@@ -105,6 +105,29 @@ final class MCPContractTests: XCTestCase {
         XCTAssertEqual(overlay["ttl"] as? Int, 4000)
     }
 
+    func testDeleteChannelIsTheServerToolWithIntentAndAsksWhenTheServerDoes() async throws {
+        let transport = MockTransport()
+        let calls = Asked()   // reused as a call counter
+        transport.handler = { _ in
+            calls.requests.append(MCPConfirmationRequest(tool: "deleteChannel", message: ""))
+            return calls.requests.count == 1
+                ? (Self.confirmReply, 200)
+                : (Self.reply(text: #"{"ok":true,"deleted":"c"}"#), 200)
+        }
+        let asked = Asked()
+        let mcp = client(transport, confirmer: { request in asked.requests.append(request); return true })
+        try await mcp.deleteChannel(channelId: "c", token: "isk_owner")
+
+        XCTAssertEqual(try transport.requests.map { try toolName($0) }, ["deleteChannel", "deleteChannel"])
+        let firstArgs = try args(transport.requests[0])
+        XCTAssertEqual(firstArgs["channelId"] as? String, "c")
+        XCTAssertEqual(firstArgs["token"] as? String, "isk_owner")
+        XCTAssertEqual(firstArgs["intent"] as? String, "owner deleted the channel from the iPhone app")
+        XCTAssertNil(firstArgs["confirm"])
+        XCTAssertEqual(try args(transport.requests[1])["confirm"] as? String, "cfm1.123.abc")
+        XCTAssertEqual(asked.requests.count, 1, "the server's own question is put to the person once")
+    }
+
     func testReadsAreNotAttributed() async throws {
         let transport = MockTransport()
         transport.handler = { _ in (Self.reply(text: #"{"access":"public","tokens":[]}"#), 200) }

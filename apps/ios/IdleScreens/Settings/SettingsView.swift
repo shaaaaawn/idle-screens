@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var keysFor: ChannelCredential?
     @State private var removing: ChannelCredential?
     @State private var confirmingRemoval = false
+    /// Owner keys can end the channel itself, not just forget it here.
+    @State private var deleteError: String?
     /// Collapsed by default: a list of secrets is not the first thing this
     /// page should show, and it grows with every channel.
     @State private var keysExpanded = false
@@ -53,6 +55,12 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { removing = nil }
         } message: {
             Text("The channel keeps running. Without a backup of this key, this device — and every device synced with it — can no longer steer it.")
+        }
+        .alert("Couldn't delete the channel", isPresented: Binding(
+            get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
         }
     }
 
@@ -196,7 +204,21 @@ struct SettingsView: View {
                 }
             }
             Button(role: .destructive) { removing = credential; confirmingRemoval = true } label: {
-                Label("Remove from this device", systemImage: "trash")
+                Label("Remove from this device", systemImage: "key.slash")
+            }
+            if token != nil, role == .owner {
+                // The server asks before it deletes — every time, naming what
+                // goes and whether screens are watching — so there is no
+                // second dialog here; that read as asking twice.
+                Button(role: .destructive) {
+                    Task {
+                        do { try await app.deleteChannel(credential) }
+                        catch where error.isMCPCancellation {}
+                        catch { deleteError = error.mcpDisplayText }
+                    }
+                } label: {
+                    Label("Delete channel…", systemImage: "trash")
+                }
             }
         } label: {
             HStack(spacing: 12) {

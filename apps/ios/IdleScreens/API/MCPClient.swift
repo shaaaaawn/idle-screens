@@ -390,6 +390,16 @@ actor MCPClient {
         ], intent: "user paused the channel from the \(identity.surface) remote")
     }
 
+    /// Delete a channel for good: scene, history, timeline and schedule. Owner
+    /// key only (the server refuses any other), and the server may ask first
+    /// (`confirmation_required`), which `callTool` puts to the person.
+    func deleteChannel(channelId: String, token: String) async throws {
+        try await callTool("deleteChannel", arguments: [
+            "channelId": .string(channelId),
+            "token": .string(token),
+        ], intent: "owner deleted the channel from the \(identity.surface) app")
+    }
+
     func wakeChannel(channelId: String, token: String) async throws {
         try await callTool("wakeChannel", arguments: [
             "channelId": .string(channelId),

@@ -170,6 +170,21 @@ extension AppState {
         store.removeToken(for: credential.channelId)
     }
 
+    /// Delete a channel on the server — owner key only — then forget it here:
+    /// the key (and so every device it synced to), the wall's copy, and any
+    /// page still warm. "Remove from this device" leaves the channel running;
+    /// this is the one that ends it.
+    func deleteChannel(_ credential: ChannelCredential) async throws {
+        guard let token = store.token(for: credential.channelId) else {
+            throw MissingKeyError(label: credential.label)
+        }
+        try await mcp.deleteChannel(channelId: credential.channelId, token: token)
+        removeChannel(credential)
+        channels.removeAll { $0.id == credential.channelId }
+        if follows.isFollowing(credential.channelId) { _ = follows.toggle(credential.channelId) }
+        WebScenePool.shared.drain(channelId: credential.channelId)
+    }
+
     // MARK: Deck operations
 
     func loadSavers() async {
@@ -233,4 +248,10 @@ extension AppState {
     private static func randomSeed() -> Int {
         Int.random(in: 0...Int(Int32.max))
     }
+}
+
+/// Deleting needs the channel's key, and this device doesn't hold it.
+struct MissingKeyError: LocalizedError {
+    let label: String
+    var errorDescription: String? { "The key for \(label) isn't on this device." }
 }
