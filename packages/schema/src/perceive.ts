@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -576,7 +576,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (!part.stroke) return [];
       const hw = (part.stroke.width * radius) / 2;
       const out: Array<Array<{ x: number; y: number }>> = [];
-      for (const l of part.flat.lines) {
+      for (const l of strokeLines(part)) {
         const m = l.points.map(([u, v]) => mapUnit(u, v));
         const n = l.closed ? m.length : m.length - 1;
         for (let i = 0; i < n; i++) {
@@ -683,8 +683,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         continue;
       }
       if (s.kind === 'stroke') {
-        // Stamp along the sampled path, rotated like the renderer does.
-        const pts = strokeSamples(s, sz / 2);
+        // Stamp along the sampled path (cut to its `draw` span), rotated like the renderer does.
+        const pts = strokeDrawnSamples(s, sz / 2);
         let angle = rotationAt(e, tPass) + paintRotation(spec, layer);
         if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
         const ca = Math.cos(angle);
@@ -702,6 +702,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         // Rasterize each segment at half-cell steps so a long stroke leaves a
         // continuous line of ink, not a dotted one.
         const step = Math.min(cellW, cellH) / 2;
+        if (pts.length < 2) continue; // a `draw` span that paints nothing
         stampAt(pts[0]!, 0);
         for (let i = 1; i < pts.length; i++) {
           const q0 = pts[i - 1]!;
@@ -1266,7 +1267,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       }
       else if (s.kind === 'stroke') {
         const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
-        entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
+        entArea = pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);

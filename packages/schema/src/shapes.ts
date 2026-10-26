@@ -9,7 +9,7 @@
  * `length` for strokes), so the seeded size range is the glyph's bounding
  * diameter — the same rule `circle.radius` / `streak.length` already follow.
  */
-import type { PathGradient, PathPart, PathStroke, SpriteSpec } from './types';
+import type { PathGradient, PathPart, PathStroke, SpriteSpec, StrokeDraw } from './types';
 
 export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' | 'bar' }>;
 export type BarSprite = Extract<SpriteSpec, { kind: 'bar' }>;
@@ -139,6 +139,13 @@ export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Ar
   return out;
 }
 
+/** A stroke sprite's sampled path as painted: `strokeSamples`, cut to its `draw` span when it has one. */
+export function strokeDrawnSamples(s: StrokeSprite, halfSize: number): Array<{ x: number; y: number }> {
+  const pts = strokeSamples(s, halfSize);
+  const span = drawSpan(s.draw);
+  return span ? trimPolyline(pts, span[0], span[1]) : pts;
+}
+
 /** Total length of a sampled path, px. */
 export function pathLength(pts: Array<{ x: number; y: number }>): number {
   let l = 0;
@@ -148,6 +155,94 @@ export function pathLength(pts: Array<{ x: number; y: number }>): number {
     l += Math.sqrt(dx * dx + dy * dy);
   }
   return l;
+}
+
+/**
+ * The [start, end] arc-length fractions a `draw` paints, clamped to 0..1 — or
+ * null when it paints the whole line (absent, or 0..1), so the caller keeps
+ * its untrimmed (cached) geometry.
+ */
+export function drawSpan(d: StrokeDraw | undefined): [number, number] | null {
+  if (!d) return null;
+  const a = Math.max(0, Math.min(1, d.start ?? 0));
+  const b = Math.max(0, Math.min(1, d.end ?? 1));
+  return a <= 0 && b >= 1 ? null : [a, b];
+}
+
+/** The stretch of a polyline between arc-length fractions `a` and `b` (a ≥ b ⇒ empty). Endpoints are interpolated. */
+export function trimPolyline(pts: Array<{ x: number; y: number }>, a: number, b: number): Array<{ x: number; y: number }> {
+  if (pts.length < 2 || b <= a) return [];
+  const total = pathLength(pts);
+  if (!(total > 0)) return [];
+  const from = a * total;
+  const to = b * total;
+  const out: Array<{ x: number; y: number }> = [];
+  let run = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1]!;
+    const q = pts[i]!;
+    const seg = Math.hypot(q.x - p.x, q.y - p.y);
+    const s0 = run;
+    const s1 = run + seg;
+    run = s1;
+    if (s1 < from || seg <= 0) continue;
+    if (s0 > to) break;
+    const at = (s: number): { x: number; y: number } => {
+      const k = Math.max(0, Math.min(1, (s - s0) / seg));
+      return { x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k };
+    };
+    if (out.length === 0) out.push(s0 >= from ? { x: p.x, y: p.y } : at(from));
+    out.push(s1 <= to ? { x: q.x, y: q.y } : at(to));
+    if (s1 >= to) break;
+  }
+  return out.length >= 2 ? out : [];
+}
+
+/**
+ * A part's subpaths cut to a `draw` span: the lines are one pen run in draw
+ * order (a closed ring counts its closing edge), so `end` sweeps through the
+ * first subpath, then the next. A trimmed ring comes back open; untouched
+ * lines are returned as they were. Memoised per (lines, span).
+ */
+export function trimLines(lines: Array<{ points: Array<[number, number]>; closed: boolean }>, a: number, b: number): Array<{ points: Array<[number, number]>; closed: boolean }> {
+  const key = `${a}|${b}`;
+  let byLines = trimCache.get(lines);
+  const hit = byLines?.get(key);
+  if (hit) return hit;
+  const lens = lines.map((l) => {
+    const pts = l.points.map(([x, y]) => ({ x, y }));
+    if (l.closed && pts.length > 1) pts.push(pts[0]!);
+    return pathLength(pts);
+  });
+  const total = lens.reduce((m, v) => m + v, 0);
+  const out: Array<{ points: Array<[number, number]>; closed: boolean }> = [];
+  if (total > 0 && b > a) {
+    const from = a * total;
+    const to = b * total;
+    let run = 0;
+    lines.forEach((l, i) => {
+      const len = lens[i]!;
+      const s0 = run;
+      run += len;
+      if (len <= 0 || run < from || s0 > to) return;
+      if (s0 >= from && run <= to) { out.push(l); return; }
+      const pts = l.points.map(([x, y]) => ({ x, y }));
+      if (l.closed && pts.length > 1) pts.push(pts[0]!);
+      const cut = trimPolyline(pts, (Math.max(from, s0) - s0) / len, (Math.min(to, run) - s0) / len);
+      if (cut.length >= 2) out.push({ points: cut.map((q) => [q.x, q.y] as [number, number]), closed: false });
+    });
+  }
+  if (!byLines) { byLines = new Map(); trimCache.set(lines, byLines); }
+  if (byLines.size > 64) byLines.clear();
+  byLines.set(key, out);
+  return out;
+}
+const trimCache = new WeakMap<object, Map<string, Array<{ points: Array<[number, number]>; closed: boolean }>>>();
+
+/** A part's stroke lines as drawn: its subpaths, cut to its stroke's `draw` span when it has one. */
+export function strokeLines(part: { flat: { lines: Array<{ points: Array<[number, number]>; closed: boolean }> }; stroke?: PathStroke }): Array<{ points: Array<[number, number]>; closed: boolean }> {
+  const span = drawSpan(part.stroke?.draw);
+  return span ? trimLines(part.flat.lines, span[0], span[1]) : part.flat.lines;
 }
 
 /**
@@ -403,7 +498,7 @@ export function partInkArea(part: ResolvedPart, sx: number, sy: number, r: numbe
   const fill = part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x: x * sx, y: y * sy }))) * part.opacity : 0;
   let stroke = 0;
   if (part.stroke && part.stroke.width > 0) {
-    for (const l of part.flat.lines) {
+    for (const l of strokeLines(part)) {
       const pts = l.points.map(([x, y]) => ({ x: x * sx, y: y * sy }));
       if (l.closed && pts.length > 1) pts.push(pts[0]!);
       stroke += pathLength(pts) * part.stroke.width * r;
@@ -930,7 +1025,7 @@ export function partStrokeQuads(part: ResolvedPart, radius: number): Array<Array
   if (!part.stroke) return [];
   const hw = (part.stroke.width * radius) / 2;
   const out: Array<Array<{ x: number; y: number }>> = [];
-  for (const l of part.flat.lines) {
+  for (const l of strokeLines(part)) {
     const pts = l.points;
     const n = l.closed ? pts.length : pts.length - 1;
     for (let i = 0; i < n; i++) {

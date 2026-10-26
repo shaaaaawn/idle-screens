@@ -198,11 +198,23 @@ export interface TimelineKey {
   path: string;
   /** The target value; the key must still validate when applied. */
   value: unknown;
-  /** Default `smooth`. */
-  ease?: 'step' | 'linear' | 'smooth';
+  /** Default `smooth`. See `GlideEase`. */
+  ease?: GlideEase;
   /** Glide length in ms, starting at `t`. Default 1000 (as live steering); 0 = a cut. */
   dur?: number;
 }
+
+/**
+ * How a glide moves between its two values. `smooth` (default) starts and
+ * ends at rest; `linear` is constant speed; `step` holds, then switches at
+ * the glide's end. `in` accelerates from rest and arrives at speed (a
+ * departure); `out` leaves at speed and decelerates into place (an
+ * arrival); `spring` is a critically damped spring — a fast start that
+ * settles with no overshoot, so every value stays between its two ends.
+ * Every ease is monotone, so a glide never leaves the range its endpoints
+ * bound. **Native:** an ease it does not know reads as `smooth`.
+ */
+export type GlideEase = 'step' | 'linear' | 'smooth' | 'in' | 'out' | 'spring';
 
 /**
  * Authored change on the scene's own clock — keyframes. A scene without a
@@ -497,6 +509,8 @@ export type SpriteSpec =
       curve?: 'smooth' | 'linear';
       taper?: boolean;
       orient?: boolean;
+      /** Draw-on: the stretch of the mark that is painted — see `StrokeDraw`. Absent ⇒ the whole mark. */
+      draw?: StrokeDraw;
       colors?: string[];
       colorWeights?: number[];
     }
@@ -871,8 +885,23 @@ export type PathGradient =
   | { type: 'radial'; center: [number, number]; radius: number; focus?: [number, number]; stops: PathGradientStop[]; units?: 'box' | 'part' };
 export interface PathGradientStop { at: number; color: string; opacity?: number }
 
-/** An outline drawn along every subpath of a path polygon (open ones too). `width` is in unit-box units. */
-export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square' }
+/**
+ * An outline drawn along every subpath of a path polygon (open ones too).
+ * `width` is in unit-box units. `draw` paints only a stretch of it — see
+ * `StrokeDraw`: every subpath of the part counts as one pen line, in the
+ * order the path draws them.
+ */
+export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square'; draw?: StrokeDraw }
+
+/**
+ * Draw-on for a line: only the stretch from `start` to `end` (fractions of
+ * the line's arc length, 0..1, defaults 0 and 1) is painted, so gliding
+ * `end` from 0 to 1 draws the line on as if by a pen, and gliding `start`
+ * after it erases it from the tail. Paint: both glide under a steer, a
+ * `timeline` key or a `morph` without a rebuild. `start ≥ end` paints
+ * nothing. **Native:** ignored ⇒ the whole line.
+ */
+export interface StrokeDraw { start?: number; end?: number }
 
 /**
  * One piece of a multi-colour path drawing (`polygon.parts`), drawn back to

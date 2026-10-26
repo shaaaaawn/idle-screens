@@ -12,11 +12,13 @@ import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters,
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
+  easeGlide,
   easeSmooth,
   lerpSpec,
   lerpValue,
   readSpecPath,
   resolveSpecPath,
+  STEER_EASES,
   structuralSignature,
   textStringsDiffer,
   type SteerDelta,
@@ -28,7 +30,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -228,12 +230,14 @@ interface TimelineOverride {
   dur: number;
   until: number;
   outDur: number;
+  /** A named steer ease (`in` / `out` / `spring`) for the glide in; absent ⇒ smooth, as before eases were honoured. */
+  ease?: string;
 }
 const EXPIRED = Symbol('expired');
 
 /** An override's glide-in value at scene time `t` (before `until`). */
 function overrideHeldAt(o: TimelineOverride, t: number): unknown {
-  const k = o.dur > 0 ? easeSmooth(clamp01((t - o.t0) / o.dur)) : 1;
+  const k = o.dur > 0 ? easeGlide(o.ease, clamp01((t - o.t0) / o.dur)) : 1;
   return k >= 1 ? o.to : lerpValue(o.from, o.to, k, false, o.leaf);
 }
 
@@ -253,9 +257,24 @@ function overrideValueAt(o: TimelineOverride, t: number, timelineValue: () => un
 const steerId = (d: SteerDelta): string => `${d.t}|${JSON.stringify(d.value)}`;
 
 /** Arm one steer on a timeline scene at scene time `now` — the steering rule: held until the path's next key, or sticky when no key will touch it. */
-function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number): TimelineOverride {
+function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number, ease?: string): TimelineOverride {
   const next = nextKeyAfter(authored, path, now);
-  return { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+  const o: TimelineOverride = { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+  if (ease) o.ease = ease;
+  return o;
+}
+
+/**
+ * The ease a live steer glides with: the named ease (`in` / `out` /
+ * `spring`) of its longest delta, else undefined (smooth). The older names
+ * (`step` / `linear` / `smooth`) were carried on tracks before steers read an
+ * ease at all, so they keep meaning smooth — honouring them now would change
+ * how every stored track replays.
+ */
+function steerEase(deltas: readonly SteerDelta[]): string | undefined {
+  let best: SteerDelta | undefined;
+  for (const d of deltas) if (!best || (d.dur ?? DEFAULT_STEER_DUR) > (best.dur ?? DEFAULT_STEER_DUR)) best = d;
+  return best?.ease !== undefined && STEER_EASES.has(best.ease) ? best.ease : undefined;
 }
 
 /**
@@ -403,7 +422,7 @@ class SpecInstance implements SaverInstance {
   /** The spec currently being rendered (base spec + any applied steering). */
   private effSpec: SaverSpec;
   /** Active glide between two resolved specs (live setParam/applyTrack). */
-  private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null = null;
+  private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number; ease?: string } | null = null;
   private lastStructural = '';
   /** See `LayerPaintOverride`; null (the default, and every plain mount) draws every layer once. */
   private paintOverrides: ReadonlyMap<number, LayerPaintOverride> | null = null;
@@ -926,7 +945,8 @@ class SpecInstance implements SaverInstance {
         }
       }
       const st = part.stroke;
-      if (st && part.flat.lines.length) {
+      const lines = st ? strokeLines(part) : part.flat.lines;
+      if (st && lines.length) {
         g.globalAlpha = a0 * part.opacity * (st.opacity ?? 1);
         g.strokeStyle = st.color;
         g.lineJoin = st.join ?? 'round';
@@ -934,13 +954,16 @@ class SpecInstance implements SaverInstance {
         if (fr.uniform) {
           // Width is in unit-box units of the uniform scale r.
           g.lineWidth = (st.width * r) / fr.sx;
-          if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
-          if (cache.stroke) g.stroke(cache.stroke);
-          else { traceLines(g, part.flat.lines); g.stroke(); }
+          if (lines !== part.flat.lines) { traceLines(g, lines); g.stroke(); }
+          else {
+            if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
+            if (cache.stroke) g.stroke(cache.stroke);
+            else { traceLines(g, part.flat.lines); g.stroke(); }
+          }
         } else {
           // A stretched drawing: stroke the stretched outline in unscaled space,
           // so the line keeps one width instead of fattening along the long axis.
-          const scaled = part.flat.lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
+          const scaled = lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
           g.save();
           g.scale(1 / fr.sx, 1 / fr.sy);
           g.lineWidth = st.width * r;
@@ -1360,7 +1383,8 @@ class SpecInstance implements SaverInstance {
     }
     if (sprite.kind === 'stroke') {
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      const pts = strokeSamples(sprite, sz / 2);
+      const pts = strokeDrawnSamples(sprite, sz / 2);
+      if (pts.length < 2) return;
       const lw = strokeWidthPx(sprite, unitScale);
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -1542,7 +1566,7 @@ class SpecInstance implements SaverInstance {
     const tr = this.transition;
     if (!tr) return;
     const k = tr.dur <= 0 ? 1 : (t - tr.startT) / tr.dur;
-    this.effSpec = k >= 1 ? tr.to : lerpSpec(tr.from, tr.to, easeSmooth(k));
+    this.effSpec = k >= 1 ? tr.to : lerpSpec(tr.from, tr.to, easeGlide(tr.ease, k));
     if (k >= 1) this.transition = null;
     // Placement/motion fields are baked into entities at build time; rebuild
     // (deterministic — same seed → same stream) only when those change.
@@ -1574,6 +1598,8 @@ class SpecInstance implements SaverInstance {
       startT: this.lastT,
       dur,
     };
+    const ease = steerEase(deltas);
+    if (ease) this.transition.ease = ease;
     if (this.paused) {
       // No frames will run the glide — jump straight to the target.
       this.transition = null;
@@ -1950,7 +1976,7 @@ class SpecInstance implements SaverInstance {
       const id = steerId(d);
       if (this.seenSteers.get(path) === id) continue;
       armed.push([path, id]);
-      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide));
+      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide, d.ease !== undefined && STEER_EASES.has(d.ease) ? d.ease : undefined));
     }
     if (armed.length === 0) return true;
     // Validate the scene as it will actually be — every live override, now

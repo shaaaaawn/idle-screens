@@ -13,7 +13,7 @@
  *   exist on the spec (a key cannot create a field).
  * - A key glides from wherever its path is at `t` to `value` over `dur` ms
  *   (default 1000, the live-steering default; 0 is a cut), eased `smooth`
- *   unless it says otherwise. Overlapping glides are fine: the later one
+ *   unless it names another `GlideEase`. Overlapping glides are fine: the later one
  *   starts from the earlier one's in-flight value.
  * - Without `loop`, a path holds the base spec's value before its first key.
  * - With `loop`, time wraps every `duration` ms and a path's value before its
@@ -21,7 +21,7 @@
  *   looks exactly like lap 7 (the value depends only on `t mod duration`).
  */
 import type { SaverSpec, Timeline, TimelineKey } from './types';
-import { applyDeltasShared, applyDeltasToSpec, canonicalSpecPath, easeSmooth, lerpValue, readSpecPath } from './steer';
+import { applyDeltasShared, applyDeltasToSpec, canonicalSpecPath, easeGlide, lerpValue, readSpecPath } from './steer';
 
 /** Default glide length for a key without `dur` — the same as a live steer's. */
 export const DEFAULT_KEY_DUR = 1000;
@@ -70,10 +70,7 @@ export function timelineLocalTime(tl: Timeline, t: number): number {
 }
 
 function ease(k: TimelineKey, x: number): number {
-  const c = x <= 0 ? 0 : x >= 1 ? 1 : x;
-  if (k.ease === 'step') return c >= 1 ? 1 : 0;
-  if (k.ease === 'linear') return c;
-  return easeSmooth(c);
+  return easeGlide(k.ease, x);
 }
 
 /** One path's value at timeline-local time `tt`, starting from `start`. */

@@ -25,6 +25,7 @@ const GROUP_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const KNOWN_POSITION = new Set(['x', 'y', 'dx', 'dy']);
 const KNOWN_TIMELINE = new Set(['loop', 'duration', 'keys']);
 const KNOWN_TIMELINE_KEY = new Set(['t', 'path', 'value', 'ease', 'dur']);
+const GLIDE_EASES = new Set(['step', 'linear', 'smooth', 'in', 'out', 'spring']);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
@@ -32,7 +33,7 @@ const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colo
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
 const KNOWN_PATH_PART = new Set(['path', 'color', 'fillRule', 'fill', 'gradient', 'stroke', 'opacity']);
 const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'parts', 'span', 'origin', 'soft', 'colors', 'colorWeights']);
-const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
+const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'draw', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
@@ -49,6 +50,63 @@ const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'cen
  */
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
 const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
+/**
+ * What an author who knows another motion tool (CSS/GSAP/After Effects/
+ * Remotion) usually means by a field the format does not have, per where it
+ * was written. Appended to the unknown-property warning so the warning says
+ * what to write instead; the warning's code and path are unchanged.
+ */
+const FOREIGN_FIELD_HINTS: Record<'top' | 'layer' | 'key' | 'motion', Record<string, string>> = {
+  top: {
+    duration: "a scene has no length — loop authored change with `timeline: { loop: true, duration }`, or give a sequence segment a `duration`",
+    loop: "use `timeline: { loop: true, duration, keys }`",
+    fps: 'a scene is a pure function of time — there is no frame rate to set',
+    frameRate: 'a scene is a pure function of time — there is no frame rate to set',
+    bpm: 'there is no tempo unit — write times in ms (one beat = 60000 / bpm)',
+    tempo: 'there is no tempo unit — write times in ms (one beat = 60000 / bpm)',
+    camera: 'use a `groups.<name>.transform` (a camera over its member layers) or a layer `transform`',
+    keyframes: 'use `timeline: { keys: [{ t, path, value, dur, ease }] }`',
+    palette: 'colours live on sprites (`color`, or `colors` for a seeded per-entity pick)',
+  },
+  layer: {
+    delay: 'use `life.enter` (ms before the layer fades in)',
+    stagger: 'use `life.stagger` (ms between successive entities\' entrances)',
+    duration: 'use `life.exit` to end a layer (ms), or a sequence segment\'s `duration`',
+    ease: "eases live on timeline keys and steers (`ease: 'out'`), or on drift/rise/wander motion (`motion.ease`)",
+    easing: "eases live on timeline keys and steers (`ease: 'out'`), or on drift/rise/wander motion (`motion.ease`)",
+    rotation: 'use `rotate` (static degrees), `spin` (degrees/sec) or `rock` (a swing back and forth)',
+    wobble: 'use `rock` (a swing back and forth) or the motion\'s `bob` / `sway`',
+    sway: 'use `rock` (a swing back and forth), or `sway` on a rise motion',
+    scale: 'use `transform.scale` (paint, glides) or `grow` (breathing)',
+    fade: 'use `life.fade` (ms) or the layer\'s paint `opacity`',
+    blur: 'there is no blur — soften with `soft: true` (circle/polygon), `rect.feather`, `trail` or `ghosting`',
+    glow: "glow is `blend: 'lighter'` over soft circles",
+    keyframes: 'use the scene\'s `timeline` (keys on this layer\'s paths)',
+    animation: 'use the scene\'s `timeline` (keys on this layer\'s paths)',
+  },
+  key: {
+    duration: 'use `dur` (the glide length, ms)',
+    delay: 'use `t` (when the glide starts, ms)',
+    time: 'use `t` (when the glide starts, ms)',
+    at: 'use `t` (when the glide starts, ms)',
+    start: 'use `t` (when the glide starts, ms)',
+    easing: "use `ease` ('smooth' | 'linear' | 'step' | 'in' | 'out' | 'spring')",
+    to: 'use `value`',
+    target: 'use `value`',
+    from: 'a key glides from wherever its path is — set the starting value on the base spec',
+  },
+  motion: {
+    delay: 'use the layer\'s `life.enter`',
+    easing: "use `ease: { type: 'settle' | 'buoyant', tau }` on drift / rise / wander",
+    duration: 'only `path` motion has a `duration` (ms per lap)',
+  },
+};
+
+/** The unknown-property message, with a hint when the field is another tool's vocabulary. */
+function unknownMessage(where: keyof typeof FOREIGN_FIELD_HINTS, k: string, plain: string): string {
+  const hint = Object.prototype.hasOwnProperty.call(FOREIGN_FIELD_HINTS[where], k) ? FOREIGN_FIELD_HINTS[where][k] : undefined;
+  return hint ? `${plain} — ${hint}` : plain;
+}
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 /**
  * Every motion type's fields besides `type` — the validator's allowlist, and
@@ -274,7 +332,7 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
   }
 
   for (const k of unknownKeys(spec, KNOWN_TOP)) {
-    warn(k, 'unknown-property', `unknown top-level property '${k}' — will be ignored`);
+    warn(k, 'unknown-property', unknownMessage('top', k, `unknown top-level property '${k}' — will be ignored`));
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
@@ -389,10 +447,10 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
   tl.keys.forEach((key, i) => {
     const p = `timeline.keys[${i}]`;
     if (!isObj(key)) return err(p, 'must be an object {t, path, value, ease?, dur?}');
-    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', `unknown key property '${k}' — will be ignored`);
+    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', unknownMessage('key', k, `unknown key property '${k}' — will be ignored`));
     let ok = true;
     if (!isNum(key.t) || key.t < 0) { err(`${p}.t`, 'must be a number of ms >= 0'); ok = false; }
-    if (key.ease !== undefined && key.ease !== 'step' && key.ease !== 'linear' && key.ease !== 'smooth') err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth'");
+    if (key.ease !== undefined && !GLIDE_EASES.has(key.ease as string)) err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth' | 'in' | 'out' | 'spring'");
     if (key.dur !== undefined && (!isNum(key.dur) || key.dur < 0 || key.dur > LIMITS.maxTimelineKeyDur)) {
       err(`${p}.dur`, `must be a number of ms, 0..${LIMITS.maxTimelineKeyDur}`);
     }
@@ -615,7 +673,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else if (k === 'depth') {
       warn(`${path}.depth`, 'unknown-property', `'depth' is not a layer property — use motion type 'warp' for true perspective depth, or fake parallax with size/speed/alpha across layers`);
     } else {
-      warn(`${path}.${k}`, 'unknown-property', `unknown layer property '${k}' — will be ignored`);
+      warn(`${path}.${k}`, 'unknown-property', unknownMessage('layer', k, `unknown layer property '${k}' — will be ignored`));
     }
   }
   if (!isNum(layer.count) || !Number.isInteger(layer.count) || layer.count < 1) {
@@ -1052,6 +1110,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
     if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
     if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
+    if (sprite.draw !== undefined) validateDraw(sprite.draw, `${path}.draw`, err);
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -1316,7 +1375,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   }
 
   for (const k of unknownKeys(motion, knownSet)) {
-    warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
+    warn(`${path}.${k}`, 'unknown-property', unknownMessage('motion', k, `unknown motion property '${k}' — will be ignored`));
   }
 }
 
@@ -1409,12 +1468,23 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 
 /** A path stroke: colour, width in unit-box units, optional opacity / join / cap. */
 function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void): void {
-  if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap? }");
+  if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err);
   if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
+  if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err);
+}
+
+/** A line's draw-on span: `{ start?, end? }`, each a fraction of its arc length 0..1. */
+function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void): void {
+  if (!isObj(d)) return err(path, 'must be { start?, end? } — fractions of the line, 0..1');
+  for (const k of ['start', 'end'] as const) {
+    const v = d[k];
+    if (v !== undefined && (!isNum(v) || v < 0 || v > 1)) err(`${path}.${k}`, 'must be 0..1 (a fraction of the line\'s length)');
+  }
+  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end') err(`${path}.${k}`, `unknown draw property '${k}' — draw takes start and end`);
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
