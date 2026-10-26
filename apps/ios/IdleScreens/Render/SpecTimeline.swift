@@ -93,14 +93,30 @@ enum SpecTimeline {
         return c * c * (3 - 2 * c)
     }
 
-    private static func ease(_ k: Key, _ x: Double) -> Double {
-        let c = x <= 0 ? 0 : x >= 1 ? 1 : x
-        switch k.ease {
+    /// ω of the `spring` ease: settles to within 0.3 % of its target by the glide's end.
+    private static let springOmega = 8.0
+    private static let springEnd = 1 - (1 + springOmega) * exp(-springOmega)
+
+    /// steer.ts `easeGlide`: a glide's progress curve by name, 0 → 1 and
+    /// monotone. `in` / `out` are cubic; `spring` is the critically damped
+    /// step response normalised to land on 1; anything unknown is `smooth`.
+    static func easeGlide(_ ease: String?, _ k: Double) -> Double {
+        let c = Swift.max(0, Swift.min(1, k))
+        switch ease {
         case "step": return c >= 1 ? 1 : 0
         case "linear": return c
-        default: return easeSmooth(c)
+        case "in": return c * c * c
+        case "out": let u = 1 - c; return 1 - u * u * u
+        case "spring": return c >= 1 ? 1 : (1 - (1 + springOmega * c) * exp(-springOmega * c)) / springEnd
+        default: return c * c * (3 - 2 * c)
         }
     }
+
+    /// The eases a live steer honours (`STEER_EASES`): older names on stored
+    /// tracks keep meaning smooth.
+    static let steerEases: Set<String> = ["in", "out", "spring"]
+
+    private static func ease(_ k: Key, _ x: Double) -> Double { easeGlide(k.ease, x) }
 
     /// One path's value at timeline-local time `tt`, starting from `start`.
     private static func evalTrack(_ keys: [Key], start: JSONValue?, tt: Double, leaf: String) -> JSONValue? {
@@ -209,6 +225,14 @@ enum SpecTimeline {
             }
         }
         return node
+    }
+
+    /// steer.ts `applyDeltasToSpec`: each delta's value written at its path,
+    /// last wins; a path that does not resolve is skipped.
+    static func applyDeltas(_ spec: JSONValue, _ deltas: [(path: String, value: JSONValue)]) -> JSONValue {
+        var out = spec
+        for d in deltas { write(&out, d.path, d.value) }
+        return out
     }
 
     private static func write(_ spec: inout JSONValue, _ path: String, _ value: JSONValue) {

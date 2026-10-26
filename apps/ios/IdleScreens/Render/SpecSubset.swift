@@ -28,6 +28,9 @@ struct SpecSubset: Decodable, Equatable {
     var label: String?
     var seed: Int?
     var units: Units?
+    /// The viewport a viewport-unit scene's counts are authored at (default
+    /// 1080): counts scale by min(w,h) / referenceViewport.
+    var referenceViewport: Double?
     var background: Background?
     var layers: [Layer]
     /// 0…1 frame persistence: each frame paints over a partly-transparent
@@ -178,18 +181,51 @@ struct SpecSubset: Decodable, Equatable {
         /// `rect.feather`: the fraction of the half-size that fades out on
         /// every side (lifted out of `sprite` like textStyle).
         var rectFeather: Double?
+        /// The palette exactly as declared (`sprite.colors`): the web draws a
+        /// palette pick only when there is one, so absence must stay visible.
+        var spriteColors: [String] = []
+        /// A rect's `aspect` was declared (only then does it draw).
+        var rectAspectDeclared = false
+        /// `spin` / `rotate` came as a [min, max] range (only then do they draw).
+        var spinIsRange = false
+        var rotateIsRange = false
+        /// emoji / text `cycle.period` (ms): the variant advances over time.
+        var spriteCycle: Double?
+        /// Mirror a glyph to face its heading (drift / wander moving left).
+        var flip: Bool?
+        /// A `text` sprite's presentation (font, align, baseline, maxWidth).
+        var textSprite: TextSpriteStyle?
+        /// A stroke sprite's draw-on span (`sprite.draw`).
+        var strokeDraw: StrokeDraw?
+        /// `rock`: a swing of `amp`° either side of rest, once per `period` ms.
+        var rock: Rock?
 
         private enum CodingKeys: String, CodingKey {
             case key, count, sprite, size, motion, wrap, alpha, blend, pulse
             case spin, region, position, grow, life, layout, trail, emit, links
-            case rotate, clock, opacity, transform, group
+            case rotate, clock, opacity, transform, group, flip, rock
         }
         private struct SpriteExtras: Decodable {
+            struct Cycle: Decodable { var period: Double? }
+            var kind: String?
             var colorWeights: [Double]?
             var feather: Double?
             var anchor: String?
             var font: String?
             var opacity: Double?
+            var colors: [String]?
+            var aspect: [Double]?
+            var cycle: Cycle?
+            var align: String?
+            var baseline: String?
+            var maxWidth: Double?
+            var draw: StrokeDraw?
+        }
+        private enum RangeProbe: Decodable {
+            case range, scalar
+            init(from decoder: Decoder) throws {
+                self = (try? decoder.singleValueContainer().decode([Double].self)) != nil ? .range : .scalar
+            }
         }
 
         init(from decoder: Decoder) throws {
@@ -214,6 +250,19 @@ struct SpecSubset: Decodable, Equatable {
             links = try? c.decodeIfPresent(Links.self, forKey: .links)
             let extras = (try? c.decodeIfPresent(SpriteExtras.self, forKey: .sprite)) ?? nil
             colorWeights = extras?.colorWeights
+            spriteColors = extras?.colors ?? []
+            rectAspectDeclared = extras?.aspect != nil
+            spinIsRange = (try? c.decodeIfPresent(RangeProbe.self, forKey: .spin)) == .range
+            rotateIsRange = (try? c.decodeIfPresent(RangeProbe.self, forKey: .rotate)) == .range
+            if extras?.kind == "emoji" || extras?.kind == "text" { spriteCycle = extras?.cycle?.period }
+            flip = try? c.decodeIfPresent(Bool.self, forKey: .flip)
+            rock = try? c.decodeIfPresent(Rock.self, forKey: .rock)
+            if extras?.kind == "stroke" { strokeDraw = extras?.draw }
+            if extras?.kind == "text", extras?.font != nil || extras?.align != nil
+                || extras?.baseline != nil || extras?.maxWidth != nil {
+                textSprite = TextSpriteStyle(font: extras?.font, align: extras?.align,
+                                             baseline: extras?.baseline, maxWidth: extras?.maxWidth)
+            }
             rectFeather = extras?.feather.map { Swift.min(1, Swift.max(0, $0)) }
             if extras?.anchor != nil || extras?.font != nil || extras?.opacity != nil {
                 textStyle = TextStyle(anchor: extras?.anchor, font: extras?.font,
@@ -281,6 +330,11 @@ struct SpecSubset: Decodable, Equatable {
         init(from decoder: Decoder) throws {
             byName = (try? decoder.singleValueContainer().decode([String: LayerGroup].self)) ?? [:]
         }
+    }
+
+    struct Rock: Decodable, Equatable, Sendable {
+        var amp: Double
+        var period: Double
     }
 
     struct Clock: Decodable, Equatable, Sendable {
@@ -359,9 +413,24 @@ struct SpecSubset: Decodable, Equatable {
         var enter: Double?
         var exit: Double?
         var fade: Double?
+        /// Entity i's whole envelope shifts by i × stagger ms (a row builds).
+        var stagger: Double?
 
-        /// 0…1 opacity of the whole layer at time `t` (ms).
+        /// 0…1 opacity of the whole layer at time `t` (ms). With a stagger
+        /// this is only the layer's gate (0 before the first entity enters);
+        /// each entity's envelope is `alpha(at:entity:)`.
         func alpha(at t: Double) -> Double {
+            if let stagger, stagger != 0 { return enter.map { t < $0 ? 0 : 1 } ?? 1 }
+            return envelope(at: t)
+        }
+
+        /// Entity `i`'s share of a staggered life (1 without a stagger).
+        func alpha(at t: Double, entity i: Int) -> Double {
+            guard let stagger, stagger != 0 else { return 1 }
+            return envelope(at: t - Double(i) * stagger)
+        }
+
+        private func envelope(at t: Double) -> Double {
             let fade = self.fade ?? 1000
             var a = 1.0
             if let enter {
@@ -431,6 +500,19 @@ struct SpecSubset: Decodable, Equatable {
         var amp: Double
         /// Period in ms.
         var period: Double
+        /// A travelling wave: phase from position along `angle`° per `wavelength`.
+        var wave: Wave?
+        struct Wave: Decodable, Equatable { var wavelength: Double; var angle: Double? }
+    }
+
+    /// A `text` sprite's presentation: CSS font (family/weight, or a full
+    /// shorthand with a px size), horizontal `align` and vertical `baseline`
+    /// about the point, and a `maxWidth` it squeezes to fit.
+    struct TextSpriteStyle: Equatable, Sendable {
+        var font: String?
+        var align: String?
+        var baseline: String?
+        var maxWidth: Double?
     }
 
     /// `spin` may be a scalar or a [min, max] range.
@@ -482,6 +564,10 @@ struct SpecSubset: Decodable, Equatable {
         var closed: Bool?
         var curve: String?
         var scatter: Double?
+        /// drift / rise / wander: `settle` decelerates to rest, `buoyant`
+        /// accelerates from rest, over `tau` ms.
+        var ease: Ease?
+        struct Ease: Decodable, Equatable { var type: String; var tau: Double? }
     }
 
     /// Layer-level size breathing: size *= 1 + amp·sin(2πt/period + phase).
@@ -595,7 +681,7 @@ extension SpecSubset.Sprite: Decodable {
         case kind, glyphs, strings, color, colors, radius, width, length, aspect, soft
         case text, maxWidth, fontSize, lineHeight, align, reveal
         case sides, points, curve, taper, orient, values, thickness, max, direction
-        case path, parts, fillRule, fill, gradient, stroke, span, origin
+        case path, parts, fillRule, fill, gradient, stroke, span, origin, number
     }
 
     init(from decoder: Decoder) throws {
@@ -637,11 +723,14 @@ extension SpecSubset.Sprite: Decodable {
         case "text":
             self = .text(
                 strings: try c.decodeIfPresent([String].self, forKey: .strings) ?? ["idle screens"],
-                color: color
+                color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#e6e8ef"
             )
         case "textBlock":
+            // `number`: a locale-free counter painted instead of `text`.
+            let counter = (try? c.decodeIfPresent(TextNumber.self, forKey: .number)) ?? nil
+            let authored = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
             self = .textBlock(
-                text: try c.decodeIfPresent(String.self, forKey: .text) ?? "",
+                text: counter?.formatted ?? authored,
                 maxWidth: try c.decodeIfPresent(Double.self, forKey: .maxWidth) ?? 0.8,
                 fontSize: try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 0.03,
                 lineHeight: try c.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.4,
@@ -742,6 +831,10 @@ struct CompiledEntity: Equatable, Sendable {
     var path: PathParams?
     /// Static rotation in degrees, added to any spin.
     var rotate: Double = 0
+    /// `rock`: swing amplitude (degrees), period (ms) and phase (radians).
+    var rockAmp: Double = 0
+    var rockPeriod: Double = 1000
+    var rockPhase: Double = 0
     /// Layer clock: a shared pulse phase (radians) and a time multiplier.
     var pulsePhase: Double?
     var clockRate: Double = 1
@@ -752,6 +845,20 @@ struct CompiledEntity: Equatable, Sendable {
     var orbitParented: Bool = false
     /// Index within a `bar` layer — picks this bar's value.
     var barIndex: Int = 0
+    /// The web's `e.size` in spec units (a circle's DIAMETER): wrap margins
+    /// and bounce bounds use it.
+    var extent: Double = 0
+    /// Moving left at birth — what `flip` mirrors on.
+    var headingLeft = false
+    /// Placed in reading order by a data layout (a cycle there is a marquee).
+    var ordered = false
+    /// Position in the layer before any thinning (`life.stagger` steps by it).
+    var order = 0
+    /// emoji / text `cycle` period (ms) and, when clocked, the shared phase.
+    var cyclePeriod: Double = 0
+    var cyclePhase: Double?
+    /// drift / rise / wander travel ease.
+    var ease: MotionEase?
     /// Second dimension: rect height (already folded into `aspect`) or a
     /// bar's thickness, in spec units.
     var thickness: Double = 0
@@ -872,6 +979,19 @@ struct CompiledLayer: Equatable, Sendable {
     /// Mid-morph only: this text layer's outgoing words, painted under the
     /// incoming ones (`text: crossfade | dip`).
     var textCrossfade: TextCrossfade?
+    /// `flip`: glyphs mirror to face a leftward heading.
+    var flip: Bool = false
+    /// A `text` sprite's font / align / baseline / maxWidth.
+    var textSprite: SpecSubset.TextSpriteStyle?
+    /// A stroke sprite's draw-on span.
+    var strokeDraw: StrokeDraw?
+}
+
+/// simulate.ts `motionSeconds`: `settle` travels τ(1 − e^(−t/τ)), `buoyant`
+/// t − τ(1 − e^(−t/τ)); under `emit` t is window-local.
+struct MotionEase: Equatable, Sendable {
+    var settle: Bool
+    var tau: Double
 }
 
 /// A morph's second text pass (compile.ts `LayerPaintOverride`): the outgoing
@@ -953,13 +1073,30 @@ extension SpecSubset {
         static let preview = (layers: 24, entities: 700)
     }
 
+    /// The viewport a scene is composed for: the TV's 1920×1080 points
+    /// (every preview tile draws in that reference space too). A grid's
+    /// automatic column count and a `pulse.wave`'s phase read its aspect.
+    static let composeViewport = CGSize(width: 1920, height: 1080)
+
     /// - Parameter budget: layer and total-entity ceilings. Layers are kept in
     ///   order (background first) and thinned proportionally rather than
     ///   truncated, so a capped scene still looks like itself.
-    func compile(seed: Int, budget: (layers: Int, entities: Int) = Budget.fullscreen) -> [CompiledLayer] {
-        var rng = Mulberry32(seed: UInt32(truncatingIfNeeded: seed))
+    func compile(seed: Int, budget: (layers: Int, entities: Int) = Budget.fullscreen,
+                 viewport: CGSize = SpecSubset.composeViewport) -> [CompiledLayer] {
+        // The web's own stream (core createRng), seeded as SpecInstance seeds
+        // it (`(seed >>> 0) || 1`), so a seed places every entity where the
+        // web places it.
+        var rng = SpecRng(seed: normalizedRenderSeed(seed))
         let resolvedUnits = units ?? .viewport
         let kept = layers.prefix(max(1, budget.layers))
+        // simulate.ts `entityScales`: viewport specs scale their counts by
+        // min(w,h) / referenceViewport (1 on a 1080-point TV by default).
+        let minDim = Double(min(viewport.width, viewport.height))
+        var countScale = resolvedUnits == .px ? 1 : minDim / (referenceViewport ?? 1080)
+        if countScale > 1 {
+            let raw = layers.reduce(0) { $0 + Int(FieldSampler.jsRound(Double($1.count) * countScale)) }
+            if raw > 4000 { countScale *= 4000 / Double(raw) }
+        }
         let requested = kept.reduce(0) { $0 + max(0, min($1.count, 400)) }
         // Uniform stride keeps every layer represented; dropping trailing
         // layers would cut the foreground accents first.
@@ -967,7 +1104,8 @@ extension SpecSubset {
             ? max(1, Int((Double(requested) / Double(budget.entities)).rounded(.up)))
             : 1
         return kept.map { layer in
-            var compiled = layer.compile(rng: &rng, units: resolvedUnits, stride: stride)
+            var compiled = layer.compile(rng: &rng, units: resolvedUnits, stride: stride,
+                                         viewport: viewport, countScale: countScale)
             // A member paints through its group: opacity multiplies, and the
             // group's transform (always about the viewport centre) wraps the
             // layer's own. A group name that matches nothing is no group.
@@ -984,6 +1122,31 @@ extension SpecSubset {
     }
 }
 
+/// The web engine's seeded stream (packages/core `createRng`): a splitmix32
+/// step mixed twice. JS int32 arithmetic is mod 2³², so it runs in wrapping
+/// `UInt32` and gives the same doubles bit for bit.
+struct SpecRng: Sendable {
+    private var a: UInt32
+
+    init(seed: UInt32) { a = seed }
+
+    mutating func next() -> Double {
+        a = a &+ 0x9E37_79B9
+        var t = a ^ (a >> 16)
+        t = t &* 0x21F0_AAAD
+        t ^= t >> 15
+        t = t &* 0x735A_2D97
+        t ^= t >> 15
+        return Double(t) / 4_294_967_296
+    }
+
+    /// `range(min, max)`: `min + (max − min) · next()`.
+    mutating func range(_ lo: Double, _ hi: Double) -> Double { lo + (hi - lo) * next() }
+
+    /// `int(min, max)`: inclusive.
+    mutating func int(_ lo: Int, _ hi: Int) -> Int { lo + Int((next() * Double(hi - lo + 1)).rounded(.down)) }
+}
+
 extension SpecSubset.Layer {
     /// One axis-pair of 3 harmonic octaves (18 draws), matching the web
     /// engine's drawOsc(). Amplitudes in spec units, freqs rad/ms.
@@ -995,111 +1158,134 @@ extension SpecSubset.Layer {
     static let octAmp = [1.0, 0.5, 0.25]
     static let octPeriod: [(Double, Double)] = [(6000, 14000), (3000, 7000), (1500, 4000)]
 
-    static func drawOsc(rng: inout Mulberry32, amp: Double) -> Osc {
+    static func drawOsc(rng: inout SpecRng, amp: Double) -> Osc {
         var o = Osc()
         for i in 0..<3 {
-            o.ax.append(amp * octAmp[i] * (0.6 + rng.next() * 0.8))
-            o.fx.append(2 * .pi / (octPeriod[i].0 + rng.next() * (octPeriod[i].1 - octPeriod[i].0)))
-            o.phx.append(rng.next() * 2 * .pi)
+            o.ax.append(amp * octAmp[i] * rng.range(0.6, 1.4))
+            o.fx.append(2 * .pi / rng.range(octPeriod[i].0, octPeriod[i].1))
+            o.phx.append(rng.range(0, 2 * .pi))
         }
         for i in 0..<3 {
-            o.ay.append(amp * octAmp[i] * (0.6 + rng.next() * 0.8))
-            o.fy.append(2 * .pi / (octPeriod[i].0 + rng.next() * (octPeriod[i].1 - octPeriod[i].0)))
-            o.phy.append(rng.next() * 2 * .pi)
+            o.ay.append(amp * octAmp[i] * rng.range(0.6, 1.4))
+            o.fy.append(2 * .pi / rng.range(octPeriod[i].0, octPeriod[i].1))
+            o.phy.append(rng.range(0, 2 * .pi))
         }
         return o
     }
 
-    func compile(rng: inout Mulberry32, units: SpecSubset.Units, stride: Int = 1) -> CompiledLayer {
+    /// A port of simulate.ts `buildEntities`, draw for draw: size → aspect →
+    /// motion → placement → variant → phase → then only what the layer
+    /// declares (alpha, pulse, spin, grow, orbit radius, palette, wander,
+    /// rotate range), so the same seed seats the same scene as the web.
+    /// Positions stay fractions of w/h with offsets in spec units, so the
+    /// placement holds at any size; `viewport` is consulted only where the
+    /// web reads the frame's aspect (a grid's automatic columns, a pulse wave).
+    func compile(rng: inout SpecRng, units: SpecSubset.Units, stride: Int = 1,
+                 viewport: CGSize = SpecSubset.composeViewport, countScale: Double = 1) -> CompiledLayer {
         var entities: [CompiledEntity] = []
         var index = 0
-        // Draw the full count so the RNG stream (and therefore the scene's
-        // identity) is unchanged; keep every `stride`-th entity.
-        let n = max(0, min(count, 400))
-        // Wander: one shared oscillator set per layer (flock coherence), like
-        // the web engine. Default meander: 60 for px specs, 0.05 viewport.
-        let meander = motion.type == "wander"
-            ? (motion.meander ?? (units == .px ? 60 : 0.05))
-            : 0
+        let vw = Double(viewport.width), vh = Double(viewport.height)
+        let unit = units == .px ? 1 : Swift.min(vw, vh)
+        // Grid layers are exempt from count scaling (they would truncate).
+        let scaled = countScale == 1 || layout != nil
+            ? count
+            : Swift.max(1, Swift.min(Int(FieldSampler.jsRound(Double(count) * countScale)), links != nil ? 200 : 400))
+        let n = max(0, min(scaled, 400))
+
+        let palette: [String]
+        let declaredColors = spriteColors.count
+        switch sprite {
+        case .circle(_, let c, _, _), .ring(_, let c, _, _), .rect(_, _, let c, _), .streak(_, let c, _, _),
+             .polygon(_, let c, _, _, _, _, _), .stroke(_, _, let c, _, _, _, _, _), .bar(_, _, _, let c, _, _, _):
+            palette = declaredColors > 0 ? spriteColors : [c]
+        case .text(_, let c): palette = [c]
+        case .textBlock(_, _, _, _, _, let c, _): palette = [c]
+        default: palette = ["#ffffff"]
+        }
+        let variants: Int
+        switch sprite {
+        case .emoji(let glyphs): variants = glyphs.count
+        case .text(let strings, _): variants = strings.count
+        default: variants = 1
+        }
+
+        // Layer-level draws before the entity loop (wander's shared octaves).
+        let meander = motion.type == "wander" ? (motion.meander ?? (units == .px ? 60 : 0.05)) : 0
         let sharedOsc = motion.type == "wander" ? Self.drawOsc(rng: &rng, amp: meander) : nil
         let orbitParentKey = motion.type == "orbit" ? motion.center?.layer : nil
-
-        // Path waypoints are layer-wide (fractions of w/h, like the web).
         let pathPoints: [(x: Double, y: Double)]? = motion.type == "path"
             ? (motion.points?.map { (x: $0.x, y: $0.y) }).flatMap { $0.count >= 2 ? $0 : nil }
             : nil
+        let ease = ["drift", "rise", "wander"].contains(motion.type) ? motion.ease : nil
+        let clockPhase = clock.map { (($0.phase ?? 0).truncatingRemainder(dividingBy: 1)) * 2 * .pi } ?? 0
 
-        // Structural layout geometry — pure, no draws (web parity).
+        // Structural layout geometry — pure, no draws. List/table cells step
+        // in spec units (×min(w,h) at draw), from an anchor fraction.
         let ordered = layout?.type == "list" || layout?.type == "table"
         let xr = Self.pair(region?.x, default: (0, 1))
         let yr = Self.pair(region?.y, default: (0, 1))
-        var gapX = 0.0, gapY = 0.0, listX0 = 0.0, listY0 = 0.0, listCols = 1
-        var listDX = 0.0, listDY = 0.0
+        var gapX = 0.0, gapY = 0.0, listCols = 1
+        var anchorX = 0.0, anchorY = 0.0, anchorDX = 0.0, anchorDY = 0.0
         if ordered, let layout {
-            // Default gap: raw px for px specs, viewport fraction otherwise.
-            let dflt = units == .px ? 28.0 : 0.06
+            let dflt = units == .px ? 40.0 : 0.06
             gapX = layout.gapX ?? dflt
             gapY = layout.gapY ?? dflt
-            listCols = layout.type == "list" ? 1 : Swift.max(1, Int((layout.columns ?? 1).rounded()))
+            listCols = layout.type == "list" ? 1 : Swift.max(1, Int(FieldSampler.jsRound(layout.columns ?? 1)))
             let rows = Swift.max(1, Int((Double(n) / Double(listCols)).rounded(.up)))
             if let position {
-                listX0 = position.x
-                listY0 = position.y
-                listDX = position.dx ?? 0
-                listDY = position.dy ?? 0
+                anchorX = position.x; anchorY = position.y
+                anchorDX = position.dx ?? 0; anchorDY = position.dy ?? 0
             } else {
-                listX0 = (xr.0 + xr.1) / 2 - Double(listCols - 1) * gapX / 2
-                listY0 = (yr.0 + yr.1) / 2 - Double(rows - 1) * gapY / 2
+                anchorX = (xr.0 + xr.1) / 2; anchorY = (yr.0 + yr.1) / 2
+                anchorDX = -Double(listCols - 1) * gapX / 2
+                anchorDY = -Double(rows - 1) * gapY / 2
             }
         }
         var gridCols = 1, cellW = 0.0, cellH = 0.0
         if layout?.type == "grid" {
-            let gw = Swift.max(0.0001, xr.1 - xr.0)
-            let gh = Swift.max(0.0001, yr.1 - yr.0)
-            let guess = Swift.max(1, Int((Double(n) * (gw / gh)).squareRoot().rounded()))
-            gridCols = Swift.min(Swift.max(1, Int((layout?.columns ?? Double(guess)).rounded())), 64)
+            // The web sizes the lattice in pixels: auto columns follow the
+            // frame's aspect, capped at 100.
+            let gw = Swift.max(1, (xr.1 - xr.0) * vw)
+            let gh = Swift.max(1, (yr.1 - yr.0) * vh)
+            let auto = Swift.max(1, Int(FieldSampler.jsRound((Double(n) * (gw / gh)).squareRoot())))
+            gridCols = Swift.max(1, Swift.min(layout?.columns.map { Int($0) } ?? auto, 100))
             let gridRows = Swift.max(1, Int((Double(n) / Double(gridCols)).rounded(.up)))
-            cellW = gw / Double(gridCols)
-            cellH = gh / Double(gridRows)
+            cellW = (xr.1 - xr.0) / Double(gridCols)
+            cellH = (yr.1 - yr.0) / Double(gridRows)
         }
 
         for i in 0..<n {
-            // Placement: explicit position wins for single-entity layers
-            // (web parity: `layer.position && layer.count === 1`), otherwise
-            // region-constrained scatter.
-            // Every branch below consumes the SAME two draws as scatter, so
-            // adding or removing a layout shifts only this layer's placement
-            // and leaves its alpha/pulse/spin stream untouched (web parity).
-            let x: Double
-            let y: Double
-            var offDX = 0.0, offDY = 0.0
-            if let position, count == 1 {
-                x = position.x
-                y = position.y
-                offDX = position.dx ?? 0
-                offDY = position.dy ?? 0
-            } else if ordered {
-                _ = rng.next(); _ = rng.next()   // burned for stream parity
-                x = listX0 + Double(i % listCols) * gapX
-                y = listY0 + Double(i / listCols) * gapY
-                offDX = listDX
-                offDY = listDY
-            } else if layout?.type == "grid" {
-                let col = i % gridCols, row = i / gridCols
-                let jx = layout?.jitterX ?? 0, jy = layout?.jitterY ?? 0
-                x = xr.0 + (Double(col) + 0.5) * cellW + (rng.next() - 0.5) * jx * cellW
-                y = yr.0 + (Double(row) + 0.5) * cellH + (rng.next() - 0.5) * jy * cellH
-            } else {
-                x = xr.0 + rng.next() * (xr.1 - xr.0)
-                y = yr.0 + rng.next() * (yr.1 - yr.0)
+            // 1. Size, in spec units (the web's e.size / scale). Circles,
+            //    rings and polygons keep their radius here; `extent` is the
+            //    web's diameter, which wrap margins and bounce bounds use.
+            var size: Double
+            var extent: Double
+            switch sprite {
+            case .circle(let r, _, _, _), .ring(let r, _, _, _), .polygon(let r, _, _, _, _, _, _):
+                size = rng.range(r.0, r.1); extent = size * 2
+            case .streak(let l, _, _, _), .stroke(let l, _, _, _, _, _, _, _):
+                size = rng.range(l.0, l.1); extent = size
+            case .rect(let w, _, _, _):
+                size = rng.range(w.0, w.1); extent = size
+            case .bar(_, let length, _, _, _, _, _):
+                size = length; extent = size
+            case .textBlock(_, _, let fs, _, _, _, _):
+                size = fs; extent = size
+            case .emoji, .text, .unknown:
+                // Glyph sizes: px specs default 20…40 px, viewport specs the
+                // same at 1080p (20/1080…40/1080 of min(w,h)).
+                let dflt = units == .px ? (20.0, 40.0) : (20.0 / 1080, 40.0 / 1080)
+                let sr = Self.pair(self.size, default: dflt)
+                size = rng.range(sr.0, sr.1); extent = size
             }
+            // 2. A rect's aspect draw, only when it declares one.
+            var aspect = 1.0
+            if case .rect(_, let a, _, _) = sprite, rectAspectDeclared { aspect = rng.range(a.0, a.1) }
 
-            // Velocity, per motion type (web engine parity; unknown → drift).
-            var vx = 0.0, vy = 0.0
-            var bob = 0.0
-            var orbitR = 0.0
+            // 3. Motion.
+            var vx = 0.0, vy = 0.0, bob = 0.0
             var warp: WarpParams?
-            var path: PathParams?
+            var pathPhase = 0.0, pathOffX = 0.0, pathOffY = 0.0
             let motionType: String
             switch motion.type {
             case "static":
@@ -1107,165 +1293,106 @@ extension SpecSubset.Layer {
             case "rise":
                 motionType = "rise"
                 let sr = Self.pair(motion.speed, default: (0.02, 0.05))
-                vy = -(sr.0 + rng.next() * (sr.1 - sr.0))  // upward
+                vy = -rng.range(sr.0, sr.1)
                 bob = motion.sway ?? 0
             case "bounce":
                 motionType = "bounce"
                 let sr = Self.pair(motion.speed, default: (0.02, 0.05))
-                let speed = sr.0 + rng.next() * (sr.1 - sr.0)
-                let a = rng.next() * 2 * .pi
-                vx = cos(a) * speed
-                vy = sin(a) * speed
+                let s = rng.range(sr.0, sr.1)
+                let a = rng.range(0, 2 * .pi)
+                vx = s * cos(a); vy = s * sin(a)
             case "orbit":
                 motionType = "orbit"
-                // A parented orbit is an offset around (0,0) — the parent's
-                // own position is added at draw time.
-                // Angular speed in deg/sec rides in vx, like the web engine.
                 let sr = Self.pair(motion.speed, default: (5, 20))
-                vx = sr.0 + rng.next() * (sr.1 - sr.0)
-                let rr = Self.pair(motion.radius, default: (0.1, 0.25))
-                orbitR = rr.0 + rng.next() * (rr.1 - rr.0)
-            case "warp":
-                motionType = "warp"
-                let sr = Self.pair(motion.speed, default: (0.1, 0.4))
-                let vz = sr.0 + rng.next() * (sr.1 - sr.0)   // depth units/sec
-                let theta = rng.next() * 2 * .pi
-                let r = 0.15 + rng.next() * 0.85            // radial offset
-                warp = WarpParams(
-                    ux: cos(theta) * r, uy: sin(theta) * r,
-                    z0: SceneMotion.warpNear + rng.next() * (1 - SceneMotion.warpNear),
-                    vz: vz,
-                    cx: motion.center?.x ?? 0.5, cy: motion.center?.y ?? 0.5
-                )
-            case "path" where pathPoints != nil:
-                motionType = "path"
-                let phase = rng.next()
-                var offX = 0.0, offY = 0.0
-                if let scatter = motion.scatter {
-                    offX = (rng.next() * 2 - 1) * scatter
-                    offY = (rng.next() * 2 - 1) * scatter
-                }
-                path = PathParams(points: pathPoints!,
-                                  duration: Swift.max(1, motion.duration ?? 8000),
-                                  closed: motion.closed != false,
-                                  smooth: motion.curve != "linear",
-                                  phase: phase, offX: offX, offY: offY)
+                vx = rng.range(sr.0, sr.1)   // deg/sec, unscaled
             case "wander":
                 motionType = "wander"
                 let sr = Self.pair(motion.speed, default: (0.02, 0.05))
-                let speed = sr.0 + rng.next() * (sr.1 - sr.0)
-                let angle = (motion.angle ?? rng.next() * 360) * .pi / 180
-                vx = cos(angle) * speed
-                vy = sin(angle) * speed
-            default:  // drift + unknown types
+                let s = rng.range(sr.0, sr.1)
+                let heading = motion.angle.map { $0 * .pi / 180 } ?? rng.range(0, 2 * .pi)
+                vx = s * cos(heading); vy = s * sin(heading)
+            case "warp":
+                motionType = "warp"
+                let sr = Self.pair(motion.speed, default: (0.1, 0.4))
+                let vz = rng.range(sr.0, sr.1)
+                let theta = rng.range(0, 2 * .pi)
+                let r = rng.range(0.15, 1)
+                warp = WarpParams(ux: cos(theta) * r, uy: sin(theta) * r,
+                                  z0: rng.range(SceneMotion.warpNear, 1), vz: vz,
+                                  cx: motion.center?.x ?? 0.5, cy: motion.center?.y ?? 0.5)
+            case "path" where pathPoints != nil:
+                motionType = "path"
+                pathPhase = rng.next()
+                if let scatter = motion.scatter, scatter != 0 {
+                    pathOffX = rng.range(-1, 1) * scatter
+                    pathOffY = rng.range(-1, 1) * scatter
+                }
+            default:  // drift (and anything unknown)
                 motionType = "drift"
                 let sr = Self.pair(motion.speed, default: (0.02, 0.05))
-                let speed = sr.0 + rng.next() * (sr.1 - sr.0)
-                let angle = (motion.angle ?? rng.next() * 360) * .pi / 180
-                vx = cos(angle) * speed
-                vy = sin(angle) * speed
-                if motion.bidirectional == true, rng.next() < 0.5 { vx = -vx }
+                let s = rng.range(sr.0, sr.1)
+                var angle = (motion.angle ?? 0) * .pi / 180
+                if motion.bidirectional == true, rng.next() < 0.5 { angle = .pi - angle }
+                vx = s * cos(angle); vy = s * sin(angle)
                 bob = motion.bob ?? 0
             }
 
-            // Size.
-            let size: Double
-            switch sprite {
-            case .circle(let r, _, _, _), .ring(let r, _, _, _):
-                size = r.0 + rng.next() * (r.1 - r.0)
-            case .rect(let w, _, _, _):
-                size = w.0 + rng.next() * (w.1 - w.0)
-            case .streak(let l, _, _, _):
-                size = l.0 + rng.next() * (l.1 - l.0)
-            case .polygon(let r, _, _, _, _, _, _):
-                // Circumradius, same convention as circle/ring here.
-                size = r.0 + rng.next() * (r.1 - r.0)
-            case .stroke(let l, _, _, _, _, _, _, _):
-                size = l.0 + rng.next() * (l.1 - l.0)
-            case .bar(_, let length, _, _, _, _, _):
-                // Fixed length — a bar consumes NO seeded size draw.
-                size = length
-            case .emoji, .text:
-                // Web parity: glyph sizes are ALWAYS raw pixels — the engine
-                // draws `${sz}px` with no unit scaling and defaults to [20,40]
-                // (schema simulate.ts `layer.size ?? [20, 40]`), in both unit
-                // modes. The old viewport-fraction default (0.02) rendered
-                // sub-pixel text in px specs.
-                let sr = Self.pair(self.size, default: (20, 40))
-                size = sr.0 + rng.next() * (sr.1 - sr.0)
-            case .textBlock(_, _, let fs, _, _, _, _):
-                // Web parity: textBlock size = fontSize (viewport fraction),
-                // NO rng draw. The fixed value keeps the stream stable.
-                size = fs
-            case .unknown:
-                size = 0.01
-            }
-
-            let aspect: Double
-            if case .rect(_, let a, _, _) = sprite {
-                aspect = a.0 + rng.next() * (a.1 - a.0)
+            // 4. Placement (two draws, or none for a pinned single entity).
+            let x: Double, y: Double
+            var offDX = 0.0, offDY = 0.0
+            if let position, count == 1 {
+                x = position.x; y = position.y
+                offDX = position.dx ?? 0; offDY = position.dy ?? 0
+            } else if ordered {
+                _ = rng.next(); _ = rng.next()   // burned: a layout is placement only
+                x = anchorX; y = anchorY
+                offDX = anchorDX + Double(i % listCols) * gapX
+                offDY = anchorDY + Double(i / listCols) * gapY
+            } else if layout?.type == "grid" {
+                let col = i % gridCols, row = i / gridCols
+                let jx = layout?.jitterX ?? 0, jy = layout?.jitterY ?? 0
+                x = xr.0 + (Double(col) + 0.5) * cellW + rng.range(-0.5, 0.5) * jx * cellW
+                y = yr.0 + (Double(row) + 0.5) * cellH + rng.range(-0.5, 0.5) * jy * cellH
             } else {
-                aspect = 1
+                x = rng.range(xr.0, xr.1)
+                y = rng.range(yr.0, yr.1)
             }
 
-            // Color.
-            let palette: [String]
-            switch sprite {
-            case .circle(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
-            case .ring(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
-            case .rect(_, _, let c, let cs): palette = cs.isEmpty ? [c] : cs
-            case .streak(_, let c, let cs, _): palette = cs.isEmpty ? [c] : cs
-            case .polygon(_, let c, let cs, _, _, _, _): palette = cs.isEmpty ? [c] : cs
-            case .stroke(_, _, let c, let cs, _, _, _, _): palette = cs.isEmpty ? [c] : cs
-            case .bar(_, _, _, let c, let cs, _, _): palette = cs.isEmpty ? [c] : cs
-            case .text(_, let c): palette = [c]
-            case .textBlock(_, _, _, _, _, let c, _): palette = [c]
-            default: palette = ["#ffffff"]
-            }
-            // One draw either way, so weights never disturb the stream — but
-            // an unweighted pick spreads a deliberately lopsided palette
-            // evenly, which is a different picture entirely.
-            let pick = rng.next()
-            let color: String
-            if let weights = colorWeights, weights.count == palette.count,
-               weights.contains(where: { $0 > 0 }) {
-                color = palette[Self.weightedIndex(pick, weights)]
-            } else {
-                color = palette[min(palette.count - 1, Int(pick * Double(palette.count)))]
-            }
-
-            // Glyph.
-            let glyph: String?
+            // 5. The variant (strings / glyphs), in reading order under a data layout.
             var glyphIndex = 0
+            if variants > 1 {
+                let drawn = rng.int(0, variants - 1)
+                glyphIndex = ordered ? i % variants : drawn
+            }
+            let glyph: String?
             switch sprite {
-            case .emoji(let glyphs):
-                glyphIndex = min(glyphs.count - 1, Int(rng.next() * Double(glyphs.count)))
-                glyph = glyphs[glyphIndex]
-            case .text(let strings, _):
-                glyphIndex = min(strings.count - 1, Int(rng.next() * Double(strings.count)))
-                glyph = strings[glyphIndex]
-            default:
-                glyph = nil
+            case .emoji(let glyphs): glyph = glyphs.isEmpty ? nil : glyphs[min(glyphIndex, glyphs.count - 1)]
+            case .text(let strings, _): glyph = strings.isEmpty ? nil : strings[min(glyphIndex, strings.count - 1)]
+            default: glyph = nil
             }
 
-            let barThickness: Double
-            if case .bar(_, _, let th, _, _, _, _) = sprite { barThickness = th } else { barThickness = 0 }
-
-            let ar = Self.pair(alpha, default: (1, 1))
-            let alphaValue = ar.0 + rng.next() * (ar.1 - ar.0)
-            let phase = rng.next() * 2 * .pi
-            let spinSpeed: Double
-            if let spin {
-                spinSpeed = spin.min + rng.next() * (spin.max - spin.min)
-            } else {
-                spinSpeed = 0
+            // 6. Phase, then the guarded draws in the web's order.
+            let phase = rng.range(0, 2 * .pi)
+            let alphaValue = alpha.map { a in rng.range(a.first ?? 1, a.count > 1 ? a[1] : (a.first ?? 1)) } ?? 1
+            var pulsePhase: Double? = pulse != nil ? rng.range(0, 2 * .pi) : nil
+            var spinSpeed = 0.0
+            if let spin { spinSpeed = spinIsRange ? rng.range(spin.min, spin.max) : spin.min }
+            let spinPhase = spin != nil ? rng.range(0, 2 * .pi) : 0
+            let growPhase = grow != nil ? rng.range(0, 2 * .pi) : 0
+            var orbitR = 0.0
+            if motionType == "orbit" {
+                let rr = Self.pair(motion.radius, default: (0.1, 0.25))
+                orbitR = rng.range(rr.0, rr.1)
             }
-            // Web parity: rotationAt() returns 0 when spinSpeed is 0 — a random
-            // initial angle only applies to entities that actually spin. (The
-            // rng draw stays unconditional to keep the seeded stream stable.)
-            let spinDraw = rng.next() * 360
-            let spinAngle = spinSpeed == 0 ? 0 : spinDraw
-
+            var color = palette[0]
+            if declaredColors > 0 {
+                if let weights = colorWeights, weights.count == declaredColors, weights.contains(where: { $0 > 0 }) {
+                    color = palette[Self.weightedIndex(rng.next(), weights)]
+                } else {
+                    let drawn = rng.int(0, declaredColors - 1)
+                    color = palette[min(declaredColors - 1, ordered ? i % declaredColors : drawn)]
+                }
+            }
             var wanderParams: WanderParams?
             if motionType == "wander", let shared = sharedOsc {
                 let own = Self.drawOsc(rng: &rng, amp: meander)
@@ -1275,8 +1402,18 @@ extension SpecSubset.Layer {
                     sharedAx: shared.ax, sharedFx: shared.fx, sharedPhx: shared.phx,
                     sharedAy: shared.ay, sharedFy: shared.fy, sharedPhy: shared.phy,
                     coherence: min(1, max(0, motion.coherence ?? 0)),
-                    margin: meander * 1.75 * 1.4  // Σ octave amps (1+0.5+0.25) × 1.4
-                )
+                    margin: meander * 1.75 * 1.4)  // Σ octave amps (1+0.5+0.25) × 1.4
+            }
+            var rotateDeg = 0.0
+            if let rotate { rotateDeg = rotateIsRange ? rng.range(rotate.min, rotate.max) : rotate.min }
+
+            // Clock and pulse wave replace the seeded phases after the draws.
+            if clock != nil { pulsePhase = clockPhase }
+            if let wave = pulse?.wave, pulse != nil {
+                let wl = Swift.max(1e-6, wave.wavelength * unit)
+                let ang = (wave.angle ?? 0) * .pi / 180
+                let px = x * vw + offDX * unit, py = y * vh + offDY * unit
+                pulsePhase = clockPhase - (px * cos(ang) + py * sin(ang)) / wl * 2 * .pi
             }
 
             // Thinning (budget) and geometry sanitation happen at the append:
@@ -1289,43 +1426,62 @@ extension SpecSubset.Layer {
             else { continue }
 
             let rgb = Self.rgb(from: color)
-            entities.append(CompiledEntity(
+            let barThickness: Double
+            if case .bar(_, _, let th, _, _, _, _) = sprite { barThickness = th } else { barThickness = 0 }
+            var e = CompiledEntity(
                 x: x, y: y, vx: vx, vy: vy,
                 size: size, aspect: aspect,
                 color: color, red: rgb.0, green: rgb.1, blue: rgb.2, glyph: glyph,
                 alpha: alphaValue, phase: phase,
-                spinSpeed: spinSpeed, spinAngle: spinAngle,
+                spinSpeed: spinSpeed, spinAngle: spinPhase * 180 / .pi,
                 motionType: motionType, bob: bob,
                 orbitR: orbitR,
                 orbitCx: orbitParentKey != nil ? 0 : (motion.center?.x ?? 0.5),
                 orbitCy: orbitParentKey != nil ? 0 : (motion.center?.y ?? 0.5),
                 growAmp: grow?.amp ?? 0,
                 growPeriod: grow?.period ?? 1000,
-                growPhase: grow != nil ? rng.next() * 2 * .pi : 0,
+                growPhase: clock != nil ? clockPhase : growPhase,
                 wander: wanderParams,
                 warp: warp,
-                path: path,
-                rotate: rotate.map { $0.min == $0.max ? $0.min : $0.min + rng.next() * ($0.max - $0.min) } ?? 0,
+                path: pathPoints.map { pts in
+                    PathParams(points: pts, duration: Swift.max(1, motion.duration ?? 8000),
+                               closed: motion.closed != false, smooth: motion.curve != "linear",
+                               phase: pathPhase, offX: pathOffX, offY: pathOffY)
+                },
+                rotate: rotateDeg,
                 orbitParented: orbitParentKey != nil,
                 barIndex: i,
                 thickness: barThickness,
                 offDX: offDX,
                 offDY: offDY,
-                glyphIndex: glyphIndex
-            ))
+                glyphIndex: glyphIndex)
+            if motionType != "path" { e.path = nil }
+            e.pulsePhase = pulsePhase
+            e.clockRate = clock?.rate ?? 1
+            e.extent = extent
+            e.headingLeft = vx < 0
+            e.ordered = ordered
+            e.order = i
+            if let cycle = spriteCycle, cycle > 0 { e.cyclePeriod = cycle; if clock != nil { e.cyclePhase = clockPhase } }
+            if let ease, let tau = ease.tau, tau > 0 { e.ease = MotionEase(settle: ease.type == "settle", tau: tau) }
+            entities.append(e)
         }
-        if let clock {
-            // In step: one phase for the whole layer instead of a seeded one each.
-            let phase = (clock.phase ?? 0).truncatingRemainder(dividingBy: 1) * 2 * .pi
+        if let rock {
+            // One seeded phase per entity in a pass AFTER the loop, drawn only
+            // when declared, so `rock` re-seats nothing else (a clock's shared
+            // phase replaces it; the draw still happens, for stream parity).
+            let phases = (0..<n).map { _ in rng.range(0, 2 * .pi) }
             for i in entities.indices {
-                entities[i].pulsePhase = phase
-                entities[i].growPhase = phase
-                entities[i].clockRate = clock.rate ?? 1
+                entities[i].rockAmp = rock.amp
+                entities[i].rockPeriod = rock.period
+                entities[i].rockPhase = clock != nil ? clockPhase : phases[entities[i].order]
             }
         }
         if let emit, !entities.isEmpty {
+            // By the entity's place in the whole layer, so budget thinning
+            // keeps every survivor's window.
             for i in entities.indices {
-                entities[i].emit = EmitParams.make(emit, index: i, count: entities.count)
+                entities[i].emit = EmitParams.make(emit, index: entities[i].order, count: n)
             }
         }
         return CompiledLayer(
@@ -1353,19 +1509,15 @@ extension SpecSubset.Layer {
                     anchorY: position?.y ?? (ry.0 + ry.1) / 2,
                     anchorDX: position?.dx ?? 0,
                     anchorDY: position?.dy ?? 0)
-            }
+            },
+            flip: flip == true,
+            textSprite: textSprite,
+            strokeDraw: strokeDraw
         )
     }
 
     /// Hex → sRGB, once per entity at compile time (never per frame).
-    static func rgb(from hex: String) -> (Double, Double, Double) {
-        let cleaned = hex.trimmingCharacters(in: .alphanumerics.inverted)
-        var value: UInt64 = 0
-        Scanner(string: cleaned).scanHexInt64(&value)
-        return (Double((value >> 16) & 0xFF) / 255,
-                Double((value >> 8) & 0xFF) / 255,
-                Double(value & 0xFF) / 255)
-    }
+    static func rgb(from hex: String) -> (Double, Double, Double) { parseHexRGB(hex) }
 
     /// Weighted pick from one uniform draw (web parity: `weightedIndex`).
     static func weightedIndex(_ u: Double, _ weights: [Double]) -> Int {

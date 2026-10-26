@@ -587,6 +587,13 @@ final class TVAppState {
         case .scene(let spec, let seed, let transition, let epoch):
             if let epoch { channelEpochMs = epoch }
             if let spec {
+                // A publish replaces the scene, and the steers made on the old one.
+                if timeline == .live {
+                    stopSteer()
+                    steeredJSON = nil
+                    steerShown = nil
+                    currentSpecJSON = nil
+                }
                 // A new scene on the channel: the renderer identity changes, so
                 // the player dissolves old into new instead of swapping layers
                 // in place at the old clock (a hard cut).
@@ -609,8 +616,10 @@ final class TVAppState {
                 guard !Task.isCancelled else { return }
                 self?.overlayText = nil
             }
-        case .delta, .track:
+        case .delta:
             break
+        case .track(let track, _):
+            applyLiveTrack(track)
         case .switchChannel(let channelId, let sceneId):
             // Any switch push proves a paired phone is steering this TV —
             // the pairing screen uses it as its "✓ Paired" cue (the phone
@@ -677,6 +686,12 @@ final class TVAppState {
     }
 
     private func render(_ json: JSONValue, fallbackSeed: Int?) {
+        // A new document replaces whatever the steers had made of the old one.
+        if json != currentSpecJSON {
+            stopSteer()
+            steeredJSON = nil
+            steerShown = nil
+        }
         currentSpecJSON = json
         guard let data = try? JSONEncoder().encode(json) else { return }
         // Sequence envelope? Route to the timeline player — it carries no
@@ -710,7 +725,9 @@ final class TVAppState {
         // Snapshots repeat the document. A timed scene already being driven
         // keeps its clock and its current frame: recompiling the base here
         // would flash the un-keyed scene, and restarting would rewind it.
+        liveSeed = seed
         if isDrivingKeyframes(json, seed: seed) { return }
+        if steeredJSON != nil { return }   // a steered scene keeps its steers on a repeat
         compiledScene = spec.compile(seed: seed, budget: sceneBudget)
         setGround(spec, seed: seed)
         complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
@@ -888,6 +905,9 @@ final class TVAppState {
     /// The wipe in flight entering the current segment, if that is how it
     /// arrived (nil for every other crossing).
     private(set) var sequenceWipe: SequenceSubset.Wipe?
+    /// When that wipe began and how long it runs (the authored `dur`).
+    private(set) var sequenceWipeStart = Date()
+    private(set) var sequenceWipeDuration: TimeInterval = 0
 
     /// `advancing` is a step to the next segment of the sequence already on
     /// screen; the first segment of a new sequence is dissolved in by the scene
@@ -912,6 +932,16 @@ final class TVAppState {
         let remaining = max(0, dissolve - resolved.localT)
         sequenceCrossfade = renderClass == .legacy ? min(remaining, 0.4) : remaining
         sequenceWipe = remaining > 0 ? wipe : nil
+        sequenceWipeStart = Date().addingTimeInterval(-resolved.localT)
+        sequenceWipeDuration = renderClass == .legacy ? min(dissolve, 0.4) : dissolve
+        if sequenceWipe != nil {
+            // Done sweeping: drop the mask so it stops animating.
+            let key = segment.key ?? "segment-\(index)"
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(remaining + 0.2))
+                if self?.sequenceSegmentKey == key { self?.sequenceWipe = nil }
+            }
+        }
         let nextKey = segment.key ?? "segment-\(index)"
         if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey, sequenceCrossfade > 0 {
             beginCrossfade(seconds: sequenceCrossfade, withBed: false)
@@ -1017,6 +1047,81 @@ final class TVAppState {
         }
     }
 
+    // MARK: Live steering (`track`)
+
+    /// The live scene as steering has left it (JSON), and the frame on screen
+    /// while a glide runs toward it. Nil until the first steer.
+    private var steeredJSON: JSONValue?
+    private var steerShown: JSONValue?
+    private var steerTask: Task<Void, Never>?
+    private var liveSeed = 0
+
+    private func stopSteer() {
+        steerTask?.cancel()
+        steerTask = nil
+    }
+
+    /// A steer reached the channel (compile.ts `applyTrack`): the whole track's
+    /// deltas applied to what is on screen, glided to over the longest delta's
+    /// `dur` with the ease of that delta when it is a steer ease (`in` / `out`
+    /// / `spring`), else smooth. A timeline scene takes the steer into its
+    /// base and keeps its clock. Sequences and classic savers steer elsewhere.
+    func applyLiveTrack(_ track: JSONValue?) {
+        if isClassicSpec {
+            liveClassicParams = Self.trackParams(from: track.map { .object(["track": $0]) })
+            if timeline == .live { classicParams = liveClassicParams }
+            return
+        }
+        guard timeline == .live, activeSequence == nil, let base = steeredJSON ?? currentSpecJSON,
+              case .object(let t)? = track, let raw = t["deltas"]?.array else { return }
+        var deltas: [(path: String, value: JSONValue)] = []
+        var glide = 0.0, ease: String?
+        for item in raw {
+            guard case .object(let d) = item, let path = d["path"]?.string, let value = d["value"] else { continue }
+            deltas.append((path, value))
+            let dur = d["dur"]?.number ?? 1000
+            if dur > glide || deltas.count == 1 {
+                glide = max(glide, dur)
+                ease = d["ease"]?.string.flatMap { SpecTimeline.steerEases.contains($0) ? $0 : nil }
+            }
+        }
+        guard !deltas.isEmpty else { return }
+        let target = SpecTimeline.applyDeltas(base, deltas)
+        guard target != base else { return }
+        steeredJSON = target
+        let seed = liveSeed
+        if SpecTimeline.hasTimeline(target) {
+            // The keys keep their clock; the steered base is what they glide from.
+            let epoch = keyframeEpoch ?? Date()
+            stopKeyframes()
+            startKeyframes(target, seed: seed, epoch: epoch)
+            return
+        }
+        stopSteer()
+        let from = steerShown ?? base
+        let began = Date()
+        let frame = { [weak self] (k: Double) -> Bool in
+            guard let self else { return false }
+            let shown = k >= 1 ? target : SpecTimeline.lerpSpec(from, target, SpecTimeline.easeGlide(ease, k))
+            guard let data = try? JSONEncoder().encode(shown),
+                  let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return false }
+            self.steerShown = shown
+            self.compiledScene = spec.compile(seed: seed, budget: self.sceneBudget)
+            self.setGround(spec, seed: seed)
+            return true
+        }
+        guard glide > 0 else { _ = frame(1); return }
+        _ = frame(0)
+        steerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let k = Date().timeIntervalSince(began) * 1000 / glide
+                guard frame(min(1, k)), k < 1 else { self.steerTask = nil; return }
+                try? await Task.sleep(for: .seconds(self.keyframeInterval))
+            }
+        }
+    }
+
     // MARK: Keyframes (`timeline`)
 
     /// Drives a scene's `timeline`: re-resolves the authored JSON on the
@@ -1028,15 +1133,17 @@ final class TVAppState {
     private var keyframeTask: Task<Void, Never>?
     /// What the driver is playing: the authored JSON and its seed.
     private var keyframeSource: (json: JSONValue, seed: Int)?
+    /// When the driven timeline's clock read 0.
+    private var keyframeEpoch: Date?
 
     private func isDrivingKeyframes(_ json: JSONValue, seed: Int) -> Bool {
         guard keyframeTask != nil, let src = keyframeSource else { return false }
         return src.seed == seed && src.json == json
     }
 
-    /// How often a glide is re-resolved: smooth on Canvas; on the sprite tier
-    /// every recompile rebuilds textures, so a glide steps a few times a second.
-    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 30 : 0.25 }
+    /// How often a glide is re-resolved: every frame on Canvas; the sprite
+    /// tier rebinds its nodes in place (cached, tinted textures), at 12 Hz.
+    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 30 : 1.0 / 12 }
 
     private func stopKeyframes() {
         keyframeTask?.cancel()
@@ -1051,6 +1158,7 @@ final class TVAppState {
         stopKeyframes()
         guard SpecTimeline.hasTimeline(source) else { return }
         keyframeSource = (source, seed)
+        keyframeEpoch = epoch
         keyframeTask = Task { [weak self] in
             var last: JSONValue?
             var slow = 0

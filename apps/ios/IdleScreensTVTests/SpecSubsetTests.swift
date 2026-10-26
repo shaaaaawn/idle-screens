@@ -149,7 +149,8 @@ final class SpecSubsetTests: XCTestCase {
         let stars = spec.layers[0]
         XCTAssertEqual(stars.motion.type, "static")
         XCTAssertEqual(stars.alpha, [0.2, 0.6])
-        XCTAssertEqual(stars.pulse, SpecSubset.Pulse(amp: 0.25, period: 6000))
+        XCTAssertEqual(stars.pulse?.amp, 0.25)
+        XCTAssertEqual(stars.pulse?.period, 6000)
         XCTAssertEqual(stars.region?.y, [0, 0.75])
 
         let curtain = spec.layers[1]

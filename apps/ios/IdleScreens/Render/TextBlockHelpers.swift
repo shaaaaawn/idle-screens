@@ -314,3 +314,47 @@ enum TextBlockFont {
     }
 }
 #endif
+
+// MARK: - textBlock.number
+
+/// A counter (simulate.ts `textBlockText`): `prefix + value + suffix`, the
+/// value rounded to `decimals` (0…6) places as JS `toFixed` does, thousands
+/// grouped with commas unless `grouping: false`. Locale-free, so every device
+/// paints the same digits.
+struct TextNumber: Decodable, Equatable, Sendable {
+    var value: Double
+    var decimals: Double?
+    var prefix: String?
+    var suffix: String?
+    var grouping: Bool?
+
+    var formatted: String {
+        let d = max(0, min(6, Int((decimals ?? 0).rounded())))
+        let v = value.isFinite ? value : 0
+        let fixed = Self.toFixed(abs(v), d)
+        let parts = fixed.split(separator: ".", omittingEmptySubsequences: false)
+        var whole = String(parts[0])
+        if grouping != false {
+            var out = ""
+            for (i, ch) in whole.reversed().enumerated() {
+                if i > 0, i % 3 == 0 { out.append(",") }
+                out.append(ch)
+            }
+            whole = String(out.reversed())
+        }
+        let neg = v < 0 && (Double(fixed) ?? 0) != 0
+        let frac = parts.count > 1 ? "." + parts[1] : ""
+        return (prefix ?? "") + (neg ? "-" : "") + whole + frac + (suffix ?? "")
+    }
+
+    /// JS `toFixed`: an exact half rounds up (printf rounds it to even).
+    static func toFixed(_ x: Double, _ d: Int) -> String {
+        let scale = pow(10.0, Double(d))
+        let scaled = x * scale
+        if scaled - scaled.rounded(.down) == 0.5 {
+            let n = scaled.rounded(.up) / scale
+            return String(format: "%.\(d)f", n)
+        }
+        return String(format: "%.\(d)f", x)
+    }
+}

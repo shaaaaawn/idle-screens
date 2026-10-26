@@ -71,7 +71,16 @@ struct ScreenSaverView: View {
                 // (TVAppState.OutgoingScene).
                 if let out = app.outgoing {
                     outgoingRenderer(out)
-                        .opacity(app.outgoingOpacity)
+                        .opacity(app.sequenceWipe == nil ? app.outgoingOpacity : 1)
+                        // A wipe sweeps the outgoing away rather than dissolving it.
+                        .mask {
+                            if let wipe = app.sequenceWipe {
+                                WipeMask(wipe: wipe, start: app.sequenceWipeStart,
+                                         duration: app.sequenceWipeDuration, inverted: true)
+                            } else {
+                                Color.white
+                            }
+                        }
                         .id("outgoing|\(out.id)")
                         .transition(.identity)
                 }
@@ -112,11 +121,20 @@ struct ScreenSaverView: View {
                 // crossfade — true spec-lerp morph is a follow-up).
                 // …and a channel change dissolves too, so surfing reads as
                 // turning a dial rather than a hard reload.
+                // A wipe reveals the incoming through its moving edge instead
+                // of fading it up.
+                .mask {
+                    if let wipe = app.sequenceWipe {
+                        WipeMask(wipe: wipe, start: app.sequenceWipeStart, duration: app.sequenceWipeDuration)
+                    } else {
+                        Color.white
+                    }
+                }
                 .id("\(app.selectedChannelId ?? "")|\(app.sequenceSegmentKey ?? "")|\(timelineKey)|\(app.sceneRevision)")
                 // In: fade up over the outgoing scene. Out: gone at once — a
                 // renderer being removed stops drawing, so the outgoing copy
                 // underneath carries the old picture instead.
-                .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                .transition(.asymmetric(insertion: app.sequenceWipe == nil ? .opacity : .identity, removal: .identity))
                 // The print finish, last of all, over the composed frame (bed,
                 // dissolve and scene together), as the web presents it.
                 if let finish = app.specFinish, finish.isVisible,

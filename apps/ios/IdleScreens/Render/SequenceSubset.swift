@@ -310,6 +310,7 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
             default: row.append(.null)
             }
             if let rotate = l["rotate"] { row.append(canon(rotate)) }
+            if let rock = l["rock"] { row.append(.object(["rock": canon(rock)])) }
             return .array(row)
         }
         return .array([canon(root["units"]), root["referenceViewport"].map { canon($0) } ?? .double(1080), .array(layers)])

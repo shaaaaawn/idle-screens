@@ -56,13 +56,15 @@ enum SceneVisibility {
                     area = length * max(1, (width ?? (layer.units == .px ? 2 : 0.002)) * dim)
                 case .emoji:
                     // Emoji are full-color glyphs — ink regardless of contrast.
-                    guard entity.size >= 4 else { continue }
-                    ink += entity.size * entity.size * 0.5 * entity.alpha
+                    let px = entity.size * dim
+                    guard px >= 4 else { continue }
+                    ink += px * px * 0.5 * entity.alpha
                     continue
                 case .text:
-                    guard entity.size >= 4 else { continue }
+                    let px = entity.size * dim
+                    guard px >= 4 else { continue }
                     let glyphs = Double(max(1, entity.glyph?.count ?? 1))
-                    area = entity.size * entity.size * 0.55 * glyphs
+                    area = px * px * 0.55 * glyphs
                 case .textBlock(let text, let maxWidth, let fontSize, let lineHeight, _, _, _):
                     let fsPx = fontSize * dim
                     guard fsPx >= 2 else { continue }

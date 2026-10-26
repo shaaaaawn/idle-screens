@@ -141,6 +141,9 @@ struct NativeSceneView: View {
             }
             for (i, entity) in layer.entities.enumerated() {
                 if stride > 1, i % stride != 0 { continue }
+                // `life.stagger`: each entity's own shifted envelope.
+                let lifeAlpha = lifeAlpha * (layer.life?.alpha(at: t * 1000, entity: entity.order) ?? 1)
+                if lifeAlpha <= 0 { continue }
                 let point = SceneMotion.position(of: entity, at: t, in: space, dim: dim,
                                                  wrap: layer.wrap, parent: parentEntity)
                 // One alpha model for both tiers. This used to be computed
@@ -167,7 +170,7 @@ struct NativeSceneView: View {
                         draw(entity: entity,
                              size: entity.size * SceneMotion.growScale(of: entity, at: back),
                              sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units, space: space, at: ghostPoint,
-                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, ctx: &layerCtx)
+                             dim: dim, alpha: alpha * lifeAlpha * decay, t: back, owner: layer, parent: parentEntity, ctx: &layerCtx)
                     }
                 }
                 if let trail = layer.trail {
@@ -183,18 +186,18 @@ struct NativeSceneView: View {
                     if xf.aOut > 0 {
                         draw(entity: outgoing, size: grownSize, sprite: xf.outgoing, textStyle: layer.textStyle,
                              feather: layer.feather, units: layer.units, space: space, at: point,
-                             dim: dim, alpha: alpha * lifeAlpha * xf.aOut, t: t, ctx: &layerCtx)
+                             dim: dim, alpha: alpha * lifeAlpha * xf.aOut, t: t, owner: layer, parent: parentEntity, ctx: &layerCtx)
                     }
                     if xf.aIn > 0 {
                         draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
                              feather: layer.feather, units: layer.units, space: space, at: point,
-                             dim: dim, alpha: alpha * lifeAlpha * xf.aIn, t: t, ctx: &layerCtx)
+                             dim: dim, alpha: alpha * lifeAlpha * xf.aIn, t: t, owner: layer, parent: parentEntity, ctx: &layerCtx)
                     }
                     continue
                 }
                 draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather,
                      units: layer.units, space: space, at: point,
-                     dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &layerCtx)
+                     dim: dim, alpha: alpha * lifeAlpha, t: t, owner: layer, parent: parentEntity, ctx: &layerCtx)
             }
         }
     }
@@ -244,7 +247,7 @@ struct NativeSceneView: View {
             for ec in echoes {
                 draw(entity: entity, size: headSize * ec.r / max(0.0001, headSize * dim),
                      sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather, units: layer.units,
-                     space: space, at: ec.point, dim: dim, alpha: ec.alpha, t: ec.t, ctx: &ctx)
+                     space: space, at: ec.point, dim: dim, alpha: ec.alpha, t: ec.t, owner: layer, parent: parent, ctx: &ctx)
             }
             return
         }
@@ -454,9 +457,11 @@ struct NativeSceneView: View {
             if links.falloff == true, maxDist.isFinite { a *= max(0, 1 - dist / maxDist) }
             a *= lifeAlpha
             guard a > 0.004 else { return }
+            // Glyph layers link in the text ink, everything else in its own colour.
+            let glyphLayer: Bool = { switch layer.sprite { case .emoji, .text: return true; default: return false } }()
             let color = links.color.map { Color(hex: $0) }
-                ?? Color(.sRGB, red: entities[lo].red, green: entities[lo].green,
-                         blue: entities[lo].blue, opacity: 1)
+                ?? (glyphLayer ? Color(hex: "e6e8ef")
+                    : Color(.sRGB, red: entities[lo].red, green: entities[lo].green, blue: entities[lo].blue, opacity: 1))
             var path = Path()
             path.move(to: positions[lo])
             path.addLine(to: CGPoint(x: positions[lo].x + d.x, y: positions[lo].y + d.y))
@@ -563,7 +568,12 @@ struct NativeSceneView: View {
                       textStyle: SpecSubset.TextStyle? = nil, feather: Double = 0,
                       units: SpecSubset.Units, space: CGSize = .zero,
                       at point: CGPoint, dim: CGFloat, alpha: Double, t: TimeInterval,
+                      owner: CompiledLayer? = nil, parent: CompiledEntity? = nil,
                       ctx: inout GraphicsContext) {
+        // The direction of travel, from the real path (simulate.ts headingAt).
+        func heading() -> Double? {
+            SceneMotion.heading(of: entity, at: t, in: space, dim: dim, wrap: owner?.wrap ?? true, parent: parent)
+        }
         // Pre-parsed components — no hex-string Scanner in the hot loop.
         let color = Color(.sRGB, red: entity.red, green: entity.green,
                           blue: entity.blue, opacity: alpha)
@@ -600,7 +610,7 @@ struct NativeSceneView: View {
             let r = size * dim
             let rect = CGRect(x: point.x - r, y: point.y - r, width: r * 2, height: r * 2)
             ctx.stroke(Path(ellipseIn: rect), with: .color(color),
-                       lineWidth: (width ?? defaultWidth) * dim)
+                       lineWidth: max(0.5, (width ?? defaultWidth) * dim))
 
         case .rect:
             let w = size * dim
@@ -627,25 +637,36 @@ struct NativeSceneView: View {
             }
 
         case .streak(_, _, _, let width):
+            // Along the actual heading plus any spin/rotate, fading from a
+            // clear tail to the head, round-capped (compile.ts streak).
             let length = size * dim
-            let speed = hypot(entity.vx, entity.vy)
-            guard speed > 0 else { return }
-            let dx = entity.vx / speed, dy = entity.vy / speed
+            let a = ((heading() ?? 0) + spin * .pi / 180)
+            let tail = CGPoint(x: point.x - cos(a) * length, y: point.y - sin(a) * length)
             var path = Path()
-            path.move(to: point)
-            path.addLine(to: CGPoint(x: point.x - dx * length, y: point.y - dy * length))
-            ctx.stroke(path, with: .color(color), lineWidth: (width ?? defaultWidth) * dim)
+            path.move(to: tail)
+            path.addLine(to: point)
+            ctx.stroke(path, with: .linearGradient(Gradient(colors: [color.opacity(0), color]),
+                                                   startPoint: tail, endPoint: point),
+                       style: StrokeStyle(lineWidth: max(0.5, (width ?? defaultWidth) * dim), lineCap: .round))
 
         case .emoji, .text:
-            // Glyph sizes are raw pixels in the web engine (`${sz}px`, never
-            // unit-scaled) — so no `dim` multiplier here, unlike shaped sprites.
-            let text = Text(entity.glyph ?? "")
-                .font(.system(size: size))
-                .foregroundStyle(color)
+            // Glyph sizes are spec units like every other size (a viewport
+            // spec's are fractions of min(w,h)); the variant cycles with `cycle`.
+            let glyph = SceneMotion.glyph(of: entity, sprite: sprite, at: t) ?? ""
             var layer = ctx
             layer.translateBy(x: point.x, y: point.y)
             layer.rotate(by: .degrees(spin))
-            layer.draw(text, at: .zero, anchor: .center)
+            // `flip`: a glyph faces its heading.
+            if owner?.flip == true, entity.headingLeft,
+               entity.motionType == "drift" || entity.motionType == "wander" {
+                layer.scaleBy(x: -1, y: 1)
+            }
+            if case .text = sprite, let style = owner?.textSprite {
+                drawTextSprite(glyph, size: size * dim, style: style, color: color, dim: dim, units: units, ctx: &layer)
+            } else {
+                layer.draw(Text(glyph).font(.system(size: size * dim)).foregroundStyle(color),
+                           at: .zero, anchor: .center)
+            }
 
         case .textBlock(let tbText, let maxWidth, let fontSize, let lineHeight,
                         let align, let tbColor, let reveal):
@@ -701,16 +722,16 @@ struct NativeSceneView: View {
         case .stroke(_, let pts, _, _, let width, let smooth, let taper, let orient):
             // Unit points span a −1…1 box scaled by HALF the seeded length,
             // so `length` is the mark's bounding diameter (streak's rule).
-            let samples = Self.strokeSamples(points: pts, halfSize: size * dim / 2,
+            var samples = Self.strokeSamples(points: pts, halfSize: size * dim / 2,
                                              smooth: smooth)
+            // Draw-on: only the `draw` span of the line's length is painted.
+            if let span = owner?.strokeDraw?.span { samples = DrawOn.trim(samples, span.0, span.1) }
             guard samples.count >= 2 else { return }
             let lw = max(0.5, (width ?? defaultWidth) * dim)
             var layer = ctx
             layer.translateBy(x: point.x, y: point.y)
             var angle = spin
-            if orient, entity.vx != 0 || entity.vy != 0 {
-                angle += atan2(entity.vy, entity.vx) * 180 / .pi
-            }
+            if orient { angle += (heading() ?? 0) * 180 / .pi }
             layer.rotate(by: .degrees(angle))
             if taper {
                 // A brush mark: its tapered outline, filled ONCE (web X386).
@@ -740,6 +761,37 @@ struct NativeSceneView: View {
         case .unknown:
             break
         }
+    }
+
+    /// A `text` sprite with a presentation (compile.ts text branch): its CSS
+    /// font — a size-less family/weight takes the seeded size, a px size in
+    /// the shorthand is used as written (scaled with the viewport) — aligned
+    /// and baselined about the point, squeezed to `maxWidth` when wider.
+    private func drawTextSprite(_ text: String, size: Double, style: SpecSubset.TextSpriteStyle, color: Color,
+                                dim: CGFloat, units: SpecSubset.Units, ctx: inout GraphicsContext) {
+        #if canImport(UIKit)
+        var px = size
+        if let f = style.font, let r = f.range(of: #"(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px"#, options: .regularExpression),
+           let n = Double(f[r].dropLast(2)) {
+            px = n * (units == .px ? 1 : dim / 1080)
+        }
+        let uiFont = TextBlockFont.uiFont(css: style.font, size: px)
+        let width = (text as NSString).size(withAttributes: [.font: uiFont]).width
+        let maxW = style.maxWidth.map { $0 * (units == .px ? 1 : dim) }
+        var layer = ctx
+        if let maxW, width > maxW, width > 0 { layer.scaleBy(x: maxW / width, y: 1) }
+        let ax: CGFloat = style.align == "left" || style.align == "start" ? 0
+            : style.align == "right" || style.align == "end" ? 1 : 0.5
+        let ay: CGFloat
+        switch style.baseline {
+        case "top", "hanging": ay = 0
+        case "bottom", "ideographic": ay = 1
+        case "alphabetic": ay = uiFont.ascender / max(1, uiFont.lineHeight)
+        default: ay = 0.5
+        }
+        layer.draw(Text(text).font(Font(uiFont as CTFont)).foregroundStyle(color),
+                   at: .zero, anchor: UnitPoint(x: ax, y: ay))
+        #endif
     }
 
     /// Path-drawing raster density, px per point (Apple TV renders at 1×–2×).
