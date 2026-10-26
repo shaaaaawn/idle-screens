@@ -14,4 +14,4 @@ export * from './sequence';
 export * from './timeline';
 export * from './period';
 export * from './examples';
-export { flattenPath, isPathPolygon, pathFrame, pathParts, MAX_PATH_POINTS, type FlattenedPath, type ResolvedPart } from './shapes';
+export { drawSpan, flattenPath, isPathPolygon, pathFrame, pathParts, strokeDrawnSamples, strokeLines, trimLines, trimPolyline, MAX_PATH_POINTS, type FlattenedPath, type ResolvedPart } from './shapes';
