@@ -289,12 +289,30 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(drift.reasons.join(' ')).toContain('drift');
   });
 
-  it('does not round a part that repeats between whole milliseconds', () => {
+  it('combines parts that repeat between whole milliseconds exactly, never by rounding', () => {
     const spinning = (spin: number): LayerSpec => ({ ...pulsing(4000), spin });
-    expect(scenePeriod(scene([spinning(90)])).period).toBe(4000); // 360000 / 90: exact
-    const odd = scenePeriod(scene([spinning(7)])); // 51428.57… ms, not 51429
-    expect(odd.period).toBeNull();
-    expect(odd.reasons.join(' ')).toContain('whole number of milliseconds');
+    expect(scenePeriod(scene([spinning(90)])).period).toBe(4000); // 360000 / 90
+    // spin 7 laps every 51428.57… ms; seven laps (360000 ms) are 90 pulses: that is the period.
+    expect(scenePeriod(scene([spinning(7)])).period).toBe(360000);
+    // Alone it has no whole-ms repeat at all.
+    const alone = scenePeriod(scene([{ ...pulsing(0), pulse: undefined, spin: 7 } as LayerSpec]));
+    expect(alone.period).toBeNull();
+    expect(alone.reasons.join(' ')).toContain('whole number of milliseconds');
+    // A 1000 ms pulse at clock rate 0.3 repeats every 3333⅓ ms: three of them fit a 10 s lap.
+    const slow = (duration: number): SaverSpec => scene([{ ...pulsing(1000), key: 'p', opacity: 1, clock: { rate: 0.3 } }], { timeline: { loop: true, duration, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] } });
+    expect(scenePeriod(slow(10000)).period).toBe(10000);
+    expect(adviseSpec(slow(10000), { width: 960, height: 540 }).map((w) => w.code)).not.toContain('loop-seam');
+  });
+
+  it('repeats a drifting field only on whole 100 ms raster buckets', () => {
+    const field = (period: number): SaverSpec => scene([], { background: { type: 'field', scale: 2, bands: ['#000000', '#ffffff'], drift: { amount: 0.5, period } } as never });
+    expect(scenePeriod(field(10050)).period).toBe(20100);
+    expect(scenePeriod(field(10000)).period).toBe(10000);
+  });
+
+  it('treats a zero-start fade as a one-shot build, not a static scene', () => {
+    expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 1000 } }])).period).toBeNull();
+    expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 0 } }])).period).toBe(0);
   });
 
   it('is aperiodic when a timeline key moves a period or rate', () => {

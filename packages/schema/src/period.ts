@@ -15,6 +15,7 @@
  * timeline whose lap the rest of the scene does not divide.
  */
 import type { LayerSpec, SaverSpec } from './types';
+import { FIELD_BUCKET_MS } from './field';
 import { spriteVariants } from './simulate';
 import { withoutTimeline } from './timeline';
 
@@ -35,23 +36,33 @@ const PERIOD_LEAF = /(^|\.)(period|rate|every|duration|spin|speed|blink|drift)$/
 
 const gcd = (a: number, b: number): number => { while (b) [a, b] = [b, a % b]; return a; };
 
+/** ms as a reduced ratio [num, den], den ≤ 1000 — or null when it is not one (an irrational-looking rate). */
+function toRatio(ms: number): [number, number] | null {
+  for (let q = 1; q <= 1000; q++) {
+    const p = ms * q;
+    if (Math.abs(p - Math.round(p)) < 1e-6) {
+      const n = Math.round(p);
+      const g = gcd(n, q);
+      return [n / g, q / g];
+    }
+  }
+  return null;
+}
+
 const range = (r: number | [number, number] | undefined): number | null =>
   r === undefined ? null : typeof r === 'number' ? r : r[0] === r[1] ? r[0] : NaN;
 
 /** The repeat period of `spec` — see the module comment. */
 export function scenePeriod(spec: SaverSpec): ScenePeriod {
-  const parts: Array<[string, number]> = [];
+  // Each part's period as an exact ratio num/den ms, so a part that repeats
+  // between whole milliseconds (`spin: 7` → 360000/7) still combines exactly.
+  const parts: Array<[string, number, number]> = [];
   const reasons: string[] = [];
   const add = (label: string, ms: number): void => {
     if (!(ms > 0) || !Number.isFinite(ms)) return;
-    // A part that does not repeat on a whole millisecond (spin: 7 laps every
-    // 51428.57… ms) has no exact whole-ms common period with anything, and a
-    // rounded one would hand back a frame that is not the same.
-    if (Math.abs(ms - Math.round(ms)) > 1e-6) {
-      reasons.push(`${label} repeats every ${Number(ms.toFixed(3))} ms, not a whole number of milliseconds`);
-      return;
-    }
-    parts.push([label, Math.round(ms)]);
+    const ratio = toRatio(ms);
+    if (!ratio) reasons.push(`${label} repeats every ${Number(ms.toFixed(3))} ms, which has no exact ratio to combine`);
+    else parts.push([label, ratio[0], ratio[1]]);
   };
 
   const tl = spec.timeline;
@@ -64,14 +75,22 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     else reasons.push('timeline does not loop (it plays once, then holds)');
   }
   const bg = spec.background;
-  if (bg && bg.type !== 'solid' && bg.drift) add('background drift', bg.drift.period);
+  if (bg && bg.type !== 'solid' && bg.drift) {
+    // A field is rastered once per bucket and held, so it repeats only on a
+    // whole number of buckets as well as of drift periods; a gradient's
+    // drift is sampled continuously.
+    const { period } = bg.drift;
+    const field = bg.type === 'field' && bg.drift.amount !== 0;
+    const r = field ? toRatio(period) : null;
+    add('background drift', r ? (r[0] / gcd(r[0], FIELD_BUCKET_MS)) * FIELD_BUCKET_MS : period);
+  }
   if (spec.finish?.animate && ((spec.finish.grain ?? 0) > 0 || (spec.finish.dither ?? 0) > 0)) reasons.push('finish.animate steps the grain without repeating');
 
   spec.layers.forEach((layer: LayerSpec, i) => {
     const at = `layers[${i}]${layer.key ? ` (${layer.key})` : ''}`;
     const rate = layer.clock?.rate ?? 1;
     const life = layer.life;
-    if (life && ((life.enter ?? 0) > 0 || life.exit !== undefined)) reasons.push(`${at} life builds in or out once`);
+    if (life && (life.exit !== undefined || (life.enter !== undefined && ((life.enter ?? 0) > 0 || (life.fade ?? 1000) > 0)))) reasons.push(`${at} life builds in or out once`);
     if (layer.pulse) add(`${at} pulse`, layer.pulse.period / rate);
     if (layer.grow) add(`${at} grow`, layer.grow.period / rate);
     if (layer.rock) add(`${at} rock`, layer.rock.period / rate);
@@ -102,17 +121,21 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     }
   });
 
-  const labelled = parts.map(([l, ms]) => `${l}: ${ms} ms`);
+  const labelled = parts.map(([l, n, d]) => `${l}: ${Number((n / d).toFixed(3))} ms`);
   if (reasons.length > 0) return { period: null, parts: labelled, reasons };
   if (parts.length === 0) return { period: 0, parts: labelled, reasons };
-  let lcm = 1;
-  for (const [, ms] of parts) {
-    lcm = (lcm / gcd(lcm, ms)) * ms;
-    if (lcm > MAX_SCENE_PERIOD) {
+  // The common period of n₁/d₁, n₂/d₂ … (each reduced) is lcm(nᵢ) / gcd(dᵢ).
+  let num = 1;
+  let den = 0;
+  for (const [, n, d] of parts) {
+    num = (num / gcd(num, n)) * n;
+    den = gcd(den, d);
+    if (num / den > MAX_SCENE_PERIOD) {
       return { period: null, parts: labelled, reasons: [`its parts share no cycle shorter than ${MAX_SCENE_PERIOD / 60000} min`] };
     }
   }
-  return { period: lcm, parts: labelled, reasons };
+  if (num % den !== 0) return { period: null, parts: labelled, reasons: [`its parts repeat together every ${Number((num / den).toFixed(3))} ms, not a whole number of milliseconds`] };
+  return { period: num / den, parts: labelled, reasons };
 }
 
 /**

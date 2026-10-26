@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { timelineFlashReport } from './flash-timeline';
+import { lumaKeyTimes, timelineFlashReport } from './flash-timeline';
 import type { SaverSpec } from './types';
 import { validateSpec } from './validate';
 
@@ -13,6 +13,21 @@ const scene = (bg: string, layers: unknown[], keys: unknown[], duration = 4000):
   ({ schemaVersion: 1, id: 'f', label: 'F', background: { type: 'solid', color: bg }, layers, timeline: { loop: true, duration, keys } }) as unknown as SaverSpec;
 
 describe('timelineFlashReport', () => {
+  it('treats draw-span keys as luminance-bearing, so a draw-only timeline is sampled', () => {
+    const bar = (key: string, color: string): Record<string, unknown> => ({
+      key, count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+      sprite: { kind: 'stroke', length: [3, 3], points: [[-1, 0], [1, 0]], curve: 'linear', width: 2, color, draw: { end: 1 } },
+    });
+    const keys = [];
+    for (let i = 0; i < 15; i++) {
+      keys.push(step(i * 200, 'w.sprite.draw.end', i % 2 ? 0 : 1));
+      keys.push(step(i * 200 + 100, 'k.sprite.draw.end', i % 2 ? 1 : 0));
+    }
+    const spec = scene('#000000', [bar('k', '#000000'), bar('w', '#ffffff')], keys);
+    expect(lumaKeyTimes(spec).times.length).toBeGreaterThan(0); // sampled, not waved through unexamined
+  });
+
+
   it('catches paths that are each legal but combine into a full-frame strobe', () => {
     // The top layer's opacity picks between its own colour and the bottom
     // layer's; all three keyed at the 200 ms floor, 67 ms apart.

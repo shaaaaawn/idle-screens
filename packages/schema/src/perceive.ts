@@ -828,13 +828,16 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       for (const edge of edges) {
         const pi = positions[edge.i]!;
         const pj = positions[edge.j]!;
+        // A link lives as long as both its ends (a staggered layer's lifeA is only its gate).
+        const env = layer.life?.stagger ? Math.min(lifeStaggerAt(layer.life, tPass, edge.i), lifeStaggerAt(layer.life, tPass, edge.j)) : 1;
+        if (env <= 0) continue;
         const steps = Math.max(1, Math.ceil(edge.dist / Math.min(cellW, cellH)));
         for (let i = 0; i <= steps; i++) {
           const k = i / steps;
           const c = Math.floor((pi.x + (pj.x - pi.x) * k) / cellW);
           const r = Math.floor((pi.y + (pj.y - pi.y) * k) / cellH);
           if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
-          compose(r * cols + c, lum, wgt, layer.blend);
+          compose(r * cols + c, lum, wgt * env, layer.blend);
         }
       }
     }
@@ -1308,7 +1311,10 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       const la = (layer.links.alpha ?? 0.6) * lifeA;
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
       const lw = (layer.links.width ?? defaultWidth) * scale;
-      for (const edge of edges) area += edge.dist * lw * la * LINE_SALIENCE;
+      for (const edge of edges) {
+        const env = layer.life?.stagger ? Math.min(lifeStaggerAt(layer.life, t, edge.i), lifeStaggerAt(layer.life, t, edge.j)) : 1;
+        area += edge.dist * lw * la * LINE_SALIENCE * env;
+      }
     }
     const meanLuma = entities.length ? lumAcc / entities.length : 0;
     const contrast = Math.abs(meanLuma - bgMean) + 0.1;
