@@ -176,6 +176,22 @@ struct NativeSceneView: View {
                               parent: parentEntity, ctx: &layerCtx)
                 }
                 let grownSize = entity.size * SceneMotion.growScale(of: entity, at: t)
+                if let xf = layer.textCrossfade {
+                    // A morph's two text passes: the outgoing words under the incoming.
+                    var outgoing = entity
+                    if let glyphs = xf.outGlyphs, glyphs.indices.contains(i) { outgoing.glyph = glyphs[i] }
+                    if xf.aOut > 0 {
+                        draw(entity: outgoing, size: grownSize, sprite: xf.outgoing, textStyle: layer.textStyle,
+                             feather: layer.feather, units: layer.units, space: space, at: point,
+                             dim: dim, alpha: alpha * lifeAlpha * xf.aOut, t: t, ctx: &layerCtx)
+                    }
+                    if xf.aIn > 0 {
+                        draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle,
+                             feather: layer.feather, units: layer.units, space: space, at: point,
+                             dim: dim, alpha: alpha * lifeAlpha * xf.aIn, t: t, ctx: &layerCtx)
+                    }
+                    continue
+                }
                 draw(entity: entity, size: grownSize, sprite: layer.sprite, textStyle: layer.textStyle, feather: layer.feather,
                      units: layer.units, space: space, at: point,
                      dim: dim, alpha: alpha * lifeAlpha, t: t, ctx: &layerCtx)
@@ -871,7 +887,7 @@ struct NativeSceneView: View {
         }
     }
 
-    // MARK: - TextBlock (t3 only — full reveal animation)
+    // MARK: - TextBlock (port of compile.ts drawEntity's textBlock branch)
 
     private func drawTextBlock(
         style: SpecSubset.TextStyle? = nil,
@@ -886,7 +902,9 @@ struct NativeSceneView: View {
         let lh = lineHeight * fsPx
         let maxWPx = maxWidth * dim
         let maxWEm = maxWPx / fsPx
-        let lines = breakTextBlock(text: tbText, maxWidthEm: maxWEm)
+        // Layout runs on the fixed metrics table (a mono `font` on its 0.6 em
+        // cell), so lines break where the web breaks them.
+        let lines = breakTextBlock(text: tbText, maxWidthEm: maxWEm, mono: isMonoFont(style?.font))
         guard !lines.isEmpty else { return }
 
         let rs = reveal.map { revealState(lines: lines, reveal: $0, t: t) }
@@ -894,8 +912,8 @@ struct NativeSceneView: View {
 
         let rgb = SpecSubset.Layer.rgb(from: tbColor)
         // Paint-level opacity for the block only (layer alpha is per entity).
-        let fillColor = Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2,
-                               opacity: alpha * min(1, max(0, style?.opacity ?? 1)))
+        let blockAlpha = alpha * min(1, max(0, style?.opacity ?? 1))
+        let fillColor = Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2, opacity: blockAlpha)
 
         var layer = ctx
         layer.translateBy(x: point.x, y: point.y)
@@ -918,37 +936,64 @@ struct NativeSceneView: View {
         default: anchor = .topLeading; xOff = 0
         }
 
-        // A CSS font shorthand can only be honoured in kind on a system
-        // font: weight, slant, and serif / mono / rounded.
-        let traits = style?.fontTraits ?? (bold: false, italic: false, design: "default")
-        let design: Font.Design = traits.design == "mono" ? .monospaced
-            : traits.design == "serif" ? .serif
-            : traits.design == "rounded" ? .rounded : .default
-        var font: Font = .system(size: fsPx, weight: traits.bold ? .bold : .regular, design: design)
-        if traits.italic { font = font.italic() }
-        for li in 0..<visibleLines {
-            let lineView = Text(lines[li].text).font(font).foregroundStyle(fillColor)
-            layer.draw(lineView, at: CGPoint(x: xOff, y: CGFloat(li) * lh),
-                       anchor: anchor)
-        }
+        // The face the CSS `font` names where it is installed, else the
+        // system face in its class, weight and slant.
+        #if canImport(UIKit)
+        let uiFont = TextBlockFont.uiFont(css: style?.font, size: fsPx)
+        let font = Font(uiFont as CTFont)
+        func measure(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: uiFont]).width }
+        #else
+        let font = Font.system(size: fsPx)
+        func measure(_ s: String) -> CGFloat { textWidthEm(s) * fsPx }
+        #endif
 
-        if let rs, !rs.partialText.isEmpty {
-            let partial = Text(rs.partialText).font(font).foregroundStyle(fillColor)
-            layer.draw(partial, at: CGPoint(x: xOff, y: CGFloat(visibleLines) * lh),
-                       anchor: anchor)
+        if let alphas = rs?.glyphAlphas {
+            // glyphFade: the fully-opaque leading run of a line draws as one
+            // string; the fading tail draws glyph by glyph at its prefix's
+            // measured advance, each at its own alpha — and, with
+            // `reveal.rise`, lifted into the line by rise·(1 − a) em.
+            let riseEm = min(Self.maxRevealRise, max(0, reveal?.rise ?? 0))
+            for li in lines.indices {
+                let la = li < alphas.count ? alphas[li] : []
+                if let first = la.first, first <= 0 { break }
+                let clusters = graphemeClusters(lines[li].text)
+                let lw = measure(lines[li].text)
+                let x0: CGFloat = align == "center" ? (maxWPx - lw) / 2 : align == "right" ? maxWPx - lw : 0
+                var opaque = 0
+                while opaque < clusters.count, opaque < la.count, la[opaque] >= 1 { opaque += 1 }
+                var prefix = ""
+                if opaque > 0 {
+                    prefix = clusters[0..<opaque].joined()
+                    layer.draw(Text(prefix).font(font).foregroundStyle(fillColor),
+                               at: CGPoint(x: x0, y: CGFloat(li) * lh), anchor: .topLeading)
+                }
+                for gi in opaque..<clusters.count {
+                    let a = gi < la.count ? la[gi] : 0
+                    if a <= 0 { break }   // alphas only fall in reading order
+                    let glyph = Text(clusters[gi]).font(font)
+                        .foregroundStyle(Color(.sRGB, red: rgb.0, green: rgb.1, blue: rgb.2, opacity: blockAlpha * a))
+                    layer.draw(glyph, at: CGPoint(x: x0 + measure(prefix),
+                                                  y: CGFloat(li) * lh + riseEm * fsPx * (1 - a)),
+                               anchor: .topLeading)
+                    prefix += clusters[gi]
+                }
+            }
+        } else {
+            for li in 0..<visibleLines {
+                let lineView = Text(lines[li].text).font(font).foregroundStyle(fillColor)
+                layer.draw(lineView, at: CGPoint(x: xOff, y: CGFloat(li) * lh), anchor: anchor)
+            }
+            if let rs, !rs.partialText.isEmpty {
+                let partial = Text(rs.partialText).font(font).foregroundStyle(fillColor)
+                layer.draw(partial, at: CGPoint(x: xOff, y: CGFloat(visibleLines) * lh), anchor: anchor)
+            }
         }
 
         if let rs, let caretCfg = reveal?.caret {
             let hz = min(3.0, caretCfg.blink ?? 1.2)
             let on = hz <= 0 || Int(t * hz * 2) % 2 == 0
             if on {
-                #if canImport(UIKit)
-                let uiFont = UIFont.systemFont(ofSize: fsPx)
-                let pw = (rs.caretPrefix as NSString)
-                    .size(withAttributes: [.font: uiFont]).width
-                #else
-                let pw = textWidthEm(rs.caretPrefix) * fsPx
-                #endif
+                let pw = measure(rs.caretPrefix)
                 let cx: CGFloat
                 switch align {
                 case "center": cx = xOff + pw / 2
@@ -957,7 +1002,7 @@ struct NativeSceneView: View {
                 }
                 let caretRGB = caretCfg.color.map { SpecSubset.Layer.rgb(from: $0) } ?? rgb
                 let caretColor = Color(.sRGB, red: caretRGB.0, green: caretRGB.1,
-                                        blue: caretRGB.2, opacity: alpha)
+                                        blue: caretRGB.2, opacity: blockAlpha)
                 let caretRect = CGRect(x: cx + fsPx * 0.06,
                                        y: CGFloat(rs.caretLine) * lh,
                                        width: max(1, fsPx * 0.08), height: fsPx)
@@ -965,4 +1010,7 @@ struct NativeSceneView: View {
             }
         }
     }
+
+    /// `LIMITS.maxRevealRise`, em.
+    static let maxRevealRise = 1.0
 }

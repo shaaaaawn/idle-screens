@@ -80,10 +80,55 @@ final class SequenceSubsetTests: XCTestCase {
         XCTAssertEqual(wrapped, 5, accuracy: 1e-9)
     }
 
-    func testTransitionDurations() {
-        XCTAssertEqual(heldTail.transitionDuration(entering: 0), 0, "absent transition = cut")
-        XCTAssertEqual(heldTail.transitionDuration(entering: 1), 2, accuracy: 1e-9)
-        XCTAssertEqual(heldTail.transitionDuration(entering: 99), 0, "out of range is safe")
+    func testTheOutgoingSegmentOwnsTheCrossing() {
+        // b's morph plays b → tail (the web reads segments[from].transition);
+        // a has none, so a → b cuts. Empty twins are structural twins.
+        XCTAssertEqual(heldTail.crossing(into: 0, wrapped: false), .cut, "nothing precedes segment 0")
+        XCTAssertEqual(heldTail.crossing(into: 1, wrapped: false), .cut, "a declares no transition")
+        XCTAssertEqual(heldTail.crossing(into: 2, wrapped: false), .morph(from: 1, seconds: 2, text: "step"))
+        XCTAssertEqual(heldTail.crossing(into: 99, wrapped: false), .cut, "out of range is safe")
+    }
+
+    func testMorphBetweenNonTwinsIsACutAndAWrapFadesFromTheLast() throws {
+        let seq = try JSONDecoder().decode(SequenceSubset.self, from: Data(##"""
+        {"format":"idle-sequence","loop":true,"segments":[
+          {"duration":1000,"transition":{"type":"morph","dur":800},"scene":{"layers":[{"count":3,"sprite":{"kind":"circle"},"motion":{"type":"drift"}}]}},
+          {"duration":1000,"transition":{"type":"fade","dur":600},"scene":{"layers":[{"count":4,"sprite":{"kind":"circle"},"motion":{"type":"drift"}}]}}]}
+        """##.utf8))
+        XCTAssertEqual(seq.crossing(into: 1, wrapped: false), .cut, "count differs: not twins")
+        XCTAssertEqual(seq.crossing(into: 0, wrapped: true), .fade(seconds: 0.6))
+        XCTAssertEqual(seq.crossing(into: 0, wrapped: false), .cut, "the first mount is not a wrap")
+        XCTAssertTrue(seq.hasWrapped(at: 2.0))
+        XCTAssertFalse(seq.hasWrapped(at: 1.9))
+    }
+
+    func testSegmentSeedsFollowTheWeb() throws {
+        // segmentRenderSeed: own seed, else seq.seed + the chain root's index.
+        let seq = try JSONDecoder().decode(SequenceSubset.self, from: Data(##"""
+        {"format":"idle-sequence","seed":10,"segments":[
+          {"duration":1000,"scene":{"layers":[]}},
+          {"duration":1000,"transition":{"type":"morph","dur":500},"scene":{"seed":77,"layers":[]}},
+          {"duration":1000,"scene":{"layers":[]}},
+          {"duration":1000,"scene":{"layers":[]}}]}
+        """##.utf8))
+        XCTAssertEqual(seq.renderSeed(0, fallback: 5), 10)
+        XCTAssertEqual(seq.renderSeed(1, fallback: 5), 77)
+        XCTAssertEqual(seq.renderSeed(2, fallback: 5), 77, "morph-chained to segment 1")
+        XCTAssertEqual(seq.renderSeed(3, fallback: 5), 13)
+    }
+
+    func testEpochSyncStartsOnTheSharedClock() throws {
+        let seq = try JSONDecoder().decode(SequenceSubset.self, from: Data(##"""
+        {"format":"idle-sequence","sync":"epoch","loop":true,"segments":[
+          {"duration":10000,"scene":{"layers":[]}},{"duration":20000,"scene":{"layers":[]}}]}
+        """##.utf8))
+        let now = Date(timeIntervalSince1970: 1_000_100)
+        XCTAssertEqual(TVAppState.sequenceBaseT(seq, epochMs: 1_000_000_000, now: now), 10, accuracy: 1e-9,
+                       "100 s in, wrapped into the 30 s lap")
+        XCTAssertEqual(TVAppState.sequenceBaseT(seq, epochMs: nil, now: now), 0)
+        var mount = seq
+        mount.sync = nil
+        XCTAssertEqual(TVAppState.sequenceBaseT(mount, epochMs: 1_000_000_000, now: now), 0)
     }
 
     // MARK: - Production fixture (noble-grove-6b resolvedSpec, 2026-08-14)
@@ -124,8 +169,10 @@ final class SequenceSubsetTests: XCTestCase {
         // Wrap: 920 -> act-1 again.
         XCTAssertEqual(seq.resolve(at: 920).index, 0)
         XCTAssertEqual(seq.resolve(at: 920 + 250).index, 1)
-        // Morph into act-2, cut into act-3.
-        XCTAssertEqual(seq.transitionDuration(entering: 1), 5, accuracy: 1e-9)
-        XCTAssertEqual(seq.transitionDuration(entering: 2), 0)
+        // act-1 and act-2 are structural twins (same placement): a true morph.
+        XCTAssertEqual(seq.crossing(into: 1, wrapped: false), .morph(from: 0, seconds: 5, text: "step"))
+        XCTAssertEqual(seq.crossing(into: 2, wrapped: false), .morph(from: 1, seconds: 5, text: "step"))
+        XCTAssertEqual(seq.crossing(into: 3, wrapped: false), .cut, "act-3 declares a cut")
+        XCTAssertEqual(seq.renderSeed(2, fallback: 0), 71, "act-3 renders with the chain root's seed")
     }
 }

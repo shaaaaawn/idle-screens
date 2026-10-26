@@ -580,10 +580,12 @@ final class TVAppState {
             // restyles the past scene nor gets lost for the return.
             liveClassicParams = Self.trackParams(from: snapshot.scene)
             if timeline == .live { classicParams = liveClassicParams }
+            if let epoch = snapshot.epoch { channelEpochMs = epoch }
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed, let transition):
+        case .scene(let spec, let seed, let transition, let epoch):
+            if let epoch { channelEpochMs = epoch }
             if let spec {
                 // A new scene on the channel: the renderer identity changes, so
                 // the player dissolves old into new instead of swapping layers
@@ -607,7 +609,7 @@ final class TVAppState {
                 guard !Task.isCancelled else { return }
                 self?.overlayText = nil
             }
-        case .delta:
+        case .delta, .track:
             break
         case .switchChannel(let channelId, let sceneId):
             // Any switch push proves a paired phone is steering this TV —
@@ -820,6 +822,9 @@ final class TVAppState {
     private(set) var bedBackground: SpecSubset.Background?
     private(set) var bedGhosting: Double = 0
     private(set) var bedSeed: Int = 0
+    /// The live scene's publish time (ms), the origin of the channel's shared
+    /// clock — what `sync: 'epoch'` sequences anchor to.
+    private(set) var channelEpochMs: Int?
     /// True while the active sequence has a bed (even one with no layers —
     /// its ground alone still replaces every segment's background).
     private(set) var hasBed = false
@@ -829,28 +834,47 @@ final class TVAppState {
         guard seq != activeSequence else { return }
         sequenceTask?.cancel()
         activeSequence = seq
-        sequenceEpoch = Date()
+        // `sync: 'epoch'` starts the clock where the channel's shared clock
+        // is (every screen in the room on one segment); `mount` at 0.
+        let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date())
+        sequenceEpoch = Date().addingTimeInterval(-baseT)
         if let bed = seq.bed {
             bedSeed = seq.bedSeed(fallback: fallbackSeed ?? 0)
             bedScene = bed.compile(seed: bedSeed, budget: sceneBudget)
             bedBackground = bed.background
             bedGhosting = bed.ghosting ?? 0
-            if !hasBed { bedMountedAt = Date() }
+            if !hasBed { bedMountedAt = sequenceEpoch ?? Date() }
             hasBed = true
         } else {
             clearBed()
         }
-        applySegment(seq, at: 0, fallbackSeed: fallbackSeed, advancing: false)
+        applySegment(seq, at: baseT, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
+    }
+
+    /// Seconds already elapsed on a `sync: 'epoch'` sequence's shared clock
+    /// (the site's `sequenceBaseT`): `now − epoch`, wrapped into the lap when
+    /// it loops, never negative; 0 for `mount` or without an epoch.
+    nonisolated static func sequenceBaseT(_ seq: SequenceSubset, epochMs: Int?, now: Date) -> TimeInterval {
+        guard seq.sync == "epoch", let epochMs else { return 0 }
+        var elapsed = max(0, now.timeIntervalSince1970 - Double(epochMs) / 1000)
+        if seq.loop == true {
+            var lap: TimeInterval = 0
+            for seg in seq.segments { guard let d = seg.duration else { break }; lap += d / 1000 }
+            if lap > 0 { elapsed = elapsed.truncatingRemainder(dividingBy: lap) }
+        }
+        return elapsed
     }
 
     private func stopSequence() {
         sequenceTask?.cancel()
         sequenceTask = nil
+        stopMorph()
         activeSequence = nil
         sequenceEpoch = nil
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
+        sequenceWipe = nil
         clearBed()
     }
 
@@ -861,24 +885,52 @@ final class TVAppState {
         hasBed = false
     }
 
+    /// The wipe in flight entering the current segment, if that is how it
+    /// arrived (nil for every other crossing).
+    private(set) var sequenceWipe: SequenceSubset.Wipe?
+
     /// `advancing` is a step to the next segment of the sequence already on
     /// screen; the first segment of a new sequence is dissolved in by the scene
     /// message (or the channel change) that started it.
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?,
                               advancing: Bool = true) {
         stopKeyframes()
+        stopMorph()
         let resolved = seq.resolve(at: T)
-        let segment = seq.segments[resolved.index]
+        let index = resolved.index
+        let segment = seq.segments[index]
+        // The crossing is the OUTGOING segment's transition (web parity).
+        let crossing = seq.crossing(into: index, wrapped: index == 0 && seq.hasWrapped(at: T))
+        var dissolve: TimeInterval = 0
+        var wipe: SequenceSubset.Wipe?
+        switch crossing {
+        case .fade(let seconds): dissolve = seconds
+        case .wipe(let w, let seconds): dissolve = seconds; wipe = w
+        case .cut, .morph: break
+        }
         // Two renderers overlap during a dissolve: same cap as a scene message.
-        let authored = seq.transitionDuration(entering: resolved.index)
-        sequenceCrossfade = renderClass == .legacy ? min(authored, 0.4) : authored
-        let nextKey = segment.key ?? "segment-\(resolved.index)"
-        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey {
+        let remaining = max(0, dissolve - resolved.localT)
+        sequenceCrossfade = renderClass == .legacy ? min(remaining, 0.4) : remaining
+        sequenceWipe = remaining > 0 ? wipe : nil
+        let nextKey = segment.key ?? "segment-\(index)"
+        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey, sequenceCrossfade > 0 {
             beginCrossfade(seconds: sequenceCrossfade, withBed: false)
         }
         sequenceSegmentKey = nextKey
+        // Entities render with the morph chain root's seed (sequence.ts
+        // `segmentRenderSeed`), so a chain of twins never re-seats.
+        let seed = seq.renderSeed(index, fallback: fallbackSeed ?? 0)
         let scene = segment.scene
-        let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
+        let entered = Date().addingTimeInterval(-resolved.localT)
+        if case .morph(let from, let seconds, let text) = crossing, resolved.localT < seconds,
+           seq.rawScenes.indices.contains(from), seq.rawScenes.indices.contains(index) {
+            setGround(scene, seed: seed)
+            if hasBed { specBackground = nil; specGhosting = 0 }
+            specFinish = seq.finish ?? scene.finish
+            startMorph(seq, from: from, into: index, seconds: seconds, text: text, seed: seed, entered: entered)
+            complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
+            return
+        }
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)
         // Over a bed, a segment paints transparently: the bed owns the
         // ground, and a smear needs an opaque ground to decay into.
@@ -887,11 +939,66 @@ final class TVAppState {
         specFinish = seq.finish ?? scene.finish
         complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
         // A segment's own keyframes run on its local clock (from 0 at entry).
-        if case .object(let root)? = currentSpecJSON,
-           case .array(let segs)? = root["segments"], segs.indices.contains(resolved.index),
-           case .object(let seg) = segs[resolved.index], let raw = seg["scene"] {
-            startKeyframes(raw, seed: seed)
+        if seq.rawScenes.indices.contains(index) {
+            startKeyframes(seq.rawScenes[index], seed: seed, epoch: entered)
         }
+    }
+
+    // MARK: Morph — a lerp between structural twins
+
+    private var morphTask: Task<Void, Never>?
+
+    private func stopMorph() {
+        morphTask?.cancel()
+        morphTask = nil
+    }
+
+    /// Drive a morph into `index` (compile.ts SequenceInstance): each tick the
+    /// outgoing scene (resolved on its own clock, `duration + localT`) and
+    /// the incoming one (at `localT`) are lerped at `easeSmooth(localT / dur)`
+    /// and compiled with the chain root's seed, so every entity keeps its
+    /// place; `text: crossfade | dip` paints differing words twice. When the
+    /// window closes the incoming segment takes over, keyframes and all.
+    private func startMorph(_ seq: SequenceSubset, from: Int, into index: Int, seconds: TimeInterval,
+                            text: String, seed: Int, entered: Date) {
+        let outDur = (seq.segments[from].duration ?? 0) / 1000
+        let rawA = seq.rawScenes[from], rawB = seq.rawScenes[index]
+        let twoPass = text == "crossfade" || text == "dip"
+        let frame = { [weak self] (localT: TimeInterval) -> Bool in
+            guard let self else { return false }
+            let k = SpecTimeline.easeSmooth(localT / seconds)
+            let a = SpecTimeline.resolve(rawA, at: (outDur + localT) * 1000)
+            let b = SpecTimeline.resolve(rawB, at: localT * 1000)
+            let lerped = SpecTimeline.lerpSpec(SpecTimeline.withoutTimeline(a), SpecTimeline.withoutTimeline(b), k)
+            guard var layers = Self.compileJSON(lerped, seed: seed, budget: self.sceneBudget) else { return false }
+            if twoPass { MorphText.applyCrossfade(&layers, from: a, to: b, lerped: lerped, k: k, dip: text == "dip") }
+            self.compiledScene = layers
+            return true
+        }
+        _ = frame(Date().timeIntervalSince(entered))
+        morphTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let localT = Date().timeIntervalSince(entered)
+                if localT >= seconds {
+                    // The window closed: the incoming segment, on its own clock.
+                    self.compiledScene = seq.segments[index].scene.compile(seed: seed, budget: self.sceneBudget)
+                    self.morphTask = nil
+                    self.startKeyframes(rawB, seed: seed, epoch: entered)
+                    return
+                }
+                guard frame(localT) else { return }
+                try? await Task.sleep(for: .seconds(self.keyframeInterval))
+            }
+        }
+    }
+
+    /// A raw scene compiled the way a decoded one is; nil when it no longer decodes.
+    nonisolated static func compileJSON(_ json: JSONValue, seed: Int,
+                                        budget: (layers: Int, entities: Int)) -> [CompiledLayer]? {
+        guard let data = try? JSONEncoder().encode(json),
+              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return nil }
+        return spec.compile(seed: seed, budget: budget)
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {
@@ -937,12 +1044,13 @@ final class TVAppState {
         keyframeSource = nil
     }
 
-    private func startKeyframes(_ source: JSONValue, seed: Int) {
+    /// `epoch`: when the scene's clock read 0 (a segment entered earlier
+    /// resumes its timeline where it is, not from the top).
+    private func startKeyframes(_ source: JSONValue, seed: Int, epoch: Date = Date()) {
         if isDrivingKeyframes(source, seed: seed) { return }
         stopKeyframes()
         guard SpecTimeline.hasTimeline(source) else { return }
         keyframeSource = (source, seed)
-        let epoch = Date()
         keyframeTask = Task { [weak self] in
             var last: JSONValue?
             var slow = 0

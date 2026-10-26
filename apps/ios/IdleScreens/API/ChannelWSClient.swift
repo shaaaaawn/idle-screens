@@ -74,8 +74,12 @@ enum ChannelWSEvent: Equatable, Sendable {
     case snapshot(ChannelSnapshot)
     /// A new scene went live (publish, recall, a scheduled entry). `transition`
     /// is how the agent asked screens to replace the old one; nil = the default.
-    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil)
+    /// `epoch`: the publish time (ms) the channel's shared clock counts from.
+    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil)
     case delta(JSONValue?)
+    /// The channel's whole control track after a steer (the server sends it
+    /// beside every `delta` so screens converge instead of stacking steers).
+    case track(JSONValue?, epoch: Int?)
     case sleep
     case wake
     case overlay(text: String?, ttl: Int?)
@@ -280,10 +284,14 @@ actor ChannelWSClient {
             return .scene(
                 spec: message["spec"]?.normalizedSpec(),
                 seed: message["seed"]?.intValue,
-                transition: SceneTransition(message["transition"])
+                transition: SceneTransition(message["transition"]),
+                epoch: message["epoch"]?.intValue
             )
         case "delta":
-            return .delta(message["delta"] ?? message["patch"])
+            // The server spreads the delta's fields onto the message itself.
+            return .delta(message["delta"] ?? message["patch"] ?? .object(message.filter { $0.key != "type" }))
+        case "track":
+            return .track(message["track"], epoch: message["epoch"]?.intValue)
         case "sleep":
             return .sleep
         case "wake":

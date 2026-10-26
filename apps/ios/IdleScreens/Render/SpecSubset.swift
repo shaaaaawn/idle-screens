@@ -500,12 +500,16 @@ struct SpecSubset: Decodable, Equatable {
         var mode: String?
         var speed: Double?
         var caret: CaretConfig?
+        /// `glyphFade`: each glyph's fade window as a fraction of progress.
+        var fade: Double?
+        /// `glyphFade`: how far (em) a glyph rises into its line as it fades in.
+        var rise: Double?
     }
 }
 
 extension SpecSubset.TextRevealSpec: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case progress, mode, speed, caret
+        case progress, mode, speed, caret, fade, rise
     }
 
     init(from decoder: Decoder) throws {
@@ -513,6 +517,8 @@ extension SpecSubset.TextRevealSpec: Decodable {
         progress = try c.decodeIfPresent(Double.self, forKey: .progress)
         mode = try c.decodeIfPresent(String.self, forKey: .mode)
         speed = try c.decodeIfPresent(Double.self, forKey: .speed)
+        fade = try? c.decodeIfPresent(Double.self, forKey: .fade)
+        rise = try? c.decodeIfPresent(Double.self, forKey: .rise)
         if let boolValue = try? c.decode(Bool.self, forKey: .caret) {
             caret = boolValue ? SpecSubset.CaretConfig() : nil
         } else {
@@ -752,6 +758,9 @@ struct CompiledEntity: Equatable, Sendable {
     /// `position.dx`/`dy`: an offset from (x, y) in spec units (×dim at draw).
     var offDX: Double = 0
     var offDY: Double = 0
+    /// Which of a `text` sprite's strings (or emoji glyphs) this entity drew —
+    /// a morph's text cross-fade paints the outgoing string at the same index.
+    var glyphIndex: Int = 0
 }
 
 /// One entity's emit window. Timing is composition, not scatter: it is
@@ -860,6 +869,19 @@ struct CompiledLayer: Equatable, Sendable {
     var feather: Double = 0
     /// Paint transform (the layer's own and/or its group's); nil = identity.
     var paint: PaintTransform?
+    /// Mid-morph only: this text layer's outgoing words, painted under the
+    /// incoming ones (`text: crossfade | dip`).
+    var textCrossfade: TextCrossfade?
+}
+
+/// A morph's second text pass (compile.ts `LayerPaintOverride`): the outgoing
+/// sprite in the lerped frame's paint, and each pass's alpha.
+struct TextCrossfade: Equatable, Sendable {
+    var outgoing: SpecSubset.Sprite
+    /// `text` sprites: the outgoing string each entity paints, by glyph index.
+    var outGlyphs: [String]?
+    var aOut: Double
+    var aIn: Double
 }
 
 /// A layer's paint-level transform, resolved at draw time for a view size.
@@ -1214,11 +1236,14 @@ extension SpecSubset.Layer {
 
             // Glyph.
             let glyph: String?
+            var glyphIndex = 0
             switch sprite {
             case .emoji(let glyphs):
-                glyph = glyphs[min(glyphs.count - 1, Int(rng.next() * Double(glyphs.count)))]
+                glyphIndex = min(glyphs.count - 1, Int(rng.next() * Double(glyphs.count)))
+                glyph = glyphs[glyphIndex]
             case .text(let strings, _):
-                glyph = strings[min(strings.count - 1, Int(rng.next() * Double(strings.count)))]
+                glyphIndex = min(strings.count - 1, Int(rng.next() * Double(strings.count)))
+                glyph = strings[glyphIndex]
             default:
                 glyph = nil
             }
@@ -1285,7 +1310,8 @@ extension SpecSubset.Layer {
                 barIndex: i,
                 thickness: barThickness,
                 offDX: offDX,
-                offDY: offDY
+                offDY: offDY,
+                glyphIndex: glyphIndex
             ))
         }
         if let clock {

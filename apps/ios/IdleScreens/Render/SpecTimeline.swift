@@ -278,6 +278,63 @@ enum SpecTimeline {
         return walk(a, b ?? to, kk, key: rootKey)
     }
 
+    /// `lerpSpec`: two whole scenes at progress `k`. A layer `opacity`,
+    /// `transform` or `group` (and a group's paint) present on one end only
+    /// glides from its identity instead of stepping, and a root `timeline`
+    /// steps — two timelines' key times never blend.
+    static func lerpSpec(_ from: JSONValue, _ to: JSONValue, _ k: Double) -> JSONValue {
+        let (a, b) = alignPaintFields(from, to)
+        let kk = Swift.max(0, Swift.min(1, k))
+        guard case .object(let oa) = a, case .object(let ob) = b else { return walk(a, b, kk, key: nil) }
+        var out: [String: JSONValue] = [:]
+        for (name, bv) in ob {
+            // A field only the target has is JS `undefined` at k = 0: absent.
+            if oa[name] == nil, kk <= 0 { continue }
+            out[name] = name == "timeline" ? (kk > 0 ? bv : oa[name] ?? .null) : walk(oa[name], bv, kk, key: name)
+        }
+        return .object(out)
+    }
+
+    /// steer.ts `alignPaintFields`.
+    private static func alignPaintFields(_ a: JSONValue, _ b: JSONValue) -> (JSONValue, JSONValue) {
+        guard case .object(var ra) = a, case .object(var rb) = b else { return (a, b) }
+        if case .array(var la)? = ra["layers"], case .array(var lb)? = rb["layers"] {
+            for i in 0..<Swift.min(la.count, lb.count) {
+                guard case .object(var x) = la[i], case .object(var y) = lb[i] else { continue }
+                if (x["group"] == nil) != (y["group"] == nil) {
+                    if x["group"] == nil { x["group"] = y["group"] } else { y["group"] = x["group"] }
+                }
+                if (x["opacity"] == nil) != (y["opacity"] == nil) {
+                    if x["opacity"] == nil { x["opacity"] = .double(1) } else { y["opacity"] = .double(1) }
+                }
+                if x["transform"] != nil || y["transform"] != nil {
+                    let (fx, fy) = alignTransform(x["transform"] ?? .object([:]), y["transform"] ?? .object([:]))
+                    x["transform"] = fx; y["transform"] = fy
+                }
+                la[i] = .object(x); lb[i] = .object(y)
+            }
+            ra["layers"] = .array(la); rb["layers"] = .array(lb)
+        }
+        let ga: [String: JSONValue]? = { if case .object(let g)? = ra["groups"] { return g } else { return nil } }()
+        let gb: [String: JSONValue]? = { if case .object(let g)? = rb["groups"] { return g } else { return nil } }()
+        if ga != nil || gb != nil {
+            var na = ga ?? [:], nb = gb ?? [:]
+            for name in Set(na.keys).union(nb.keys) {
+                var x: [String: JSONValue] = { if case .object(let o)? = na[name] { return o } else { return [:] } }()
+                var y: [String: JSONValue] = { if case .object(let o)? = nb[name] { return o } else { return [:] } }()
+                if (x["opacity"] == nil) != (y["opacity"] == nil) {
+                    if x["opacity"] == nil { x["opacity"] = .double(1) } else { y["opacity"] = .double(1) }
+                }
+                if (x["transform"] == nil) != (y["transform"] == nil) {
+                    if x["transform"] == nil { x["transform"] = .object([:]) } else { y["transform"] = .object([:]) }
+                }
+                na[name] = .object(x); nb[name] = .object(y)
+            }
+            ra["groups"] = .object(na); rb["groups"] = .object(nb)
+        }
+        return (.object(ra), .object(rb))
+    }
+
     private static func walk(_ a: JSONValue?, _ b: JSONValue, _ kk: Double, key: String?) -> JSONValue {
         if let x = a?.number, let y = b.number, a?.isNumber == true, b.isNumber {
             let v = x + (y - x) * kk
@@ -289,12 +346,17 @@ enum SpecTimeline {
         if case .string(let sa)? = a, case .string(let sb) = b, isHex(sa), isHex(sb) {
             return .string(lerpHex(sa, sb, kk))
         }
+        if key == "path", case .string(let sa)? = a, case .string(let sb) = b, sa != sb,
+           let m = lerpPathD(sa, sb, kk) {
+            return .string(m)
+        }
         if case .array(let xa)? = a, case .array(let xb) = b, xa.count == xb.count {
             return .array(xb.indices.map { walk(xa[$0], xb[$0], kk, key: String($0)) })
         }
         if case .object(let oa)? = a, case .object(let ob) = b {
             var out: [String: JSONValue] = [:]
             for (name, bv) in ob {
+                if oa[name] == nil, kk <= 0 { continue }
                 if name == "transform" {
                     let (fa, fb) = alignTransform(oa[name], bv)
                     out[name] = walk(fa, fb ?? bv, kk, key: name)
@@ -309,6 +371,44 @@ enum SpecTimeline {
 
     /// JavaScript's Math.round (halves toward +∞).
     private static func jsRound(_ v: Double) -> Double { (v + 0.5).rounded(.down) }
+
+    /// steer.ts `lerpPathD`: two SVG paths with the same commands and number
+    /// count morph number by number (arc flags round); nil when they differ.
+    static func lerpPathD(_ a: String, _ b: String, _ k: Double) -> String? {
+        let ta = pathTokens(a), tb = pathTokens(b)
+        guard ta.count == tb.count else { return nil }
+        var out: [String] = []
+        var cmd = "", argIndex = 0
+        for (x, y) in zip(ta, tb) {
+            let isCmdA = x.count == 1 && x.first!.isLetter, isCmdB = y.count == 1 && y.first!.isLetter
+            if isCmdA != isCmdB { return nil }
+            if isCmdA {
+                if x != y { return nil }
+                cmd = x.uppercased(); argIndex = 0
+                out.append(x)
+                continue
+            }
+            guard let va = Double(x), let vb = Double(y) else { return nil }
+            let flag = cmd == "A" && (argIndex % 7 == 3 || argIndex % 7 == 4)
+            argIndex += 1
+            let v = va + (vb - va) * k
+            out.append(flag ? jsNumber(jsRound(v)) : jsNumber((v * 100_000).rounded() / 100_000))
+        }
+        return out.joined(separator: " ")
+    }
+
+    /// `/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g`
+    private static func pathTokens(_ d: String) -> [String] {
+        let re = try! NSRegularExpression(pattern: #"[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"#)
+        let ns = d as NSString
+        return re.matches(in: d, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+    }
+
+    /// A number as JS `String(n)` prints it for the values a path carries.
+    private static func jsNumber(_ v: Double) -> String {
+        if v == v.rounded(), abs(v) < 1e15 { return String(Int(v)) }
+        return String(v)
+    }
 }
 
 extension JSONValue {

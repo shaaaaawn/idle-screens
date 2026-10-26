@@ -6,12 +6,12 @@ import XCTest
 final class SceneTransitionTests: XCTestCase {
     func testParsesTheScenesTransition() throws {
         let fade = ChannelWSClient.parse(#"{"type":"scene","spec":{"id":"warp"},"seed":3,"transition":{"type":"fade","dur":2000}}"#)
-        guard case .scene(_, let seed, let transition)? = fade else { return XCTFail("not a scene: \(String(describing: fade))") }
+        guard case .scene(_, let seed, let transition, _)? = fade else { return XCTFail("not a scene: \(String(describing: fade))") }
         XCTAssertEqual(seed, 3)
         XCTAssertEqual(transition, SceneTransition(kind: .fade, dur: 2000))
 
         let plain = ChannelWSClient.parse(#"{"type":"scene","spec":{"id":"warp"},"seed":3}"#)
-        guard case .scene(_, _, let none)? = plain else { return XCTFail("not a scene") }
+        guard case .scene(_, _, let none, _)? = plain else { return XCTFail("not a scene") }
         XCTAssertNil(none)
 
         // Malformed values are dropped, not trusted: the server refuses them first.
