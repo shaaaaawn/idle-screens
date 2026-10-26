@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { drawSpan, pathLength, pathParts, partInkArea, strokeDrawnSamples, strokeSamples, trimLines, trimPolyline } from './shapes';
+import { drawSpan, strokeDrawnAt, strokeOutline, pathLength, pathParts, partInkArea, strokeDrawnSamples, strokeSamples, trimLines, trimPolyline } from './shapes';
 import { validateSpec } from './validate';
 import { luminanceGrid } from './perceive';
 import { createRng } from '@idle-screens/core';
@@ -9,7 +9,7 @@ import { adviseSequence, adviseSpec } from './advise';
 import { validateSequence } from './validate';
 import { wipeMask } from './compile';
 import { textSprites } from './perceive';
-import { easeGlide, easeSmooth, steerablePaths, structuralSignature } from './steer';
+import { easeGlide, easeSmooth, steerablePaths, structuralSignature, textStringsDiffer } from './steer';
 import { resolveTimelineAt } from './timeline';
 import type { LayerSpec, SaverSpec } from './types';
 
@@ -84,6 +84,23 @@ describe('draw-on (stroke.draw / path stroke.draw)', () => {
     expect(c).toBe(0);
   });
 
+  it('a tapered mark keeps its width as it is revealed (the taper belongs to the whole mark)', () => {
+    const sprite = line({ end: 0.5 }).sprite as never;
+    const drawn = strokeDrawnSamples(sprite, 100);
+    const at = strokeDrawnAt(sprite, 100, drawn)!;
+    expect(at[0]).toBeCloseTo(0, 6);
+    expect(at[at.length - 1]).toBeCloseTo(0.5, 2); // half the mark: the far end is mid-brush, not the thin tip
+    expect(strokeDrawnAt(line().sprite as never, 100, drawn)).toBeUndefined(); // no draw: unchanged index taper
+    // The revealed half's outline is the first half of the full mark's, not a re-tapered whole.
+    const full = strokeOutline(strokeSamples(line().sprite as never, 100), 10);
+    const widthAt = (o: Array<{ x: number; y: number }>, x: number): number => {
+      const near = o.filter((p) => Math.abs(p.x - x) < 1);
+      return Math.max(...near.map((p) => p.y)) - Math.min(...near.map((p) => p.y));
+    };
+    const part = strokeOutline(drawn, 10, true, at);
+    expect(widthAt(part, -40)).toBeCloseTo(widthAt(full, -40), 0);
+  });
+
   it('a path stroke paints its draw span (ink area)', () => {
     const sprite = {
       kind: 'polygon' as const,
@@ -104,7 +121,10 @@ describe('draw-on (stroke.draw / path stroke.draw)', () => {
     const bad = validateSpec(scene([line({ end: 2 })]));
     expect(bad.valid).toBe(false);
     expect(bad.errors.some((e) => e.path.endsWith('draw.end'))).toBe(true);
-    expect(validateSpec(scene([line({ stop: 1 } as never)])).valid).toBe(false);
+    // An unknown field is a forward-compatible warning, like everywhere else: the known span still draws.
+    const future = validateSpec(scene([line({ end: 0.5, stop: 1 } as never)]));
+    expect(future.valid).toBe(true);
+    expect(future.warnings?.some((w) => w.code === 'unknown-property' && w.path.endsWith('draw.stop'))).toBe(true);
     expect(structuralSignature(scene([line({ end: 0.1 })]))).toBe(structuralSignature(scene([line({ end: 0.9 })])));
     expect(steerablePaths(scene([line({ end: 0 })]))).toContain('layers.0.sprite.draw.end');
   });
@@ -269,6 +289,22 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(drift.reasons.join(' ')).toContain('drift');
   });
 
+  it('does not round a part that repeats between whole milliseconds', () => {
+    const spinning = (spin: number): LayerSpec => ({ ...pulsing(4000), spin });
+    expect(scenePeriod(scene([spinning(90)])).period).toBe(4000); // 360000 / 90: exact
+    const odd = scenePeriod(scene([spinning(7)])); // 51428.57… ms, not 51429
+    expect(odd.period).toBeNull();
+    expect(odd.reasons.join(' ')).toContain('whole number of milliseconds');
+  });
+
+  it('is aperiodic when a timeline key moves a period or rate', () => {
+    const keyed = (path: string): SaverSpec => scene([{ ...pulsing(4000), key: 'p' }], { timeline: { loop: true, duration: 12000, keys: [{ t: 0, path, value: 2500 }] } });
+    const r = scenePeriod(keyed('p.pulse.period'));
+    expect(r.period).toBeNull();
+    expect(r.reasons.join(' ')).toContain('p.pulse.period');
+    expect(scenePeriod(scene([{ ...pulsing(4000), key: 'p', opacity: 1 }], { timeline: { loop: true, duration: 12000, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] } })).period).toBe(12000);
+  });
+
   it('fires only when a looping timeline does not fit the rest of the scene', () => {
     const codes = (s: SaverSpec): string[] => adviseSpec(s, { width: 960, height: 540 }).map((w) => w.code);
     const tl = (duration: number): SaverSpec['timeline'] => ({ loop: true, duration, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] });
@@ -291,6 +327,12 @@ describe('wipe transition', () => {
       { key: 'a', scene: seg('#102030'), duration: 4000, transition },
       { key: 'b', scene: seg('#f0e0d0'), duration: 4000, transition },
     ],
+  });
+
+  it('warns, not errors, on an unknown wipe field', () => {
+    const r = validateSequence(seq({ type: 'wipe', dur: 1200, futureOption: true }));
+    expect(r.valid).toBe(true);
+    expect(r.warnings?.some((w) => w.code === 'unknown-property' && w.path.endsWith('futureOption'))).toBe(true);
   });
 
   it('validates its edge fields', () => {
@@ -352,6 +394,15 @@ describe('reveal.rise and textBlock.number', () => {
     expect(structuralSignature(s)).toBe(structuralSignature(scene([block({ number: { value: 9000, suffix: ' visitors' } })])));
     expect(validateSpec(scene([block({ number: { value: 'many' } })])).valid).toBe(false);
     expect(validateSpec(scene([block({ number: { value: 1, decimals: 9 } })])).valid).toBe(false);
+  });
+
+  it('a text morph fades a counter only when its label changes, not as its value glides', () => {
+    const a = scene([block({ number: { value: 10, suffix: ' visitors' } })]);
+    const sameLabel = scene([block({ number: { value: 99, suffix: ' visitors' } })]);
+    const newLabel = scene([block({ number: { value: 10, suffix: ' guests' } })]);
+    expect(textStringsDiffer(a, sameLabel, 0)).toBe(false);
+    expect(textStringsDiffer(a, newLabel, 0)).toBe(true);
+    expect(textStringsDiffer(a, scene([block({})]), 0)).toBe(true); // counter -> plain text
   });
 
   it('rise validates on glyphFade and warns elsewhere', () => {

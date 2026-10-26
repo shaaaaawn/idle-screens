@@ -351,7 +351,9 @@ export function lerpPathD(a: string, b: string, k: number): string | null {
  */
 export function textStringsOf(sprite: SpriteSpec): string[] | null {
   if (sprite.kind === 'text') return sprite.strings;
-  if (sprite.kind === 'textBlock') return [sprite.text];
+  // A counter's label is its prefix and suffix: the digits glide on their
+  // own, so only a changed label is a change of words.
+  if (sprite.kind === 'textBlock') return [sprite.number ? `${sprite.number.prefix ?? ''}\u0000${sprite.number.suffix ?? ''}` : sprite.text];
   return null;
 }
 

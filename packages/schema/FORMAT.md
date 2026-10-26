@@ -1108,8 +1108,11 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   path laps, emit, caret, background drift, a looping timeline), `0` for a
   static scene, or `null` with the reasons when something never repeats
   (seeded speed ranges, wrapping travel, a `life` build, a non-looping
-  timeline, a self-typing reveal, animated grain). An exporter reads it to
-  cut an exact loop.
+  timeline, a self-typing reveal, animated grain) — and likewise when a part
+  repeats between whole milliseconds (`spin: 7` laps every 51428.57 ms, which
+  no whole-ms period reproduces) or a timeline key moves a period, rate or
+  speed (the cycle itself then varies). An exporter reads it to cut an exact
+  loop.
   The two density advisories read the spec's declared `density` first:
   `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
   under `"dense"`, and `density-mismatch` fires instead when the measured

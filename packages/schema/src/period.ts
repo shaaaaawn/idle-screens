@@ -30,6 +30,9 @@ export interface ScenePeriod {
   reasons: string[];
 }
 
+/** Spec-path leaves that set how fast or how often something repeats (a key on one makes the period itself time-varying). */
+const PERIOD_LEAF = /(^|\.)(period|rate|every|duration|spin|speed|blink|drift)$/;
+
 const gcd = (a: number, b: number): number => { while (b) [a, b] = [b, a % b]; return a; };
 
 const range = (r: number | [number, number] | undefined): number | null =>
@@ -41,11 +44,22 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
   const reasons: string[] = [];
   const add = (label: string, ms: number): void => {
     if (!(ms > 0) || !Number.isFinite(ms)) return;
+    // A part that does not repeat on a whole millisecond (spin: 7 laps every
+    // 51428.57… ms) has no exact whole-ms common period with anything, and a
+    // rounded one would hand back a frame that is not the same.
+    if (Math.abs(ms - Math.round(ms)) > 1e-6) {
+      reasons.push(`${label} repeats every ${Number(ms.toFixed(3))} ms, not a whole number of milliseconds`);
+      return;
+    }
     parts.push([label, Math.round(ms)]);
   };
 
   const tl = spec.timeline;
   if (tl && tl.keys.length > 0) {
+    // A key that moves a period, rate or speed changes where the scene is in
+    // its cycle for as long as it glides, so one lap is no longer one cycle.
+    const keyed = tl.keys.filter((k) => PERIOD_LEAF.test(String(k.path)));
+    if (keyed.length > 0) reasons.push(`timeline keys animate ${[...new Set(keyed.map((k) => String(k.path)))].join(', ')}, which sets the scene's own period`);
     if (tl.loop && (tl.duration ?? 0) > 0) add('timeline', tl.duration!);
     else reasons.push('timeline does not loop (it plays once, then holds)');
   }

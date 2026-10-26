@@ -146,6 +146,24 @@ export function strokeDrawnSamples(s: StrokeSprite, halfSize: number): Array<{ x
   return span ? trimPolyline(pts, span[0], span[1]) : pts;
 }
 
+/**
+ * Each drawn sample's position along the WHOLE mark (0..1 by arc length), for
+ * a tapered stroke with a `draw` span: the brush width belongs to the mark,
+ * so revealing more of it must not reshape ink already down. Undefined when
+ * the stroke has no `draw` (its taper runs by sample index, as it always has).
+ */
+export function strokeDrawnAt(s: StrokeSprite, halfSize: number, drawn: Array<{ x: number; y: number }>): number[] | undefined {
+  if (!s.draw) return undefined;
+  const total = pathLength(strokeSamples(s, halfSize));
+  if (!(total > 0)) return undefined;
+  const a = drawSpan(s.draw)?.[0] ?? 0;
+  let run = 0;
+  return drawn.map((p, i) => {
+    if (i > 0) run += Math.hypot(p.x - drawn[i - 1]!.x, p.y - drawn[i - 1]!.y);
+    return a + run / total;
+  });
+}
+
 /** Total length of a sampled path, px. */
 export function pathLength(pts: Array<{ x: number; y: number }>): number {
   let l = 0;
@@ -318,10 +336,11 @@ export function ribbonSides(pts: Array<{ x: number; y: number }>, half: readonly
  * floored at 0.5 px. Joints are mitred (the offset scaled by 1/cos of the
  * half-turn, capped at 2×) so a polyline corner keeps its width.
  */
-export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, taper = true): Array<{ x: number; y: number }> {
+export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, taper = true, at?: readonly number[]): Array<{ x: number; y: number }> {
   const n = pts.length;
   if (n < 2) return [];
-  const half = (i: number): number => Math.max(0.5, taper ? lw * strokeTaper(i / (n - 1)) : lw) / 2;
+  // `at`: each sample's position along the whole mark, when `pts` is only a stretch of it.
+  const half = (i: number): number => Math.max(0.5, taper ? lw * strokeTaper(at?.[i] ?? i / (n - 1)) : lw) / 2;
   const dir = (a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;

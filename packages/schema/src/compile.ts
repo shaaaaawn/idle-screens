@@ -25,12 +25,12 @@ import {
 } from './steer';
 import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
-import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec, WipeTransition } from './types';
+import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec, TextNumber, WipeTransition } from './types';
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnAt, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -262,6 +262,16 @@ function armOverride(authored: SaverSpec, path: string, from: unknown, to: unkno
   const o: TimelineOverride = { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
   if (ease) o.ease = ease;
   return o;
+}
+
+/**
+ * A textBlock's outgoing words for a text morph. A counter keeps the
+ * incoming value (it glides on its own) under the outgoing prefix and
+ * suffix; a plain block, or a counter becoming one, shows the outgoing text.
+ */
+function outgoingCounter(from: Extract<SpriteSpec, { kind: 'textBlock' }>, now: Extract<SpriteSpec, { kind: 'textBlock' }>): { text: string; number?: TextNumber } {
+  if (from.number && now.number) return { text: from.text, number: { ...now.number, prefix: from.number.prefix, suffix: from.number.suffix } };
+  return { text: textBlockText(from), number: undefined };
 }
 
 /**
@@ -1434,7 +1444,7 @@ class SpecInstance implements SaverInstance {
         // A brush mark (X386): its tapered outline, filled once — so a
         // translucent stroke composites as one mark instead of beading at
         // every overlapping segment joint.
-        const outline = strokeOutline(pts, lw);
+        const outline = strokeOutline(pts, lw, true, strokeDrawnAt(sprite, sz / 2, pts));
         ctx.fillStyle = resolvedColor;
         ctx.beginPath();
         ctx.moveTo(outline[0]!.x, outline[0]!.y);
@@ -1685,7 +1695,7 @@ class SpecInstance implements SaverInstance {
   }
 
   private drawLinks(built: Built, t: number, lifeA: number, parentE: Entity | null): void {
-    const { links } = built.layer;
+    const { links, life } = built.layer;
     if (!links) return;
     const { ctx } = this;
     // Toroidal link drawing only makes sense for motions that actually wrap —
@@ -1714,6 +1724,8 @@ class SpecInstance implements SaverInstance {
         } else resolvedColor = '#e6e8ef';
       }
       let a = links.alpha ?? alphaAt(ei, t);
+      // A staggered layer's lifeA is only its gate; a link lives as long as both its ends.
+      if (life?.stagger) a *= Math.min(lifeStaggerAt(life, t, i), lifeStaggerAt(life, t, j));
       if (links.falloff && Number.isFinite(maxDistPx)) a *= Math.max(0, 1 - dist / maxDistPx);
       ctx.globalAlpha = a * lifeA;
       ctx.strokeStyle = resolvedColor;
@@ -2017,11 +2029,13 @@ class SpecInstance implements SaverInstance {
     }
     const next = new Map(this.overrides);
     const armed: Array<[string, string]> = [];
+    // The batch glides on one curve — the longest delta's — as on a plain scene.
+    const batchEase = steerEase([...latest.values()]);
     for (const [path, d] of latest) {
       const id = steerId(d);
       if (this.seenSteers.get(path) === id) continue;
       armed.push([path, id]);
-      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide, d.ease !== undefined && STEER_EASES.has(d.ease) ? d.ease : undefined));
+      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide, batchEase));
     }
     if (armed.length === 0) return true;
     // Validate the scene as it will actually be — every live override, now
@@ -2506,7 +2520,7 @@ class SequenceInstance implements SequenceSaverInstance {
       const outgoing: SpriteSpec = from.kind === 'text' && now.kind === 'text'
         ? { ...now, strings: from.strings }
         : from.kind === 'textBlock' && now.kind === 'textBlock'
-          ? { ...now, text: from.text }
+          ? { ...now, ...outgoingCounter(from, now) }
           : now;
       if (outgoing === now) continue;
       // `mode` is only written for `dip`, so a crossfade override is the
@@ -2529,28 +2543,17 @@ class SequenceInstance implements SequenceSaverInstance {
   }
 
   private wipeScratch: HTMLCanvasElement | OffscreenCanvas | null = null;
+  private wipeScratchIn: HTMLCanvasElement | OffscreenCanvas | null = null;
 
-  /**
-   * Composite one side of a transition out of segment `from` at eased
-   * progress `k`. A fade draws the outgoing at 1 − k (and, over a bed, the
-   * incoming at k). A wipe draws each side through the moving edge instead:
-   * the outgoing everywhere the edge has not yet passed, the incoming where
-   * it has — the canvas is masked on a scratch copy (`destination-out` /
-   * `destination-in` with the edge's gradient), then drawn.
-   */
-  private compositeTransition(canvas: HTMLCanvasElement | OffscreenCanvas, k: number, from: number, side: 'out' | 'in'): void {
-    const wipe = this.wipeOf(from);
-    if (!wipe) return this.composite(canvas, side === 'out' ? 1 - k : k);
-    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
-    if (!main) return;
+  /** `canvas` masked to one side of the wipe edge at progress `k`, on a scratch canvas of its own. */
+  private wipeSide(slot: 'wipeScratch' | 'wipeScratchIn', canvas: HTMLCanvasElement | OffscreenCanvas, wipe: WipeTransition, k: number, side: 'out' | 'in'): HTMLCanvasElement | OffscreenCanvas | null {
     const cw = Math.max(1, canvas.width);
     const ch = Math.max(1, canvas.height);
-    if (!this.wipeScratch) this.wipeScratch = createSceneCanvas(cw, ch);
-    const scratch = this.wipeScratch;
+    const scratch = (this[slot] ??= createSceneCanvas(cw, ch));
     if (scratch.width !== cw) scratch.width = cw;
     if (scratch.height !== ch) scratch.height = ch;
     const g = scratch.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-    if (!g) return this.composite(canvas, side === 'out' ? 1 - k : k);
+    if (!g) return null;
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalCompositeOperation = 'copy';
@@ -2559,6 +2562,42 @@ class SequenceInstance implements SequenceSaverInstance {
     g.fillStyle = wipeMask(g, wipe, k, cw, ch);
     g.fillRect(0, 0, cw, ch);
     g.restore();
+    return scratch;
+  }
+
+  /**
+   * Composite one side of a transition out of segment `from` at eased
+   * progress `k`. A fade draws the outgoing at 1 − k (and, over a bed, the
+   * incoming at k). A wipe draws each side through the moving edge instead:
+   * the outgoing everywhere the edge has not yet passed, the incoming where
+   * it has — the canvas is masked on a scratch copy (`destination-out` /
+   * `destination-in` with the edge's gradient), then drawn. `other`: the
+   * opposite side's canvas, when it is drawn too (a wipe over a bed) — the
+   * two masked sides are summed (`lighter`) on the scratch first, so a soft
+   * edge keeps matching marks opaque instead of letting the bed show through.
+   */
+  private compositeTransition(canvas: HTMLCanvasElement | OffscreenCanvas, k: number, from: number, side: 'out' | 'in', other?: HTMLCanvasElement | OffscreenCanvas): void {
+    const wipe = this.wipeOf(from);
+    if (!wipe) {
+      // A fade: the incoming under, the outgoing over — each at its own alpha.
+      if (other) this.composite(other, side === 'out' ? k : 1 - k);
+      return this.composite(canvas, side === 'out' ? 1 - k : k);
+    }
+    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+    if (!main) return;
+    const scratch = this.wipeSide('wipeScratch', canvas, wipe, k, side);
+    if (!scratch) return this.composite(canvas, side === 'out' ? 1 - k : k);
+    if (other) {
+      const rest = this.wipeSide('wipeScratchIn', other, wipe, k, side === 'out' ? 'in' : 'out');
+      const g = scratch.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      if (rest && g) {
+        g.save();
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalCompositeOperation = 'lighter';
+        g.drawImage(rest, 0, 0);
+        g.restore();
+      }
+    }
     main.save();
     main.globalAlpha = 1;
     main.globalCompositeOperation = 'source-over';
@@ -2924,8 +2963,7 @@ class SequenceInstance implements SequenceSaverInstance {
         if (!this.fadingIn) this.fadingIn = this.offscreenChild(index, useMorphSeed ? chainRoot : index);
         this.renderOffscreen(this.fadingIn, localT, effSeed);
         const out = this.renderOutgoing(fadeFrom, localT, seed);
-        this.compositeTransition(this.fadingIn.canvas, k, fadeFrom, 'in');
-        this.compositeTransition(out.canvas, k, fadeFrom, 'out');
+        this.compositeTransition(out.canvas, k, fadeFrom, 'out', this.fadingIn.canvas);
         return;
       }
 

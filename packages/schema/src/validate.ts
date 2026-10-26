@@ -1135,7 +1135,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
     if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
     if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
-    if (sprite.draw !== undefined) validateDraw(sprite.draw, `${path}.draw`, err);
+    if (sprite.draw !== undefined) validateDraw(sprite.draw, `${path}.draw`, err, warn);
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -1481,9 +1481,8 @@ function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
   if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err);
-  if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err);
+  if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err, warn);
   if (piece.fillRule !== undefined && !['auto', 'nonzero', 'evenodd'].includes(piece.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
-  void warn;
 }
 
 /** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
@@ -1512,18 +1511,18 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 }
 
 /** A path stroke: colour, width in unit-box units, optional opacity / join / cap. */
-function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void): void {
+function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err);
   if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
-  if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err);
+  if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err, warn);
 }
 
 /** A wipe transition's edge: shape, origin, angle and feather. */
-function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (tr.shape !== undefined && tr.shape !== 'circle' && tr.shape !== 'line') err(`${path}.shape`, "must be 'circle' | 'line'");
   if (tr.origin !== undefined) {
     const o = tr.origin;
@@ -1536,18 +1535,18 @@ function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string
   }
   if (tr.feather !== undefined && (!isNum(tr.feather) || tr.feather < 0 || tr.feather > 1)) err(`${path}.feather`, 'must be 0..1 (the edge width, as a fraction of the distance it travels)');
   for (const k of Object.keys(tr)) {
-    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) err(`${path}.${k}`, `unknown wipe property '${k}'`);
+    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) warn(`${path}.${k}`, 'unknown-property', `unknown wipe property '${k}' — will be ignored`);
   }
 }
 
 /** A line's draw-on span: `{ start?, end? }`, each a fraction of its arc length 0..1. */
-function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void): void {
+function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(d)) return err(path, 'must be { start?, end? } — fractions of the line, 0..1');
   for (const k of ['start', 'end'] as const) {
     const v = d[k];
     if (v !== undefined && (!isNum(v) || v < 0 || v > 1)) err(`${path}.${k}`, 'must be 0..1 (a fraction of the line\'s length)');
   }
-  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end') err(`${path}.${k}`, `unknown draw property '${k}' — draw takes start and end`);
+  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start and end; will be ignored`);
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
@@ -1665,7 +1664,7 @@ export function validateSequence(seq: unknown): ValidationResult {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
-        if (s.transition.type === 'wipe') validateWipe(s.transition, `${p}.transition`, err);
+        if (s.transition.type === 'wipe') validateWipe(s.transition, `${p}.transition`, err, (wp, code, message) => void warnings.push({ path: wp, code, message }));
       } else if (s.transition.type !== 'cut') {
         err(`${p}.transition.type`, "must be 'cut', 'morph', 'fade' or 'wipe'");
       }
