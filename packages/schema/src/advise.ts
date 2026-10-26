@@ -3,7 +3,7 @@ import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
 import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
@@ -283,7 +283,7 @@ export function adviseSpec(
         const fsPx = layer.sprite.fontSize * scale;
         const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
         const maxWPx = layer.sprite.maxWidth * scale;
-        const lines = breakTextBlock(layer.sprite.text, maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
+        const lines = breakTextBlock(textBlockText(layer.sprite), maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
         pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
       } else if (layer.sprite.kind === 'text') {
         // The renderer's own box (a px `font` wins over the seeded size), at
@@ -550,7 +550,7 @@ export function adviseSpec(
       // `role: 'read'` text can't hide behind an unmeasured alpha.
       const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
       const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
-      const str = s.kind === 'textBlock' ? s.text : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
+      const str = s.kind === 'textBlock' ? textBlockText(s) : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
       textBoxes.push({ li, label, alpha, str, ...box, rawW: raw.x1 - raw.x0, rawH: raw.y1 - raw.y0 });
     }
   }
@@ -1048,7 +1048,7 @@ function textBlockBoxAt(
   const fsPx = s.fontSize * unit;
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unit;
-  const lines = breakTextBlock(s.text, maxWPx / fsPx, textMetricsClassFor(s.font));
+  const lines = breakTextBlock(textBlockText(s), maxWPx / fsPx, textMetricsClassFor(s.font));
   const maxLineW = lines.reduce((mx, l) => Math.max(mx, l.widthEm), 0) * fsPx;
   const totalH = lines.length * lh;
   const align = s.align ?? 'left';
@@ -1120,13 +1120,17 @@ export function adviseSequence(
   // segment for it to transition into, so it never executes and should not
   // be counted.
   const fadeBound = seq.loop ? seq.segments.length : seq.segments.length - 1;
-  const fades = seq.segments.slice(0, fadeBound).filter((s) => s.transition?.type === 'fade').length;
+  const live = (s: { transition?: { type: string } }): boolean => s.transition?.type === 'fade' || s.transition?.type === 'wipe';
+  const fades = seq.segments.slice(0, fadeBound).filter(live).length;
   if (fades > 0) {
-    const first = seq.segments.slice(0, fadeBound).findIndex((s) => s.transition?.type === 'fade');
+    const first = seq.segments.slice(0, fadeBound).findIndex(live);
+    const wipes = seq.segments.slice(0, fadeBound).some((s) => s.transition?.type === 'wipe');
     warnings.push({
       path: `segments[${first}].transition`,
       code: 'fade-degrades-on-low-tier',
-      message: `informational: ${fades} fade transition${fades === 1 ? '' : 's'} declared — viewers on the 'basic' or 'minimal' capability tier render fade as cut (two live segments for dur is over that budget); the show still plays`,
+      message: wipes
+        ? `informational: ${fades} fade/wipe transition${fades === 1 ? '' : 's'} declared — viewers on the 'basic' or 'minimal' capability tier render them as cuts (two live segments for dur is over that budget); the show still plays`
+        : `informational: ${fades} fade transition${fades === 1 ? '' : 's'} declared — viewers on the 'basic' or 'minimal' capability tier render fade as cut (two live segments for dur is over that budget); the show still plays`,
     });
   }
 
@@ -1141,7 +1145,7 @@ export function adviseSequence(
     const lumaA = backgroundLuma(resolveTimelineAt(seq.segments[i]!.scene, seq.segments[i]!.duration ?? 0));
     const lumaB = backgroundLuma(resolveTimelineAt(seq.segments[i + 1]!.scene, 0));
     const delta = Math.abs(lumaA - lumaB);
-    if (delta > 0.5 && tr?.type !== 'fade') {
+    if (delta > 0.5 && tr?.type !== 'fade' && tr?.type !== 'wipe') {
       warnings.push({
         path: `segments[${i}]`,
         code: 'boundary-luminance-jump',

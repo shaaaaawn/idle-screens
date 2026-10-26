@@ -22,7 +22,7 @@ import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathF
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
-  breakTextBlock,
+  breakTextBlock, textBlockText,
   buildEntities,
   headingAt,
   isFullWidth,
@@ -207,7 +207,7 @@ function textBlockBox(
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unitScale;
   const maxWEm = maxWPx / fsPx;
-  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
+  const lines = breakTextBlock(textBlockText(s), maxWEm, textMetricsClassFor(s.font));
   const totalH = lines.length * lh;
   const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
   const align = s.align ?? 'left';
@@ -238,7 +238,7 @@ function textBlockRevealFraction(
   if (!s.reveal) return 1;
   const unitScale = Math.min(w, h);
   const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
-  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
+  const lines = breakTextBlock(textBlockText(s), maxWEm, textMetricsClassFor(s.font));
   const rs = revealState(lines, s.reveal, t);
   if (rs.glyphAlphas) {
     // glyphFade paints partial-alpha glyphs, so the ink fraction is the mean
@@ -1093,7 +1093,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
       const s = layer.sprite;
       const unitScale = Math.min(scene.w, scene.h);
       const sizePx = s.fontSize * unitScale;
-      const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [s.text], count: entities.length, sizePx: Math.round(sizePx) };
+      const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [textBlockText(s)], count: entities.length, sizePx: Math.round(sizePx) };
       if (s.reveal) info.revealed = Math.round(textBlockRevealFraction(s, scene.w, scene.h, t) * 100) / 100;
       out.push(info);
       return;

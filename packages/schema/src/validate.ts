@@ -36,7 +36,8 @@ const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'pa
 const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'draw', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role', 'number']);
+const KNOWN_TEXT_NUMBER = new Set(['value', 'decimals', 'prefix', 'suffix', 'grouping']);
 const TEXT_ROLES = new Set(['read', 'atmosphere']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
 /**
@@ -49,7 +50,7 @@ const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'cen
  * to identify an embedded size regardless of what follows it.
  */
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
-const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
+const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade', 'rise']);
 /**
  * What an author who knows another motion tool (CSS/GSAP/After Effects/
  * Remotion) usually means by a field the format does not have, per where it
@@ -1175,6 +1176,22 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.opacity`, 'must be a number between 0 and 1');
     }
     validateTextRole(sprite, path, err);
+    if (sprite.number !== undefined) {
+      const n = sprite.number as unknown;
+      if (!isObj(n)) err(`${path}.number`, 'must be { value, decimals?, prefix?, suffix?, grouping? }');
+      else {
+        if (!isNum(n.value)) err(`${path}.number.value`, 'must be a finite number');
+        if (n.decimals !== undefined && (!isNum(n.decimals) || !Number.isInteger(n.decimals) || n.decimals < 0 || n.decimals > LIMITS.maxTextNumberDecimals)) {
+          err(`${path}.number.decimals`, `must be a whole number 0..${LIMITS.maxTextNumberDecimals}`);
+        }
+        for (const k of ['prefix', 'suffix'] as const) {
+          const v = n[k];
+          if (v !== undefined && (!isStr(v) || v.length > LIMITS.maxTextAffix)) err(`${path}.number.${k}`, `must be a string of at most ${LIMITS.maxTextAffix} characters`);
+        }
+        if (n.grouping !== undefined && typeof n.grouping !== 'boolean') err(`${path}.number.grouping`, 'must be a boolean');
+        for (const k of unknownKeys(n, KNOWN_TEXT_NUMBER)) warn(`${path}.number.${k}`, 'unknown-property', `unknown number property '${k}' — will be ignored`);
+      }
+    }
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
@@ -1194,6 +1211,10 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         }
         if (rv.speed !== undefined && (!isNum(rv.speed) || rv.speed < 0 || rv.speed > LIMITS.maxRevealSpeed)) {
           err(`${path}.reveal.speed`, `must be between 0 and ${LIMITS.maxRevealSpeed} (graphemes/sec)`);
+        }
+        if (rv.rise !== undefined) {
+          if (!isNum(rv.rise) || rv.rise < 0 || rv.rise > LIMITS.maxRevealRise) err(`${path}.reveal.rise`, `must be 0..${LIMITS.maxRevealRise} (em below the line a glyph rises from)`);
+          else if (rv.mode !== 'glyphFade') warn(`${path}.reveal.rise`, 'unknown-property', "rise applies to mode 'glyphFade' only — will be ignored");
         }
         if (rv.caret !== undefined && typeof rv.caret !== 'boolean') {
           const caret = rv.caret as Record<string, unknown>;
@@ -1501,6 +1522,24 @@ function validatePathStroke(st: unknown, path: string, err: (p: string, m: strin
   if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err);
 }
 
+/** A wipe transition's edge: shape, origin, angle and feather. */
+function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string, m: string) => void): void {
+  if (tr.shape !== undefined && tr.shape !== 'circle' && tr.shape !== 'line') err(`${path}.shape`, "must be 'circle' | 'line'");
+  if (tr.origin !== undefined) {
+    const o = tr.origin;
+    if (!isObj(o) || !isNum(o.x) || !isNum(o.y) || o.x < 0 || o.x > 1 || o.y < 0 || o.y > 1) err(`${path}.origin`, 'must be { x, y } with each 0..1 (where the iris opens)');
+    else if (tr.shape === 'line') err(`${path}.origin`, "applies to shape 'circle' only — a line wipe sweeps along `angle`");
+  }
+  if (tr.angle !== undefined) {
+    if (!isNum(tr.angle) || Math.abs(tr.angle) > 360) err(`${path}.angle`, 'must be degrees, -360..360 (0 = left to right, 90 = top to bottom)');
+    else if (tr.shape !== 'line') err(`${path}.angle`, "applies to shape 'line' only — an iris opens from `origin`");
+  }
+  if (tr.feather !== undefined && (!isNum(tr.feather) || tr.feather < 0 || tr.feather > 1)) err(`${path}.feather`, 'must be 0..1 (the edge width, as a fraction of the distance it travels)');
+  for (const k of Object.keys(tr)) {
+    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) err(`${path}.${k}`, `unknown wipe property '${k}'`);
+  }
+}
+
 /** A line's draw-on span: `{ start?, end? }`, each a fraction of its arc length 0..1. */
 function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void): void {
   if (!isObj(d)) return err(path, 'must be { start?, end? } — fractions of the line, 0..1');
@@ -1622,16 +1661,17 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
-      } else if (s.transition.type === 'morph' || s.transition.type === 'fade') {
+      } else if (s.transition.type === 'morph' || s.transition.type === 'fade' || s.transition.type === 'wipe') {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
+        if (s.transition.type === 'wipe') validateWipe(s.transition, `${p}.transition`, err);
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
+        err(`${p}.transition.type`, "must be 'cut', 'morph', 'fade' or 'wipe'");
       }
       if (isObj(s.transition) && s.transition.text !== undefined) {
         if (s.transition.type !== 'morph') {
-          err(`${p}.transition.text`, 'is a morph option (fade already cross-fades whole frames; cut has no window)');
+          err(`${p}.transition.text`, 'is a morph option (fade and wipe already change whole frames; cut has no window)');
         } else if (s.transition.text !== 'step' && s.transition.text !== 'crossfade' && s.transition.text !== 'dip') {
           err(`${p}.transition.text`, "must be 'step' | 'crossfade' | 'dip'");
         }

@@ -3,9 +3,12 @@ import { drawSpan, pathLength, pathParts, partInkArea, strokeDrawnSamples, strok
 import { validateSpec } from './validate';
 import { luminanceGrid } from './perceive';
 import { createRng } from '@idle-screens/core';
-import { buildEntities, lifeAlphaAt, lifeStaggerAt, rotationAt } from './simulate';
+import { buildEntities, lifeAlphaAt, lifeStaggerAt, rotationAt, textBlockText } from './simulate';
 import { scenePeriod } from './period';
-import { adviseSpec } from './advise';
+import { adviseSequence, adviseSpec } from './advise';
+import { validateSequence } from './validate';
+import { wipeMask } from './compile';
+import { textSprites } from './perceive';
 import { easeGlide, easeSmooth, steerablePaths, structuralSignature } from './steer';
 import { resolveTimelineAt } from './timeline';
 import type { LayerSpec, SaverSpec } from './types';
@@ -197,7 +200,7 @@ describe('rock — a swing about the resting angle', () => {
   });
 
   it('draws only when declared, after the layer: declaring it re-seats nothing else in the layer', () => {
-    const { rock: _r, ...noRock } = rocking();
+    const noRock: LayerSpec = { ...rocking(), rock: undefined };
     const a = buildEntities(noRock, createRng(3), 1000, 1000, 1000);
     const b = buildEntities(rocking(), createRng(3), 1000, 1000, 1000);
     expect(b.map(({ rock: _x, ...rest }) => rest)).toEqual(a);
@@ -273,5 +276,89 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(codes(base())).not.toContain('loop-seam');
     expect(codes(base(8000))).not.toContain('loop-seam');
     expect(codes(base(6000))).toContain('loop-seam');
+  });
+});
+
+describe('wipe transition', () => {
+  const seg = (color: string): SaverSpec => scene([{ ...line(), sprite: { ...(line().sprite as object), color } as never }], { background: { type: 'solid', color } });
+  const seq = (transition: Record<string, unknown>) => ({
+    format: 'idle-sequence' as const,
+    schemaVersion: 1 as const,
+    id: 'wipes',
+    label: 'Wipes',
+    loop: true,
+    segments: [
+      { key: 'a', scene: seg('#102030'), duration: 4000, transition },
+      { key: 'b', scene: seg('#f0e0d0'), duration: 4000, transition },
+    ],
+  });
+
+  it('validates its edge fields', () => {
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200 })).valid).toBe(true);
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200, shape: 'circle', origin: { x: 0.2, y: 0.8 }, feather: 0.2 })).valid).toBe(true);
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200, shape: 'line', angle: 90 })).valid).toBe(true);
+    expect(validateSequence(seq({ type: 'wipe', dur: 50 })).valid).toBe(false);
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200, shape: 'star' })).valid).toBe(false);
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200, shape: 'line', origin: { x: 0.5, y: 0.5 } })).valid).toBe(false);
+    expect(validateSequence(seq({ type: 'wipe', dur: 1200, text: 'dip' })).valid).toBe(false);
+  });
+
+  it('counts as a live transition for the advisories (no luminance-jump nag)', () => {
+    const codes = adviseSequence(seq({ type: 'wipe', dur: 1200 }) as never).map((w) => w.code);
+    expect(codes).not.toContain('boundary-luminance-jump');
+    expect(codes).toContain('fade-degrades-on-low-tier');
+    expect(adviseSequence(seq({ type: 'cut' }) as never).map((w) => w.code)).toContain('boundary-luminance-jump');
+  });
+
+  it('the mask reveals nothing at k = 0 and everything at k = 1', () => {
+    const stops: Array<{ kind: string; args: number[] }> = [];
+    const fake = {
+      createRadialGradient: (...args: number[]) => { stops.push({ kind: 'radial', args }); return { addColorStop: () => undefined }; },
+      createLinearGradient: (...args: number[]) => { stops.push({ kind: 'linear', args }); return { addColorStop: () => undefined }; },
+    } as unknown as CanvasRenderingContext2D;
+    const reach = Math.hypot(50, 50);
+    wipeMask(fake, { type: 'wipe', dur: 1000 }, 0, 100, 100);
+    wipeMask(fake, { type: 'wipe', dur: 1000 }, 1, 100, 100);
+    expect(stops[0]!.args[5]).toBeLessThan(1); // outer radius ~0
+    expect(stops[1]!.args[2]).toBeGreaterThanOrEqual(reach - 1e-9); // inner radius clears every corner
+    wipeMask(fake, { type: 'wipe', dur: 1000, shape: 'line', angle: 0 }, 1, 100, 100);
+    expect(stops[2]!.kind).toBe('linear');
+    expect(stops[2]!.args[0]).toBeGreaterThanOrEqual(100); // the trailing edge is past the right side
+  });
+});
+
+describe('reveal.rise and textBlock.number', () => {
+  const block = (extra: Record<string, unknown>): LayerSpec => ({
+    count: 1,
+    position: { x: 0.5, y: 0.5 },
+    motion: { type: 'static' },
+    sprite: { kind: 'textBlock', text: '1,200 visitors', maxWidth: 1, fontSize: 0.05, anchor: 'center', ...extra } as never,
+  });
+
+  it('formats a counter the same way everywhere', () => {
+    expect(textBlockText({ text: 'x', number: { value: 1234567 } })).toBe('1,234,567');
+    expect(textBlockText({ text: 'x', number: { value: 1234.5678, decimals: 2, prefix: '$', suffix: ' raised' } })).toBe('$1,234.57 raised');
+    expect(textBlockText({ text: 'x', number: { value: 9999, grouping: false } })).toBe('9999');
+    expect(textBlockText({ text: 'x', number: { value: -0.004, decimals: 2 } })).toBe('0.00');
+    expect(textBlockText({ text: 'x', number: { value: -1500 } })).toBe('-1,500');
+    expect(textBlockText({ text: 'plain' })).toBe('plain');
+  });
+
+  it('perception reads the formatted number, and value is a steerable paint path', () => {
+    const s = scene([block({ number: { value: 42, suffix: ' visitors' } })]);
+    expect(validateSpec(s).valid).toBe(true);
+    expect(textSprites(s)[0]!.strings).toEqual(['42 visitors']);
+    expect(steerablePaths(s)).toContain('layers.0.sprite.number.value');
+    expect(structuralSignature(s)).toBe(structuralSignature(scene([block({ number: { value: 9000, suffix: ' visitors' } })])));
+    expect(validateSpec(scene([block({ number: { value: 'many' } })])).valid).toBe(false);
+    expect(validateSpec(scene([block({ number: { value: 1, decimals: 9 } })])).valid).toBe(false);
+  });
+
+  it('rise validates on glyphFade and warns elsewhere', () => {
+    expect(validateSpec(scene([block({ reveal: { mode: 'glyphFade', progress: 0.5, rise: 0.4 } })])).valid).toBe(true);
+    const r = validateSpec(scene([block({ reveal: { mode: 'typewriter', rise: 0.4 } })]));
+    expect(r.valid).toBe(true);
+    expect(r.warnings?.some((w) => w.path.endsWith('reveal.rise'))).toBe(true);
+    expect(validateSpec(scene([block({ reveal: { mode: 'glyphFade', rise: 3 } })])).valid).toBe(false);
   });
 });

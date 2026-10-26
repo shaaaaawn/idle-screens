@@ -160,6 +160,12 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 1
+        },
+        "rise": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "glyphFade only: each glyph rises into its line from this many em below as it fades in. Native: ignored."
         }
       },
       "description": "Animated reveal controls for a text block."
@@ -1263,6 +1269,19 @@
             },
             "role": {
               "$ref": "#/definitions/textRole"
+            },
+            "number": {
+              "type": "object",
+              "required": ["value"],
+              "additionalProperties": false,
+              "properties": {
+                "value": { "type": "number", "description": "The number shown. Paint: steer or key sprite.number.value and the digits roll over the glide." },
+                "decimals": { "type": "integer", "minimum": 0, "maximum": 6, "description": "Places after the point (default 0)." },
+                "prefix": { "type": "string", "maxLength": 64 },
+                "suffix": { "type": "string", "maxLength": 64 },
+                "grouping": { "type": "boolean", "description": "Thousands separated by commas (default true). Locale-free." }
+              },
+              "description": "A counter: the block paints prefix + value + suffix instead of text. text is what clients that do not read number show - author it as the rest value. Native: ignored (text)."
             }
           },
           "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
@@ -1896,6 +1915,18 @@
                   "maximum": 5000,
                   "description": "Cross-fade duration in ms: the outgoing segment keeps animating on its own canvas and is composited over the incoming one at 1 − easeSmooth(localT / dur). No structural requirement. Hosts on the 'basic' or 'minimal' capability tier render it as cut."
                 }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "wipe" },
+                "dur": { "type": "number", "minimum": 200, "maximum": 5000, "description": "Wipe duration in ms. Same machinery and tier gate as fade (basic/minimal hosts cut). Native: cross-fades over dur." },
+                "shape": { "enum": ["circle", "line"], "description": "circle (default): an iris opening from origin until it clears the farthest corner. line: a straight edge sweeping along angle." },
+                "origin": { "type": "object", "required": ["x", "y"], "additionalProperties": false, "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } }, "description": "Where an iris opens (circle only). Default the centre." },
+                "angle": { "type": "number", "minimum": -360, "maximum": 360, "description": "Sweep direction for a line wipe, degrees (0 = left to right, 90 = top to bottom)." },
+                "feather": { "type": "number", "minimum": 0, "maximum": 1, "description": "Edge softness as a fraction of the distance the edge travels. Default 0.08." }
               },
               "required": ["type", "dur"],
               "additionalProperties": false

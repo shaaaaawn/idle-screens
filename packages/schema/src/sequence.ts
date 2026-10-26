@@ -266,5 +266,6 @@ export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): 
 function transitionKey(tr: SequenceTransition | undefined): string {
   if (!tr || tr.type === 'cut') return 'cut';
   if (tr.type === 'morph') return `morph:${tr.dur}:${tr.text ?? 'step'}`;
+  if (tr.type === 'wipe') return `wipe:${tr.dur}:${JSON.stringify([tr.shape ?? 'circle', tr.origin ?? null, tr.angle ?? 0, tr.feather ?? 0.08])}`;
   return `fade:${tr.dur}`;
 }

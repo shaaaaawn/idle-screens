@@ -1,5 +1,5 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor } from './types';
+import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor, TextNumber } from './types';
 import { LIMITS } from './types';
 import { isShapedSprite } from './shapes';
 
@@ -527,6 +527,24 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   return out;
 }
 
+/**
+ * The string a `textBlock` paints: its `text`, or with `number` the
+ * counter's `prefix + value + suffix` — rounded to `decimals`, thousands
+ * grouped with commas unless `grouping: false`. Locale-free, so every
+ * device draws the same digits.
+ */
+export function textBlockText(s: { text: string; number?: TextNumber }): string {
+  const n = s.number;
+  if (!n) return s.text;
+  const d = Math.max(0, Math.min(LIMITS.maxTextNumberDecimals, Math.round(n.decimals ?? 0)));
+  const v = Number.isFinite(n.value) ? n.value : 0;
+  const fixed = Math.abs(v).toFixed(d);
+  const [whole, frac] = fixed.split('.');
+  const grouped = n.grouping === false ? whole! : whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const neg = v < 0 && Number(fixed) !== 0;
+  return `${n.prefix ?? ''}${neg ? '-' : ''}${grouped}${frac !== undefined ? `.${frac}` : ''}${n.suffix ?? ''}`;
+}
+
 /** Depth of a warp entity at time t: wraps from far (1) to near (WARP_NEAR). Pure. */
 function warpZ(e: Entity, t: number): number {
   const wp = e.warp!;
@@ -650,8 +668,7 @@ export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number
  */
 export function lifeStaggerAt(life: { enter?: number; exit?: number; fade?: number; stagger?: number } | undefined, t: number, i: number): number {
   if (!life?.stagger) return 1;
-  const { stagger: _s, ...plain } = life;
-  return lifeAlphaAt(plain, t - i * life.stagger);
+  return lifeAlphaAt({ enter: life.enter, exit: life.exit, fade: life.fade }, t - i * life.stagger);
 }
 
 function wrap(v: number, min: number, max: number): number {

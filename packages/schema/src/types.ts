@@ -574,7 +574,29 @@ export type SpriteSpec =
       opacity?: number;
       /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
       role?: TextRole;
+      /** A number the block shows instead of `text` — see `TextNumber`. */
+      number?: TextNumber;
     };
+
+/**
+ * A counter: the block paints `prefix + value + suffix` instead of `text`,
+ * with `value` rounded to `decimals` places (default 0) and, unless
+ * `grouping: false`, its thousands separated by commas — formatted the same
+ * way on every device (never by locale). `value` is **paint**: steer
+ * `sprite.number.value` (or key it on the timeline) and the digits roll
+ * there over the glide. Line-breaking runs on the formatted string, so a
+ * counter that gains a digit can re-wrap — give it room (`maxWidth`) or an
+ * `anchor` that pins the edge you want still. `text` stays what clients
+ * that do not read `number` show — author it as the counter's rest value.
+ * **Native:** ignored ⇒ `text`.
+ */
+export interface TextNumber {
+  value: number;
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
+  grouping?: boolean;
+}
 
 /**
  * What a text layer is *for* — a declaration, not a pixel. `read` says the
@@ -632,6 +654,14 @@ export interface TextRevealSpec {
    * wave of overlapping fades. Ignored by the other modes.
    */
   fade?: number;
+  /**
+   * `glyphFade` only: each glyph rises into place as it fades in, from
+   * `rise` em below its line (0..1, default 0) — the caption that lifts as
+   * it appears. A pure function of the glyph's fade, so it glides, deletes
+   * and seeks like the rest of reveal; layout never moves. **Native:**
+   * ignored ⇒ no rise.
+   */
+  rise?: number;
 }
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
@@ -805,6 +835,9 @@ export const LIMITS = {
   minPolygonSides: 3,
   maxPolygonSides: 12,
   maxShapePoints: 24, // polygon.points / stroke.points
+  maxTextNumberDecimals: 6,
+  maxTextAffix: 64, // characters of a counter's prefix / suffix
+  maxRevealRise: 1, // em
   maxRockAmp: 45, // degrees either side of rest — a swing, not a spin
   minRockPeriod: 1000, // ms — a calm swing; at most once a second
   maxLifeStagger: 60000, // ms between successive entities' entrances
@@ -837,7 +870,30 @@ export type SequenceTransition =
    * structural requirement). Hosts on the `basic`/`minimal` capability tier
    * render it as `cut` (see `SequenceMountContext.capabilityTier`).
    */
-  | { type: 'fade'; dur: number };
+  | { type: 'fade'; dur: number }
+  /**
+   * Wipe into the next segment over `dur` ms: the incoming segment is
+   * revealed through a moving edge instead of a dissolve — `shape: 'circle'`
+   * (default) is an iris opening from `origin` ({x, y} 0..1, default the
+   * centre) until it clears the farthest corner; `'line'` sweeps a straight
+   * edge across the frame along `angle` degrees (0 = left to right, 90 = top
+   * to bottom). `feather` (0..1, default 0.08) softens the edge, as a
+   * fraction of the distance it travels. Works between unlike segments,
+   * like `fade`, on the same two-live-segment machinery and the same tier
+   * gate (`basic` / `minimal` hosts cut). Every pixel changes once, so it is
+   * a spatial ramp, never a flash. **Native:** cross-fades over `dur`.
+   */
+  | WipeTransition;
+
+/** See the `wipe` member of `SequenceTransition`. */
+export interface WipeTransition {
+  type: 'wipe';
+  dur: number;
+  shape?: 'circle' | 'line';
+  origin?: { x: number; y: number };
+  angle?: number;
+  feather?: number;
+}
 
 export interface SequenceSegment {
   key: string;

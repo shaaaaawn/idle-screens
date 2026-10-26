@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, textBlockText, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
@@ -25,7 +25,7 @@ import {
 } from './steer';
 import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
-import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec } from './types';
+import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec, WipeTransition } from './types';
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
@@ -399,6 +399,42 @@ interface FeatherBlit {
   /** The shape key seen most recently, and the paintSeq it was first seen at. */
   seenKey: string;
   seenAt: number;
+}
+
+/**
+ * A wipe's revealed region at progress `k` as a fill: opaque where the
+ * incoming segment shows, clear where the outgoing still does, ramping over
+ * the feathered edge — in the canvas's own pixels (`cw` × `ch`). The edge
+ * starts just outside the frame and ends past its far side (feather
+ * included), so k = 0 reveals nothing and k = 1 everything.
+ */
+export function wipeMask(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: WipeTransition, k: number, cw: number, ch: number): CanvasGradient {
+  const f = Math.max(0, Math.min(1, w.feather ?? 0.08));
+  if ((w.shape ?? 'circle') === 'line') {
+    const a = ((w.angle ?? 0) * Math.PI) / 180;
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    const proj = [0, cw * ux, ch * uy, cw * ux + ch * uy];
+    const p0 = Math.min(...proj);
+    const span = Math.max(...proj) - p0;
+    const fw = Math.max(1, f * span);
+    const lead = p0 + k * (span + fw);
+    const trail = lead - fw;
+    const g2 = g.createLinearGradient(ux * trail, uy * trail, ux * lead, uy * lead);
+    g2.addColorStop(0, 'rgba(0,0,0,1)');
+    g2.addColorStop(1, 'rgba(0,0,0,0)');
+    return g2;
+  }
+  const ox = Math.max(0, Math.min(1, w.origin?.x ?? 0.5)) * cw;
+  const oy = Math.max(0, Math.min(1, w.origin?.y ?? 0.5)) * ch;
+  const reach = Math.max(Math.hypot(ox, oy), Math.hypot(cw - ox, oy), Math.hypot(ox, ch - oy), Math.hypot(cw - ox, ch - oy));
+  const fw = Math.max(1, f * reach);
+  const outer = Math.max(1e-3, k * (reach + fw));
+  const inner = Math.max(0, outer - fw);
+  const g2 = g.createRadialGradient(ox, oy, inner, ox, oy, Math.max(outer, inner + 1e-3));
+  g2.addColorStop(0, 'rgba(0,0,0,1)');
+  g2.addColorStop(1, 'rgba(0,0,0,0)');
+  return g2;
 }
 
 class SpecInstance implements SaverInstance {
@@ -1445,7 +1481,7 @@ class SpecInstance implements SaverInstance {
       const lh = (sprite.lineHeight ?? 1.4) * fsPx;
       const maxWPx = sprite.maxWidth * unitScale;
       const maxWEm = maxWPx / fsPx;
-      const lines = breakTextBlock(sprite.text, maxWEm, textMetricsClassFor(sprite.font));
+      const lines = breakTextBlock(textBlockText(sprite), maxWEm, textMetricsClassFor(sprite.font));
       const align = sprite.align ?? 'left';
       // Reveal masks glyphs; layout above always ran on the full text, so
       // lines never reflow while typing.
@@ -1483,6 +1519,7 @@ class SpecInstance implements SaverInstance {
         // shift as they fade.
         ctx.textAlign = 'left';
         const baseAlpha = ctx.globalAlpha;
+        const riseEm = Math.max(0, Math.min(LIMITS.maxRevealRise, reveal!.rise ?? 0));
         for (let li = 0; li < lines.length; li++) {
           const alphas = rs.glyphAlphas[li] ?? [];
           if (alphas.length > 0 && alphas[0]! <= 0) break;
@@ -1501,7 +1538,8 @@ class SpecInstance implements SaverInstance {
             const a = alphas[gi] ?? 0;
             if (a <= 0) break; // alphas only fall in reading order
             ctx.globalAlpha = baseAlpha * a;
-            ctx.fillText(clusters[gi]!, x0 + ctx.measureText(prefix).width, li * lh);
+            // `reveal.rise`: a fading glyph lifts into its line as it appears.
+            ctx.fillText(clusters[gi]!, x0 + ctx.measureText(prefix).width, li * lh + riseEm * fsPx * (1 - a));
             prefix += clusters[gi]!;
           }
         }
@@ -2478,10 +2516,54 @@ class SequenceInstance implements SequenceSaverInstance {
     return map;
   }
 
-  /** Length of the fade out of segment `from`, or 0 (no fade, or a tier that plays it as cut). */
+  /** Length of the fade (or wipe) out of segment `from`, or 0 (none, or a tier that plays it as cut). */
   private fadeDur(from: number): number {
     const tr = this.seq.segments[from]?.transition;
-    return this.fadeEnabled && tr?.type === 'fade' ? tr.dur : 0;
+    return this.fadeEnabled && (tr?.type === 'fade' || tr?.type === 'wipe') ? tr.dur : 0;
+  }
+
+  /** The wipe out of segment `from`, when that is its transition. */
+  private wipeOf(from: number): WipeTransition | null {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'wipe' ? tr : null;
+  }
+
+  private wipeScratch: HTMLCanvasElement | OffscreenCanvas | null = null;
+
+  /**
+   * Composite one side of a transition out of segment `from` at eased
+   * progress `k`. A fade draws the outgoing at 1 − k (and, over a bed, the
+   * incoming at k). A wipe draws each side through the moving edge instead:
+   * the outgoing everywhere the edge has not yet passed, the incoming where
+   * it has — the canvas is masked on a scratch copy (`destination-out` /
+   * `destination-in` with the edge's gradient), then drawn.
+   */
+  private compositeTransition(canvas: HTMLCanvasElement | OffscreenCanvas, k: number, from: number, side: 'out' | 'in'): void {
+    const wipe = this.wipeOf(from);
+    if (!wipe) return this.composite(canvas, side === 'out' ? 1 - k : k);
+    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+    if (!main) return;
+    const cw = Math.max(1, canvas.width);
+    const ch = Math.max(1, canvas.height);
+    if (!this.wipeScratch) this.wipeScratch = createSceneCanvas(cw, ch);
+    const scratch = this.wipeScratch;
+    if (scratch.width !== cw) scratch.width = cw;
+    if (scratch.height !== ch) scratch.height = ch;
+    const g = scratch.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!g) return this.composite(canvas, side === 'out' ? 1 - k : k);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(canvas, 0, 0);
+    g.globalCompositeOperation = side === 'out' ? 'destination-out' : 'destination-in';
+    g.fillStyle = wipeMask(g, wipe, k, cw, ch);
+    g.fillRect(0, 0, cw, ch);
+    g.restore();
+    main.save();
+    main.globalAlpha = 1;
+    main.globalCompositeOperation = 'source-over';
+    main.drawImage(scratch, 0, 0, this.childCtx.width, this.childCtx.height);
+    main.restore();
   }
 
   /** Sum of every timed segment — the lap length under `loop: true`. */
@@ -2842,8 +2924,8 @@ class SequenceInstance implements SequenceSaverInstance {
         if (!this.fadingIn) this.fadingIn = this.offscreenChild(index, useMorphSeed ? chainRoot : index);
         this.renderOffscreen(this.fadingIn, localT, effSeed);
         const out = this.renderOutgoing(fadeFrom, localT, seed);
-        this.composite(this.fadingIn.canvas, k);
-        this.composite(out.canvas, 1 - k);
+        this.compositeTransition(this.fadingIn.canvas, k, fadeFrom, 'in');
+        this.compositeTransition(out.canvas, k, fadeFrom, 'out');
         return;
       }
 
@@ -2855,7 +2937,7 @@ class SequenceInstance implements SequenceSaverInstance {
         // The outgoing segment on its own canvas over the incoming frame at
         // 1 − easeSmooth(k): the incoming's opaque ground fades in beneath it.
         const out = this.renderOutgoing(fadeFrom, localT, seed);
-        this.composite(out.canvas, 1 - easeSmooth(localT / this.fadeDur(fadeFrom)));
+        this.compositeTransition(out.canvas, easeSmooth(localT / this.fadeDur(fadeFrom)), fadeFrom, 'out');
       }
     }
   }
