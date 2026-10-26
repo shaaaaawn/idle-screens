@@ -144,8 +144,18 @@ enum FieldRaster {
     nonisolated(unsafe) private static let cache = NSCache<NSString, Box>()
     private final class Box { let r: Raster; init(_ r: Raster) { self.r = r } }
 
+    /// The latest raster per config and frame (any time bucket), and the
+    /// buckets being sampled off the render path.
+    nonisolated(unsafe) private static var latest: [String: Raster] = [:]
+    nonisolated(unsafe) private static var inFlight: Set<String> = []
+    private static let lock = NSLock()
+    private static let queue = DispatchQueue(label: "field-raster", qos: .userInitiated)
+
     /// Raster for a `w`×`h` frame at scene time `t` (ms). `seed` is the
-    /// instance seed, normalised (`(seed >>> 0) || 1`).
+    /// instance seed, normalised (`(seed >>> 0) || 1`). A drifting field's
+    /// next 100 ms bucket is sampled in the background while the previous one
+    /// stays on screen (a whole raster per bucket is too much for a frame on
+    /// the main thread); the first raster of a config is sampled at once.
     static func raster(_ bg: SpecSubset.Background, seed: UInt32, width w: Double, height h: Double,
                        t: Double, shortSide: Int = FieldSampler.shortSide) -> Raster? {
         guard let bands = bg.bands, !bands.isEmpty, w > 0, h > 0 else { return nil }
@@ -153,8 +163,39 @@ enum FieldRaster {
         let cols = Swift.max(1, Int(FieldSampler.jsRound(Double(shortSide) * w / short)))
         let rows = Swift.max(1, Int(FieldSampler.jsRound(Double(shortSide) * h / short)))
         let ft = FieldSampler.sampleTime(bg, t)
-        let key = "\(bg.fieldKey)|\(seed)|\(w)x\(h)|\(cols)x\(rows)|\(ft)" as NSString
+        let frame = "\(bg.fieldKey)|\(seed)|\(w)x\(h)|\(cols)x\(rows)"
+        let key = "\(frame)|\(ft)" as NSString
         if let hit = cache.object(forKey: key) { return hit.r }
+        lock.lock()
+        let stale = latest[frame]
+        let start = stale != nil && !inFlight.contains(key as String)
+        if start { inFlight.insert(key as String) }
+        lock.unlock()
+        if let stale {
+            if start {
+                queue.async {
+                    let r = sample(bg, seed: seed, w: w, h: h, cols: cols, rows: rows, ft: ft, bands: bands)
+                    if let r { cache.setObject(Box(r), forKey: key) }
+                    lock.lock()
+                    if let r { latest[frame] = r }
+                    inFlight.remove(key as String)
+                    lock.unlock()
+                }
+            }
+            return stale
+        }
+        guard let r = sample(bg, seed: seed, w: w, h: h, cols: cols, rows: rows, ft: ft, bands: bands) else { return nil }
+        cache.setObject(Box(r), forKey: key)
+        lock.lock()
+        if latest.count > 16 { latest.removeAll() }
+        latest[frame] = r
+        lock.unlock()
+        return r
+    }
+
+    private static func sample(_ bg: SpecSubset.Background, seed: UInt32, w: Double, h: Double,
+                               cols: Int, rows: Int, ft: Double, bands: [String]) -> Raster? {
+        let short = Swift.max(1, Swift.min(w, h))
         var px = [UInt8](repeating: 255, count: cols * rows * 4)
         var i = 0
         for r in 0..<rows {
@@ -173,9 +214,7 @@ enum FieldRaster {
                                   provider: provider, decode: nil, shouldInterpolate: false,
                                   intent: .defaultIntent)
         else { return nil }
-        let raster = Raster(image: image, crisp: Int(FieldSampler.jsRound(bg.quantize ?? Double(bands.count))) >= 2)
-        cache.setObject(Box(raster), forKey: key)
-        return raster
+        return Raster(image: image, crisp: Int(FieldSampler.jsRound(bg.quantize ?? Double(bands.count))) >= 2)
     }
 }
 
