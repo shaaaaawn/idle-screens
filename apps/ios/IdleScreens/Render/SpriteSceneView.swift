@@ -212,6 +212,9 @@ final class CompiledSpriteScene: SKScene {
             let tex = SKTexture(cgImage: ras.image)
             tex.filteringMode = ras.crisp ? .nearest : .linear
             node.texture = tex
+            // Still the previous bucket: ask again next frame until the
+            // requested one has been sampled.
+            if ras.ft != FieldSampler.sampleTime(bg, t * 1000) { groundKey = nil }
             return
         }
         node.texture = backgroundTexture(t: t)
@@ -664,7 +667,7 @@ final class CompiledSpriteScene: SKScene {
         let canvasH = ceil(max(1, CGFloat(lines.count) * lh))
         let state = reveal.map { Self.revealKey(text: text, maxWidth: maxWidth, fontSize: fontSize, style: style,
                                                reveal: $0, dim: dim, t: t) } ?? "all"
-        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(align)|\(color)|\(style?.font ?? "")|\(state)"
+        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(Int(lh))|\(align)|\(color)|\(style?.font ?? "")|\(reveal?.rise ?? 0)|\(reveal?.caret?.color ?? "")|\(state)"
         return texture(key: key) {
             let font = TextBlockFont.uiFont(css: style?.font, size: fsPx)
             let ui = UIColor(hexString: color)

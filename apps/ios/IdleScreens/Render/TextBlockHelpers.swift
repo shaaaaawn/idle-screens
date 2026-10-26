@@ -347,13 +347,17 @@ struct TextNumber: Decodable, Equatable, Sendable {
         return (prefix ?? "") + (neg ? "-" : "") + whole + frac + (suffix ?? "")
     }
 
-    /// JS `toFixed`: an exact half rounds up (printf rounds it to even).
+    /// JS `toFixed`: it rounds the double's exact value, so only a true tie
+    /// (exactly representable) goes away from zero; printf rounds it to even.
     static func toFixed(_ x: Double, _ d: Int) -> String {
         let scale = pow(10.0, Double(d))
-        let scaled = x * scale
-        if scaled - scaled.rounded(.down) == 0.5 {
+        let a = abs(x)
+        let scaled = a * scale
+        // fma recovers the product's rounding error: zero only for an exact half.
+        let err = fma(a, scale, -scaled)
+        if err == 0, scaled - scaled.rounded(.down) == 0.5 {
             let n = scaled.rounded(.up) / scale
-            return String(format: "%.\(d)f", n)
+            return String(format: "%.\(d)f", x < 0 ? -n : n)
         }
         return String(format: "%.\(d)f", x)
     }

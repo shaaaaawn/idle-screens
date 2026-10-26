@@ -594,7 +594,9 @@ final class TVAppState {
             }
         case .reseed(let seed, let epoch):
             if let epoch { channelEpochMs = epoch }
-            guard timeline == .live, let json = currentSpecJSON else { break }
+            // Browsing the past: the live scene it returns to takes the new seed.
+            if timeline != .live, let live = liveScene { liveScene = (live.json, seed ?? 42); break }
+            guard let json = currentSpecJSON else { break }
             // A new arrangement: the steered scene remounts on the new seed.
             let shown = steeredJSON ?? json
             stopSteer(); stopKeyframes(); stopSequence()
@@ -824,7 +826,7 @@ final class TVAppState {
         let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
                                             seed: bedSeed, elapsed: now.timeIntervalSince(bedMountedAt)) : nil
         outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
-                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt) + sceneClockOffset,
                                  transparent: hasBed, bed: bed)
         outgoingOpacity = 1
         let serial = outgoingSerial
@@ -1037,7 +1039,11 @@ final class TVAppState {
             let a = SpecTimeline.resolve(rawA, at: (outDur + localT) * 1000)
             let b = SpecTimeline.resolve(rawB, at: localT * 1000)
             let lerped = SpecTimeline.lerpSpec(SpecTimeline.withoutTimeline(a), SpecTimeline.withoutTimeline(b), k)
-            guard var layers = Self.compileJSON(lerped, seed: seed, budget: self.sceneBudget) else { return false }
+            guard let data = try? JSONEncoder().encode(lerped),
+                  let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return false }
+            var layers = spec.compile(seed: seed, budget: self.sceneBudget)
+            // The ground glides with the foreground (a bed owns it otherwise).
+            if !self.hasBed { self.specBackground = spec.background }
             if twoPass { MorphText.applyCrossfade(&layers, from: a, to: b, lerped: lerped, k: k, dip: text == "dip") }
             self.compiledScene = layers
             return true
