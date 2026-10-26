@@ -17,7 +17,7 @@ const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life', 'emit', 'clock', 'rotate', 'opacity', 'transform', 'group',
+  'layout', 'life', 'emit', 'clock', 'rotate', 'rock', 'opacity', 'transform', 'group',
 ]);
 const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate', 'origin']);
 const KNOWN_GROUP = new Set(['transform', 'opacity']);
@@ -25,6 +25,7 @@ const GROUP_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const KNOWN_POSITION = new Set(['x', 'y', 'dx', 'dy']);
 const KNOWN_TIMELINE = new Set(['loop', 'duration', 'keys']);
 const KNOWN_TIMELINE_KEY = new Set(['t', 'path', 'value', 'ease', 'dur']);
+const GLIDE_EASES = new Set(['step', 'linear', 'smooth', 'in', 'out', 'spring']);
 const KNOWN_CIRCLE = new Set(['kind', 'radius', 'color', 'soft', 'colors', 'colorWeights']);
 const KNOWN_RING = new Set(['kind', 'radius', 'color', 'width', 'colors', 'colorWeights']);
 const KNOWN_STREAK = new Set(['kind', 'length', 'color', 'width', 'colors', 'colorWeights']);
@@ -32,10 +33,11 @@ const KNOWN_RECT = new Set(['kind', 'width', 'aspect', 'color', 'feather', 'colo
 const KNOWN_BAR = new Set(['kind', 'values', 'length', 'thickness', 'color', 'max', 'direction', 'colors', 'colorWeights']);
 const KNOWN_PATH_PART = new Set(['path', 'color', 'fillRule', 'fill', 'gradient', 'stroke', 'opacity']);
 const KNOWN_POLYGON = new Set(['kind', 'radius', 'color', 'sides', 'points', 'path', 'fillRule', 'fill', 'gradient', 'stroke', 'parts', 'span', 'origin', 'soft', 'colors', 'colorWeights']);
-const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'colors', 'colorWeights']);
+const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'curve', 'taper', 'orient', 'draw', 'colors', 'colorWeights']);
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
-const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role']);
+const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role', 'number']);
+const KNOWN_TEXT_NUMBER = new Set(['value', 'decimals', 'prefix', 'suffix', 'grouping']);
 const TEXT_ROLES = new Set(['read', 'atmosphere']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
 /**
@@ -48,7 +50,64 @@ const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'cen
  * to identify an embedded size regardless of what follows it.
  */
 const FONT_SIZE_RE = /\d(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%)/i;
-const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade']);
+const KNOWN_REVEAL = new Set(['progress', 'mode', 'speed', 'caret', 'fade', 'rise']);
+/**
+ * What an author who knows another motion tool (CSS/GSAP/After Effects/
+ * Remotion) usually means by a field the format does not have, per where it
+ * was written. Appended to the unknown-property warning so the warning says
+ * what to write instead; the warning's code and path are unchanged.
+ */
+const FOREIGN_FIELD_HINTS: Record<'top' | 'layer' | 'key' | 'motion', Record<string, string>> = {
+  top: {
+    duration: "a scene has no length — loop authored change with `timeline: { loop: true, duration }`, or give a sequence segment a `duration`",
+    loop: "use `timeline: { loop: true, duration, keys }`",
+    fps: 'a scene is a pure function of time — there is no frame rate to set',
+    frameRate: 'a scene is a pure function of time — there is no frame rate to set',
+    bpm: 'there is no tempo unit — write times in ms (one beat = 60000 / bpm)',
+    tempo: 'there is no tempo unit — write times in ms (one beat = 60000 / bpm)',
+    camera: 'use a `groups.<name>.transform` (a camera over its member layers) or a layer `transform`',
+    keyframes: 'use `timeline: { keys: [{ t, path, value, dur, ease }] }`',
+    palette: 'colours live on sprites (`color`, or `colors` for a seeded per-entity pick)',
+  },
+  layer: {
+    delay: 'use `life.enter` (ms before the layer fades in)',
+    stagger: 'use `life.stagger` (ms between successive entities\' entrances)',
+    duration: 'use `life.exit` to end a layer (ms), or a sequence segment\'s `duration`',
+    ease: "eases live on timeline keys and steers (`ease: 'out'`), or on drift/rise/wander motion (`motion.ease`)",
+    easing: "eases live on timeline keys and steers (`ease: 'out'`), or on drift/rise/wander motion (`motion.ease`)",
+    rotation: 'use `rotate` (static degrees), `spin` (degrees/sec) or `rock` (a swing back and forth)',
+    wobble: 'use `rock` (a swing back and forth) or the motion\'s `bob` / `sway`',
+    sway: 'use `rock` (a swing back and forth), or `sway` on a rise motion',
+    scale: 'use `transform.scale` (paint, glides) or `grow` (breathing)',
+    fade: 'use `life.fade` (ms) or the layer\'s paint `opacity`',
+    blur: 'there is no blur — soften with `soft: true` (circle/polygon), `rect.feather`, `trail` or `ghosting`',
+    glow: "glow is `blend: 'lighter'` over soft circles",
+    keyframes: 'use the scene\'s `timeline` (keys on this layer\'s paths)',
+    animation: 'use the scene\'s `timeline` (keys on this layer\'s paths)',
+  },
+  key: {
+    duration: 'use `dur` (the glide length, ms)',
+    delay: 'use `t` (when the glide starts, ms)',
+    time: 'use `t` (when the glide starts, ms)',
+    at: 'use `t` (when the glide starts, ms)',
+    start: 'use `t` (when the glide starts, ms)',
+    easing: "use `ease` ('smooth' | 'linear' | 'step' | 'in' | 'out' | 'spring')",
+    to: 'use `value`',
+    target: 'use `value`',
+    from: 'a key glides from wherever its path is — set the starting value on the base spec',
+  },
+  motion: {
+    delay: 'use the layer\'s `life.enter`',
+    easing: "use `ease: { type: 'settle' | 'buoyant', tau }` on drift / rise / wander",
+    duration: 'only `path` motion has a `duration` (ms per lap)',
+  },
+};
+
+/** The unknown-property message, with a hint when the field is another tool's vocabulary. */
+function unknownMessage(where: keyof typeof FOREIGN_FIELD_HINTS, k: string, plain: string): string {
+  const hint = Object.prototype.hasOwnProperty.call(FOREIGN_FIELD_HINTS[where], k) ? FOREIGN_FIELD_HINTS[where][k] : undefined;
+  return hint ? `${plain} — ${hint}` : plain;
+}
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 /**
  * Every motion type's fields besides `type` — the validator's allowlist, and
@@ -80,7 +139,7 @@ const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 
 const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate', 'rock']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -274,7 +333,7 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
   }
 
   for (const k of unknownKeys(spec, KNOWN_TOP)) {
-    warn(k, 'unknown-property', `unknown top-level property '${k}' — will be ignored`);
+    warn(k, 'unknown-property', unknownMessage('top', k, `unknown top-level property '${k}' — will be ignored`));
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
@@ -389,10 +448,10 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
   tl.keys.forEach((key, i) => {
     const p = `timeline.keys[${i}]`;
     if (!isObj(key)) return err(p, 'must be an object {t, path, value, ease?, dur?}');
-    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', `unknown key property '${k}' — will be ignored`);
+    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', unknownMessage('key', k, `unknown key property '${k}' — will be ignored`));
     let ok = true;
     if (!isNum(key.t) || key.t < 0) { err(`${p}.t`, 'must be a number of ms >= 0'); ok = false; }
-    if (key.ease !== undefined && key.ease !== 'step' && key.ease !== 'linear' && key.ease !== 'smooth') err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth'");
+    if (key.ease !== undefined && !GLIDE_EASES.has(key.ease as string)) err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth' | 'in' | 'out' | 'spring'");
     if (key.dur !== undefined && (!isNum(key.dur) || key.dur < 0 || key.dur > LIMITS.maxTimelineKeyDur)) {
       err(`${p}.dur`, `must be a number of ms, 0..${LIMITS.maxTimelineKeyDur}`);
     }
@@ -615,7 +674,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else if (k === 'depth') {
       warn(`${path}.depth`, 'unknown-property', `'depth' is not a layer property — use motion type 'warp' for true perspective depth, or fake parallax with size/speed/alpha across layers`);
     } else {
-      warn(`${path}.${k}`, 'unknown-property', `unknown layer property '${k}' — will be ignored`);
+      warn(`${path}.${k}`, 'unknown-property', unknownMessage('layer', k, `unknown layer property '${k}' — will be ignored`));
     }
   }
   if (!isNum(layer.count) || !Number.isInteger(layer.count) || layer.count < 1) {
@@ -851,6 +910,27 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (layer.life.fade !== undefined && (!isNum(layer.life.fade) || layer.life.fade < 0)) {
         err(`${path}.life.fade`, 'must be >= 0 (ms)');
       }
+      if (layer.life.stagger !== undefined && (!isNum(layer.life.stagger) || layer.life.stagger < 0 || layer.life.stagger > LIMITS.maxLifeStagger)) {
+        err(`${path}.life.stagger`, `must be 0..${LIMITS.maxLifeStagger} ms (between successive entities' entrances)`);
+      }
+      for (const k of unknownKeys(layer.life, new Set(['enter', 'exit', 'fade', 'stagger']))) {
+        warn(`${path}.life.${k}`, 'unknown-property', `unknown life property '${k}' — will be ignored`);
+      }
+    }
+  }
+
+  if (layer.rock !== undefined) {
+    if (!isObj(layer.rock)) err(`${path}.rock`, 'must be an object { amp, period }');
+    else {
+      if (!isNum(layer.rock.amp) || layer.rock.amp <= 0 || layer.rock.amp > LIMITS.maxRockAmp) {
+        err(`${path}.rock.amp`, `must be > 0 and <= ${LIMITS.maxRockAmp} (degrees either side of rest)`);
+      }
+      if (!isNum(layer.rock.period) || layer.rock.period < LIMITS.minRockPeriod) {
+        err(`${path}.rock.period`, `must be >= ${LIMITS.minRockPeriod} ms (one swing there and back)`);
+      }
+      for (const k of unknownKeys(layer.rock, new Set(['amp', 'period']))) {
+        warn(`${path}.rock.${k}`, 'unknown-property', `unknown rock property '${k}' — will be ignored`);
+      }
     }
   }
 
@@ -917,6 +997,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         }
         if (isObj(layer.grow) && isNum(layer.grow.period) && layer.grow.period < floor) {
           err(`${path}.grow.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+        if (isObj(layer.rock) && isNum(layer.rock.period) && layer.rock.period < floor) {
+          err(`${path}.rock.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
         }
         const sp = layer.sprite;
         if (isObj(sp) && isObj(sp.cycle) && isNum(sp.cycle.period) && sp.cycle.period < floor) {
@@ -1052,6 +1135,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.curve !== undefined && sprite.curve !== 'smooth' && sprite.curve !== 'linear') err(`${path}.curve`, "must be 'smooth' | 'linear'");
     if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
     if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
+    if (sprite.draw !== undefined) validateDraw(sprite.draw, `${path}.draw`, err, warn);
     color(sprite.color, `${path}.color`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
@@ -1092,6 +1176,22 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       err(`${path}.opacity`, 'must be a number between 0 and 1');
     }
     validateTextRole(sprite, path, err);
+    if (sprite.number !== undefined) {
+      const n = sprite.number as unknown;
+      if (!isObj(n)) err(`${path}.number`, 'must be { value, decimals?, prefix?, suffix?, grouping? }');
+      else {
+        if (!isNum(n.value)) err(`${path}.number.value`, 'must be a finite number');
+        if (n.decimals !== undefined && (!isNum(n.decimals) || !Number.isInteger(n.decimals) || n.decimals < 0 || n.decimals > LIMITS.maxTextNumberDecimals)) {
+          err(`${path}.number.decimals`, `must be a whole number 0..${LIMITS.maxTextNumberDecimals}`);
+        }
+        for (const k of ['prefix', 'suffix'] as const) {
+          const v = n[k];
+          if (v !== undefined && (!isStr(v) || v.length > LIMITS.maxTextAffix)) err(`${path}.number.${k}`, `must be a string of at most ${LIMITS.maxTextAffix} characters`);
+        }
+        if (n.grouping !== undefined && typeof n.grouping !== 'boolean') err(`${path}.number.grouping`, 'must be a boolean');
+        for (const k of unknownKeys(n, KNOWN_TEXT_NUMBER)) warn(`${path}.number.${k}`, 'unknown-property', `unknown number property '${k}' — will be ignored`);
+      }
+    }
     if (sprite.reveal !== undefined) {
       const rv = sprite.reveal as Record<string, unknown>;
       if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) {
@@ -1111,6 +1211,10 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         }
         if (rv.speed !== undefined && (!isNum(rv.speed) || rv.speed < 0 || rv.speed > LIMITS.maxRevealSpeed)) {
           err(`${path}.reveal.speed`, `must be between 0 and ${LIMITS.maxRevealSpeed} (graphemes/sec)`);
+        }
+        if (rv.rise !== undefined) {
+          if (!isNum(rv.rise) || rv.rise < 0 || rv.rise > LIMITS.maxRevealRise) err(`${path}.reveal.rise`, `must be 0..${LIMITS.maxRevealRise} (em below the line a glyph rises from)`);
+          else if (rv.mode !== 'glyphFade') warn(`${path}.reveal.rise`, 'unknown-property', "rise applies to mode 'glyphFade' only — will be ignored");
         }
         if (rv.caret !== undefined && typeof rv.caret !== 'boolean') {
           const caret = rv.caret as Record<string, unknown>;
@@ -1316,7 +1420,7 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
   }
 
   for (const k of unknownKeys(motion, knownSet)) {
-    warn(`${path}.${k}`, 'unknown-property', `unknown motion property '${k}' — will be ignored`);
+    warn(`${path}.${k}`, 'unknown-property', unknownMessage('motion', k, `unknown motion property '${k}' — will be ignored`));
   }
 }
 
@@ -1377,9 +1481,8 @@ function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
   if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err);
-  if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err);
+  if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err, warn);
   if (piece.fillRule !== undefined && !['auto', 'nonzero', 'evenodd'].includes(piece.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
-  void warn;
 }
 
 /** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
@@ -1408,13 +1511,42 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 }
 
 /** A path stroke: colour, width in unit-box units, optional opacity / join / cap. */
-function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void): void {
-  if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap? }");
+function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err);
   if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
+  if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err, warn);
+}
+
+/** A wipe transition's edge: shape, origin, angle and feather. */
+function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (tr.shape !== undefined && tr.shape !== 'circle' && tr.shape !== 'line') err(`${path}.shape`, "must be 'circle' | 'line'");
+  if (tr.origin !== undefined) {
+    const o = tr.origin;
+    if (!isObj(o) || !isNum(o.x) || !isNum(o.y) || o.x < 0 || o.x > 1 || o.y < 0 || o.y > 1) err(`${path}.origin`, 'must be { x, y } with each 0..1 (where the iris opens)');
+    else if (tr.shape === 'line') err(`${path}.origin`, "applies to shape 'circle' only — a line wipe sweeps along `angle`");
+  }
+  if (tr.angle !== undefined) {
+    if (!isNum(tr.angle) || Math.abs(tr.angle) > 360) err(`${path}.angle`, 'must be degrees, -360..360 (0 = left to right, 90 = top to bottom)');
+    else if (tr.shape !== 'line') err(`${path}.angle`, "applies to shape 'line' only — an iris opens from `origin`");
+  }
+  if (tr.feather !== undefined && (!isNum(tr.feather) || tr.feather < 0 || tr.feather > 1)) err(`${path}.feather`, 'must be 0..1 (the edge width, as a fraction of the distance it travels)');
+  for (const k of Object.keys(tr)) {
+    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) warn(`${path}.${k}`, 'unknown-property', `unknown wipe property '${k}' — will be ignored`);
+  }
+}
+
+/** A line's draw-on span: `{ start?, end? }`, each a fraction of its arc length 0..1. */
+function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
+  if (!isObj(d)) return err(path, 'must be { start?, end? } — fractions of the line, 0..1');
+  for (const k of ['start', 'end'] as const) {
+    const v = d[k];
+    if (v !== undefined && (!isNum(v) || v < 0 || v > 1)) err(`${path}.${k}`, 'must be 0..1 (a fraction of the line\'s length)');
+  }
+  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start and end; will be ignored`);
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
@@ -1528,16 +1660,17 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (s.transition !== undefined) {
       if (!isObj(s.transition)) {
         err(`${p}.transition`, 'must be an object');
-      } else if (s.transition.type === 'morph' || s.transition.type === 'fade') {
+      } else if (s.transition.type === 'morph' || s.transition.type === 'fade' || s.transition.type === 'wipe') {
         if (!isNum(s.transition.dur) || s.transition.dur < LIMITS.minTransitionDur || s.transition.dur > LIMITS.maxTransitionDur) {
           err(`${p}.transition.dur`, `must be a number between ${LIMITS.minTransitionDur} and ${LIMITS.maxTransitionDur}`);
         }
+        if (s.transition.type === 'wipe') validateWipe(s.transition, `${p}.transition`, err, (wp, code, message) => void warnings.push({ path: wp, code, message }));
       } else if (s.transition.type !== 'cut') {
-        err(`${p}.transition.type`, "must be 'cut', 'morph' or 'fade'");
+        err(`${p}.transition.type`, "must be 'cut', 'morph', 'fade' or 'wipe'");
       }
       if (isObj(s.transition) && s.transition.text !== undefined) {
         if (s.transition.type !== 'morph') {
-          err(`${p}.transition.text`, 'is a morph option (fade already cross-fades whole frames; cut has no window)');
+          err(`${p}.transition.text`, 'is a morph option (fade and wipe already change whole frames; cut has no window)');
         } else if (s.transition.text !== 'step' && s.transition.text !== 'crossfade' && s.transition.text !== 'dip') {
           err(`${p}.transition.text`, "must be 'step' | 'crossfade' | 'dip'");
         }

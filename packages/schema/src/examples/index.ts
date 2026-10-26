@@ -29,6 +29,7 @@ import { SNOWFALL_SPEC } from './snowfall';
 import { THERMAL_FIELD_SPEC } from './thermal-field';
 import { WARP_TUNNEL_SPEC } from './warp-tunnel';
 import { TYPED_CUE_SPEC } from './typed-cue';
+import { INK_TIDE_SPEC } from './ink-tide';
 
 export { AQUARIUM_SPEC } from './aquarium';
 export { COMETS_SPEC } from './comets';
@@ -97,6 +98,7 @@ export const SCHEMA_EXAMPLES: readonly SchemaExample[] = [
   { id: 'web-work', label: 'Web Work', spec: WEB_WORK_SPEC },
   { id: 'shard-fall', label: 'Shard Fall', spec: SHARD_FALL_SPEC },
   { id: 'murmur', label: 'Murmur', spec: MURMUR_SPEC },
+  { id: 'ink-tide', label: 'Ink Tide', spec: INK_TIDE_SPEC },
 ] as const;
 
 /** Catalog entry for a bundled idle-sequence example. */

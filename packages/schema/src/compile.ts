@@ -8,27 +8,29 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, textBlockText, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
+  easeGlide,
   easeSmooth,
   lerpSpec,
   lerpValue,
   readSpecPath,
   resolveSpecPath,
+  STEER_EASES,
   structuralSignature,
   textStringsDiffer,
   type SteerDelta,
 } from './steer';
 import { transformOrigin } from './paint';
 import { nextKeyAfter, resolveTimelineAt, timelineSampleTimesAfter } from './timeline';
-import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec } from './types';
+import type { FieldBackground, IdleSequence, LayerSpec, LayerTransform, PathGradient, SaverSpec, SpriteSpec, TextNumber, WipeTransition } from './types';
 import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeOutline, strokeSamples, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnAt, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -228,12 +230,14 @@ interface TimelineOverride {
   dur: number;
   until: number;
   outDur: number;
+  /** A named steer ease (`in` / `out` / `spring`) for the glide in; absent ⇒ smooth, as before eases were honoured. */
+  ease?: string;
 }
 const EXPIRED = Symbol('expired');
 
 /** An override's glide-in value at scene time `t` (before `until`). */
 function overrideHeldAt(o: TimelineOverride, t: number): unknown {
-  const k = o.dur > 0 ? easeSmooth(clamp01((t - o.t0) / o.dur)) : 1;
+  const k = o.dur > 0 ? easeGlide(o.ease, clamp01((t - o.t0) / o.dur)) : 1;
   return k >= 1 ? o.to : lerpValue(o.from, o.to, k, false, o.leaf);
 }
 
@@ -253,9 +257,34 @@ function overrideValueAt(o: TimelineOverride, t: number, timelineValue: () => un
 const steerId = (d: SteerDelta): string => `${d.t}|${JSON.stringify(d.value)}`;
 
 /** Arm one steer on a timeline scene at scene time `now` — the steering rule: held until the path's next key, or sticky when no key will touch it. */
-function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number): TimelineOverride {
+function armOverride(authored: SaverSpec, path: string, from: unknown, to: unknown, now: number, glide: number, ease?: string): TimelineOverride {
   const next = nextKeyAfter(authored, path, now);
-  return { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+  const o: TimelineOverride = { leaf: path.slice(path.lastIndexOf('.') + 1), from, to, t0: now, dur: glide, until: next ? next.at : Number.POSITIVE_INFINITY, outDur: next ? next.dur : 0 };
+  if (ease) o.ease = ease;
+  return o;
+}
+
+/**
+ * A textBlock's outgoing words for a text morph. A counter keeps the
+ * incoming value (it glides on its own) under the outgoing prefix and
+ * suffix; a plain block, or a counter becoming one, shows the outgoing text.
+ */
+function outgoingCounter(from: Extract<SpriteSpec, { kind: 'textBlock' }>, now: Extract<SpriteSpec, { kind: 'textBlock' }>): { text: string; number?: TextNumber } {
+  if (from.number && now.number) return { text: from.text, number: { ...now.number, prefix: from.number.prefix, suffix: from.number.suffix } };
+  return { text: textBlockText(from), number: undefined };
+}
+
+/**
+ * The ease a live steer glides with: the named ease (`in` / `out` /
+ * `spring`) of its longest delta, else undefined (smooth). The older names
+ * (`step` / `linear` / `smooth`) were carried on tracks before steers read an
+ * ease at all, so they keep meaning smooth — honouring them now would change
+ * how every stored track replays.
+ */
+function steerEase(deltas: readonly SteerDelta[]): string | undefined {
+  let best: SteerDelta | undefined;
+  for (const d of deltas) if (!best || (d.dur ?? DEFAULT_STEER_DUR) > (best.dur ?? DEFAULT_STEER_DUR)) best = d;
+  return best?.ease !== undefined && STEER_EASES.has(best.ease) ? best.ease : undefined;
 }
 
 /**
@@ -382,6 +411,42 @@ interface FeatherBlit {
   seenAt: number;
 }
 
+/**
+ * A wipe's revealed region at progress `k` as a fill: opaque where the
+ * incoming segment shows, clear where the outgoing still does, ramping over
+ * the feathered edge — in the canvas's own pixels (`cw` × `ch`). The edge
+ * starts just outside the frame and ends past its far side (feather
+ * included), so k = 0 reveals nothing and k = 1 everything.
+ */
+export function wipeMask(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: WipeTransition, k: number, cw: number, ch: number): CanvasGradient {
+  const f = Math.max(0, Math.min(1, w.feather ?? 0.08));
+  if ((w.shape ?? 'circle') === 'line') {
+    const a = ((w.angle ?? 0) * Math.PI) / 180;
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    const proj = [0, cw * ux, ch * uy, cw * ux + ch * uy];
+    const p0 = Math.min(...proj);
+    const span = Math.max(...proj) - p0;
+    const fw = Math.max(1, f * span);
+    const lead = p0 + k * (span + fw);
+    const trail = lead - fw;
+    const g2 = g.createLinearGradient(ux * trail, uy * trail, ux * lead, uy * lead);
+    g2.addColorStop(0, 'rgba(0,0,0,1)');
+    g2.addColorStop(1, 'rgba(0,0,0,0)');
+    return g2;
+  }
+  const ox = Math.max(0, Math.min(1, w.origin?.x ?? 0.5)) * cw;
+  const oy = Math.max(0, Math.min(1, w.origin?.y ?? 0.5)) * ch;
+  const reach = Math.max(Math.hypot(ox, oy), Math.hypot(cw - ox, oy), Math.hypot(ox, ch - oy), Math.hypot(cw - ox, ch - oy));
+  const fw = Math.max(1, f * reach);
+  const outer = Math.max(1e-3, k * (reach + fw));
+  const inner = Math.max(0, outer - fw);
+  const g2 = g.createRadialGradient(ox, oy, inner, ox, oy, Math.max(outer, inner + 1e-3));
+  g2.addColorStop(0, 'rgba(0,0,0,1)');
+  g2.addColorStop(1, 'rgba(0,0,0,0)');
+  return g2;
+}
+
 class SpecInstance implements SaverInstance {
   private readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   private readonly ownsCanvas: boolean;
@@ -403,7 +468,7 @@ class SpecInstance implements SaverInstance {
   /** The spec currently being rendered (base spec + any applied steering). */
   private effSpec: SaverSpec;
   /** Active glide between two resolved specs (live setParam/applyTrack). */
-  private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number } | null = null;
+  private transition: { from: SaverSpec; to: SaverSpec; startT: number; dur: number; ease?: string } | null = null;
   private lastStructural = '';
   /** See `LayerPaintOverride`; null (the default, and every plain mount) draws every layer once. */
   private paintOverrides: ReadonlyMap<number, LayerPaintOverride> | null = null;
@@ -926,7 +991,8 @@ class SpecInstance implements SaverInstance {
         }
       }
       const st = part.stroke;
-      if (st && part.flat.lines.length) {
+      const lines = st ? strokeLines(part) : part.flat.lines;
+      if (st && lines.length) {
         g.globalAlpha = a0 * part.opacity * (st.opacity ?? 1);
         g.strokeStyle = st.color;
         g.lineJoin = st.join ?? 'round';
@@ -934,13 +1000,16 @@ class SpecInstance implements SaverInstance {
         if (fr.uniform) {
           // Width is in unit-box units of the uniform scale r.
           g.lineWidth = (st.width * r) / fr.sx;
-          if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
-          if (cache.stroke) g.stroke(cache.stroke);
-          else { traceLines(g, part.flat.lines); g.stroke(); }
+          if (lines !== part.flat.lines) { traceLines(g, lines); g.stroke(); }
+          else {
+            if (cache.stroke === undefined) cache.stroke = typeof Path2D === 'undefined' ? null : ringPath2D(part.flat.lines);
+            if (cache.stroke) g.stroke(cache.stroke);
+            else { traceLines(g, part.flat.lines); g.stroke(); }
+          }
         } else {
           // A stretched drawing: stroke the stretched outline in unscaled space,
           // so the line keeps one width instead of fattening along the long axis.
-          const scaled = part.flat.lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
+          const scaled = lines.map((l) => ({ closed: l.closed, points: l.points.map(([x, y]) => [x * fr.sx, y * fr.sy] as [number, number]) }));
           g.save();
           g.scale(1 / fr.sx, 1 / fr.sy);
           g.lineWidth = st.width * r;
@@ -1360,7 +1429,8 @@ class SpecInstance implements SaverInstance {
     }
     if (sprite.kind === 'stroke') {
       const resolvedColor = sprite.colors?.[e.colorIndex] ?? sprite.color;
-      const pts = strokeSamples(sprite, sz / 2);
+      const pts = strokeDrawnSamples(sprite, sz / 2);
+      if (pts.length < 2) return;
       const lw = strokeWidthPx(sprite, unitScale);
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -1374,7 +1444,7 @@ class SpecInstance implements SaverInstance {
         // A brush mark (X386): its tapered outline, filled once — so a
         // translucent stroke composites as one mark instead of beading at
         // every overlapping segment joint.
-        const outline = strokeOutline(pts, lw);
+        const outline = strokeOutline(pts, lw, true, strokeDrawnAt(sprite, sz / 2, pts));
         ctx.fillStyle = resolvedColor;
         ctx.beginPath();
         ctx.moveTo(outline[0]!.x, outline[0]!.y);
@@ -1421,7 +1491,7 @@ class SpecInstance implements SaverInstance {
       const lh = (sprite.lineHeight ?? 1.4) * fsPx;
       const maxWPx = sprite.maxWidth * unitScale;
       const maxWEm = maxWPx / fsPx;
-      const lines = breakTextBlock(sprite.text, maxWEm, textMetricsClassFor(sprite.font));
+      const lines = breakTextBlock(textBlockText(sprite), maxWEm, textMetricsClassFor(sprite.font));
       const align = sprite.align ?? 'left';
       // Reveal masks glyphs; layout above always ran on the full text, so
       // lines never reflow while typing.
@@ -1459,6 +1529,7 @@ class SpecInstance implements SaverInstance {
         // shift as they fade.
         ctx.textAlign = 'left';
         const baseAlpha = ctx.globalAlpha;
+        const riseEm = Math.max(0, Math.min(LIMITS.maxRevealRise, reveal!.rise ?? 0));
         for (let li = 0; li < lines.length; li++) {
           const alphas = rs.glyphAlphas[li] ?? [];
           if (alphas.length > 0 && alphas[0]! <= 0) break;
@@ -1477,7 +1548,8 @@ class SpecInstance implements SaverInstance {
             const a = alphas[gi] ?? 0;
             if (a <= 0) break; // alphas only fall in reading order
             ctx.globalAlpha = baseAlpha * a;
-            ctx.fillText(clusters[gi]!, x0 + ctx.measureText(prefix).width, li * lh);
+            // `reveal.rise`: a fading glyph lifts into its line as it appears.
+            ctx.fillText(clusters[gi]!, x0 + ctx.measureText(prefix).width, li * lh + riseEm * fsPx * (1 - a));
             prefix += clusters[gi]!;
           }
         }
@@ -1542,7 +1614,7 @@ class SpecInstance implements SaverInstance {
     const tr = this.transition;
     if (!tr) return;
     const k = tr.dur <= 0 ? 1 : (t - tr.startT) / tr.dur;
-    this.effSpec = k >= 1 ? tr.to : lerpSpec(tr.from, tr.to, easeSmooth(k));
+    this.effSpec = k >= 1 ? tr.to : lerpSpec(tr.from, tr.to, easeGlide(tr.ease, k));
     if (k >= 1) this.transition = null;
     // Placement/motion fields are baked into entities at build time; rebuild
     // (deterministic — same seed → same stream) only when those change.
@@ -1574,6 +1646,8 @@ class SpecInstance implements SaverInstance {
       startT: this.lastT,
       dur,
     };
+    const ease = steerEase(deltas);
+    if (ease) this.transition.ease = ease;
     if (this.paused) {
       // No frames will run the glide — jump straight to the target.
       this.transition = null;
@@ -1621,7 +1695,7 @@ class SpecInstance implements SaverInstance {
   }
 
   private drawLinks(built: Built, t: number, lifeA: number, parentE: Entity | null): void {
-    const { links } = built.layer;
+    const { links, life } = built.layer;
     if (!links) return;
     const { ctx } = this;
     // Toroidal link drawing only makes sense for motions that actually wrap —
@@ -1650,6 +1724,8 @@ class SpecInstance implements SaverInstance {
         } else resolvedColor = '#e6e8ef';
       }
       let a = links.alpha ?? alphaAt(ei, t);
+      // A staggered layer's lifeA is only its gate; a link lives as long as both its ends.
+      if (life?.stagger) a *= Math.min(lifeStaggerAt(life, t, i), lifeStaggerAt(life, t, j));
       if (links.falloff && Number.isFinite(maxDistPx)) a *= Math.max(0, 1 - dist / maxDistPx);
       ctx.globalAlpha = a * lifeA;
       ctx.strokeStyle = resolvedColor;
@@ -1716,10 +1792,15 @@ class SpecInstance implements SaverInstance {
     ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
     this.drawLinks(built, t, lifeA, parentE);
     const override = this.paintOverrides?.get(li) ?? null;
-    for (const e of built.entities) {
-      this.drawTrail(built, e, t, lifeA, parentE);
+    const life = built.layer.life;
+    for (let ei = 0; ei < built.entities.length; ei++) {
+      const e = built.entities[ei]!;
+      // `life.stagger`: each entity's own shifted envelope (1 without one).
+      const entA = life?.stagger ? lifeA * lifeStaggerAt(life, t, ei) : lifeA;
+      if (entA <= 0) continue;
+      this.drawTrail(built, e, t, entA, parentE);
       if (override === null) {
-        this.drawEntity(built, e, t, lifeA, parentE);
+        this.drawEntity(built, e, t, entA, parentE);
         continue;
       }
       // A text cross-fade: the previous words fading out under the new
@@ -1728,8 +1809,8 @@ class SpecInstance implements SaverInstance {
       const [aOut, aIn] = override.mode === 'dip'
         ? [Math.max(0, 1 - 2 * override.k), Math.max(0, 2 * override.k - 1)]
         : [1 - override.k, override.k];
-      if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
-      if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
+      if (aOut > 0) this.drawEntity(built, e, t, entA, parentE, { sprite: override.outgoing, alpha: aOut });
+      if (aIn > 0) this.drawEntity(built, e, t, entA, parentE, { alpha: aIn });
     }
     if (tf || gtf) ctx.restore();
   }
@@ -1787,10 +1868,12 @@ class SpecInstance implements SaverInstance {
     if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
     let sig = `${pathPaintSig(built.layer.sprite as PolygonSprite)}:${lifeA.toFixed(4)}:${JSON.stringify(built.layer.transform ?? null)}:${JSON.stringify(group?.transform ?? null)}`;
     const parentE = this.parentEntityFor(built);
-    for (const e of built.entities) {
+    const life = built.layer.life;
+    built.entities.forEach((e, ei) => {
       const p = this.entityPos(e, t, parentE);
-      sig += `|${p.x.toFixed(2)},${p.y.toFixed(2)},${sizeAt(e, t).toFixed(3)},${rotationAt(e, t).toFixed(5)},${alphaAt(e, t).toFixed(4)},${e.colorIndex}`;
-    }
+      const a = life?.stagger ? alphaAt(e, t) * lifeStaggerAt(life, t, ei) : alphaAt(e, t);
+      sig += `|${p.x.toFixed(2)},${p.y.toFixed(2)},${sizeAt(e, t).toFixed(3)},${rotationAt(e, t).toFixed(5)},${a.toFixed(4)},${e.colorIndex}`;
+    });
     return sig;
   }
 
@@ -1946,11 +2029,13 @@ class SpecInstance implements SaverInstance {
     }
     const next = new Map(this.overrides);
     const armed: Array<[string, string]> = [];
+    // The batch glides on one curve — the longest delta's — as on a plain scene.
+    const batchEase = steerEase([...latest.values()]);
     for (const [path, d] of latest) {
       const id = steerId(d);
       if (this.seenSteers.get(path) === id) continue;
       armed.push([path, id]);
-      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide));
+      next.set(path, armOverride(this.authored!, path, glide > 0 ? readSpecPath(shown, path) : d.value, d.value, now, glide, batchEase));
     }
     if (armed.length === 0) return true;
     // Validate the scene as it will actually be — every live override, now
@@ -2435,7 +2520,7 @@ class SequenceInstance implements SequenceSaverInstance {
       const outgoing: SpriteSpec = from.kind === 'text' && now.kind === 'text'
         ? { ...now, strings: from.strings }
         : from.kind === 'textBlock' && now.kind === 'textBlock'
-          ? { ...now, text: from.text }
+          ? { ...now, ...outgoingCounter(from, now) }
           : now;
       if (outgoing === now) continue;
       // `mode` is only written for `dip`, so a crossfade override is the
@@ -2445,10 +2530,79 @@ class SequenceInstance implements SequenceSaverInstance {
     return map;
   }
 
-  /** Length of the fade out of segment `from`, or 0 (no fade, or a tier that plays it as cut). */
+  /** Length of the fade (or wipe) out of segment `from`, or 0 (none, or a tier that plays it as cut). */
   private fadeDur(from: number): number {
     const tr = this.seq.segments[from]?.transition;
-    return this.fadeEnabled && tr?.type === 'fade' ? tr.dur : 0;
+    return this.fadeEnabled && (tr?.type === 'fade' || tr?.type === 'wipe') ? tr.dur : 0;
+  }
+
+  /** The wipe out of segment `from`, when that is its transition. */
+  private wipeOf(from: number): WipeTransition | null {
+    const tr = this.seq.segments[from]?.transition;
+    return tr?.type === 'wipe' ? tr : null;
+  }
+
+  private wipeScratch: HTMLCanvasElement | OffscreenCanvas | null = null;
+  private wipeScratchIn: HTMLCanvasElement | OffscreenCanvas | null = null;
+
+  /** `canvas` masked to one side of the wipe edge at progress `k`, on a scratch canvas of its own. */
+  private wipeSide(slot: 'wipeScratch' | 'wipeScratchIn', canvas: HTMLCanvasElement | OffscreenCanvas, wipe: WipeTransition, k: number, side: 'out' | 'in'): HTMLCanvasElement | OffscreenCanvas | null {
+    const cw = Math.max(1, canvas.width);
+    const ch = Math.max(1, canvas.height);
+    const scratch = (this[slot] ??= createSceneCanvas(cw, ch));
+    if (scratch.width !== cw) scratch.width = cw;
+    if (scratch.height !== ch) scratch.height = ch;
+    const g = scratch.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!g) return null;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(canvas, 0, 0);
+    g.globalCompositeOperation = side === 'out' ? 'destination-out' : 'destination-in';
+    g.fillStyle = wipeMask(g, wipe, k, cw, ch);
+    g.fillRect(0, 0, cw, ch);
+    g.restore();
+    return scratch;
+  }
+
+  /**
+   * Composite one side of a transition out of segment `from` at eased
+   * progress `k`. A fade draws the outgoing at 1 − k (and, over a bed, the
+   * incoming at k). A wipe draws each side through the moving edge instead:
+   * the outgoing everywhere the edge has not yet passed, the incoming where
+   * it has — the canvas is masked on a scratch copy (`destination-out` /
+   * `destination-in` with the edge's gradient), then drawn. `other`: the
+   * opposite side's canvas, when it is drawn too (a wipe over a bed) — the
+   * two masked sides are summed (`lighter`) on the scratch first, so a soft
+   * edge keeps matching marks opaque instead of letting the bed show through.
+   */
+  private compositeTransition(canvas: HTMLCanvasElement | OffscreenCanvas, k: number, from: number, side: 'out' | 'in', other?: HTMLCanvasElement | OffscreenCanvas): void {
+    const wipe = this.wipeOf(from);
+    if (!wipe) {
+      // A fade: the incoming under, the outgoing over — each at its own alpha.
+      if (other) this.composite(other, side === 'out' ? k : 1 - k);
+      return this.composite(canvas, side === 'out' ? 1 - k : k);
+    }
+    const main = this.childCtx.surface?.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+    if (!main) return;
+    const scratch = this.wipeSide('wipeScratch', canvas, wipe, k, side);
+    if (!scratch) return this.composite(canvas, side === 'out' ? 1 - k : k);
+    if (other) {
+      const rest = this.wipeSide('wipeScratchIn', other, wipe, k, side === 'out' ? 'in' : 'out');
+      const g = scratch.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      if (rest && g) {
+        g.save();
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalCompositeOperation = 'lighter';
+        g.drawImage(rest, 0, 0);
+        g.restore();
+      }
+    }
+    main.save();
+    main.globalAlpha = 1;
+    main.globalCompositeOperation = 'source-over';
+    main.drawImage(scratch, 0, 0, this.childCtx.width, this.childCtx.height);
+    main.restore();
   }
 
   /** Sum of every timed segment — the lap length under `loop: true`. */
@@ -2809,8 +2963,7 @@ class SequenceInstance implements SequenceSaverInstance {
         if (!this.fadingIn) this.fadingIn = this.offscreenChild(index, useMorphSeed ? chainRoot : index);
         this.renderOffscreen(this.fadingIn, localT, effSeed);
         const out = this.renderOutgoing(fadeFrom, localT, seed);
-        this.composite(this.fadingIn.canvas, k);
-        this.composite(out.canvas, 1 - k);
+        this.compositeTransition(out.canvas, k, fadeFrom, 'out', this.fadingIn.canvas);
         return;
       }
 
@@ -2822,7 +2975,7 @@ class SequenceInstance implements SequenceSaverInstance {
         // The outgoing segment on its own canvas over the incoming frame at
         // 1 − easeSmooth(k): the incoming's opaque ground fades in beneath it.
         const out = this.renderOutgoing(fadeFrom, localT, seed);
-        this.composite(out.canvas, 1 - easeSmooth(localT / this.fadeDur(fadeFrom)));
+        this.compositeTransition(out.canvas, easeSmooth(localT / this.fadeDur(fadeFrom)), fadeFrom, 'out');
       }
     }
   }

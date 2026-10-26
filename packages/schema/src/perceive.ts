@@ -18,15 +18,16 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
-  breakTextBlock,
+  breakTextBlock, textBlockText,
   buildEntities,
   headingAt,
   isFullWidth,
   lifeAlphaAt,
+  lifeStaggerAt,
   linkEdges,
   linkMaxDistPx,
   positionAt,
@@ -206,7 +207,7 @@ function textBlockBox(
   const lh = (s.lineHeight ?? 1.4) * fsPx;
   const maxWPx = s.maxWidth * unitScale;
   const maxWEm = maxWPx / fsPx;
-  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
+  const lines = breakTextBlock(textBlockText(s), maxWEm, textMetricsClassFor(s.font));
   const totalH = lines.length * lh;
   const maxLineW = lines.reduce((m, l) => Math.max(m, l.widthEm), 0) * fsPx;
   const align = s.align ?? 'left';
@@ -237,7 +238,7 @@ function textBlockRevealFraction(
   if (!s.reveal) return 1;
   const unitScale = Math.min(w, h);
   const maxWEm = (s.maxWidth * unitScale) / (s.fontSize * unitScale);
-  const lines = breakTextBlock(s.text, maxWEm, textMetricsClassFor(s.font));
+  const lines = breakTextBlock(textBlockText(s), maxWEm, textMetricsClassFor(s.font));
   const rs = revealState(lines, s.reveal, t);
   if (rs.glyphAlphas) {
     // glyphFade paints partial-alpha glyphs, so the ink fraction is the mean
@@ -576,7 +577,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       if (!part.stroke) return [];
       const hw = (part.stroke.width * radius) / 2;
       const out: Array<Array<{ x: number; y: number }>> = [];
-      for (const l of part.flat.lines) {
+      for (const l of strokeLines(part)) {
         const m = l.points.map(([u, v]) => mapUnit(u, v));
         const n = l.closed ? m.length : m.length - 1;
         for (let i = 0; i < n; i++) {
@@ -669,9 +670,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * paintOpacity(spec, layer);
     if (lifeA <= 0) continue;
 
-    for (const e of entities) {
-      splatTrail(layer, e, tPass, lifeA, alphaScale, entities.length);
-      const a = Math.min(1, alphaAt(e, tPass) * lifeA) * alphaScale;
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
+      const entA = layer.life?.stagger ? lifeA * lifeStaggerAt(layer.life, tPass, ei) : lifeA;
+      if (entA <= 0) continue;
+      splatTrail(layer, e, tPass, entA, alphaScale, entities.length);
+      const a = Math.min(1, alphaAt(e, tPass) * entA) * alphaScale;
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
@@ -683,8 +687,8 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         continue;
       }
       if (s.kind === 'stroke') {
-        // Stamp along the sampled path, rotated like the renderer does.
-        const pts = strokeSamples(s, sz / 2);
+        // Stamp along the sampled path (cut to its `draw` span), rotated like the renderer does.
+        const pts = strokeDrawnSamples(s, sz / 2);
         let angle = rotationAt(e, tPass) + paintRotation(spec, layer);
         if (s.orient) angle += headingAt(e, tPass, w, h) ?? 0;
         const ca = Math.cos(angle);
@@ -702,6 +706,7 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
         // Rasterize each segment at half-cell steps so a long stroke leaves a
         // continuous line of ink, not a dotted one.
         const step = Math.min(cellW, cellH) / 2;
+        if (pts.length < 2) continue; // a `draw` span that paints nothing
         stampAt(pts[0]!, 0);
         for (let i = 1; i < pts.length; i++) {
           const q0 = pts[i - 1]!;
@@ -823,13 +828,16 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
       for (const edge of edges) {
         const pi = positions[edge.i]!;
         const pj = positions[edge.j]!;
+        // A link lives as long as both its ends (a staggered layer's lifeA is only its gate).
+        const env = layer.life?.stagger ? Math.min(lifeStaggerAt(layer.life, tPass, edge.i), lifeStaggerAt(layer.life, tPass, edge.j)) : 1;
+        if (env <= 0) continue;
         const steps = Math.max(1, Math.ceil(edge.dist / Math.min(cellW, cellH)));
         for (let i = 0; i <= steps; i++) {
           const k = i / steps;
           const c = Math.floor((pi.x + (pj.x - pi.x) * k) / cellW);
           const r = Math.floor((pi.y + (pj.y - pi.y) * k) / cellH);
           if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
-          compose(r * cols + c, lum, wgt, layer.blend);
+          compose(r * cols + c, lum, wgt * env, layer.blend);
         }
       }
     }
@@ -1088,7 +1096,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
       const s = layer.sprite;
       const unitScale = Math.min(scene.w, scene.h);
       const sizePx = s.fontSize * unitScale;
-      const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [s.text], count: entities.length, sizePx: Math.round(sizePx) };
+      const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [textBlockText(s)], count: entities.length, sizePx: Math.round(sizePx) };
       if (s.reveal) info.revealed = Math.round(textBlockRevealFraction(s, scene.w, scene.h, t) * 100) / 100;
       out.push(info);
       return;
@@ -1241,8 +1249,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
     const areaScale = painted ? paintSize(spec, layer) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
-    for (const e of entities) {
-      const a = alphaAt(e, t) * lifeA;
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei);
       const sz = sizeAt(e, t);
       const s = layer.sprite;
       let entArea: number;
@@ -1266,7 +1275,7 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       }
       else if (s.kind === 'stroke') {
         const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
-        entArea = pathLength(strokeSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
+        entArea = pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
       }
       else if (s.kind === 'text') {
         const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
@@ -1302,7 +1311,10 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       const la = (layer.links.alpha ?? 0.6) * lifeA;
       const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
       const lw = (layer.links.width ?? defaultWidth) * scale;
-      for (const edge of edges) area += edge.dist * lw * la * LINE_SALIENCE;
+      for (const edge of edges) {
+        const env = layer.life?.stagger ? Math.min(lifeStaggerAt(layer.life, t, edge.i), lifeStaggerAt(layer.life, t, edge.j)) : 1;
+        area += edge.dist * lw * la * LINE_SALIENCE * env;
+      }
     }
     const meanLuma = entities.length ? lumAcc / entities.length : 0;
     const contrast = Math.abs(meanLuma - bgMean) + 0.1;
@@ -1505,10 +1517,11 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       wb += c.b * weight;
       wsum += weight;
     };
-    for (const e of entities) {
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      const a = alphaAt(e, t) * lifeA * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
       if (a <= 0) continue;
       // A path drawing is the colours its parts paint, by the ink each lays
       // down: a part at opacity 0 adds nothing (X609).

@@ -49,7 +49,7 @@ export interface TimelineFlashReport {
 }
 
 /** Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are. */
-const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$/;
+const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background|draw)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$/;
 /** More than 3 flashes is at least 8 reversals; allow one that starts just before the window. */
 const MIN_BOUNDARIES = 7;
 /** Frames analysed together (one run of the WCAG analyzer). */
@@ -96,7 +96,7 @@ export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } 
  * reshaping it, or changing how many seeded draws it takes: opacity, colour,
  * a gradient, a part's fill. `colors` is not one — its length is a draw.
  */
-const PAINT_LEAF = /(^|\.)(opacity|alpha|color|fill)(\.\d+)?$|(^|\.)gradient(\.|$)/;
+const PAINT_LEAF = /(^|\.)(opacity|alpha|color|fill)(\.\d+)?$|(^|\.)gradient(\.|$)|(^|\.)draw\.(start|end)$/;
 
 /**
  * Which grid cells each luminance-bearing path can change, or null when some

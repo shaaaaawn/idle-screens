@@ -198,11 +198,23 @@ export interface TimelineKey {
   path: string;
   /** The target value; the key must still validate when applied. */
   value: unknown;
-  /** Default `smooth`. */
-  ease?: 'step' | 'linear' | 'smooth';
+  /** Default `smooth`. See `GlideEase`. */
+  ease?: GlideEase;
   /** Glide length in ms, starting at `t`. Default 1000 (as live steering); 0 = a cut. */
   dur?: number;
 }
+
+/**
+ * How a glide moves between its two values. `smooth` (default) starts and
+ * ends at rest; `linear` is constant speed; `step` holds, then switches at
+ * the glide's end. `in` accelerates from rest and arrives at speed (a
+ * departure); `out` leaves at speed and decelerates into place (an
+ * arrival); `spring` is a critically damped spring — a fast start that
+ * settles with no overshoot, so every value stays between its two ends.
+ * Every ease is monotone, so a glide never leaves the range its endpoints
+ * bound. **Native:** an ease it does not know reads as `smooth`.
+ */
+export type GlideEase = 'step' | 'linear' | 'smooth' | 'in' | 'out' | 'spring';
 
 /**
  * Authored change on the scene's own clock — keyframes. A scene without a
@@ -371,8 +383,26 @@ export interface LayerSpec {
    * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
    * before `enter` (ms), ramps up over `fade` ms (default 1000), holds at 1, then
    * ramps down starting at `exit`. Entities are skipped entirely while at alpha 0.
+   * `stagger` (ms, default 0) shifts entity i's whole envelope — its enter and
+   * its exit — by i × stagger, in the layer's entity order (reading order for
+   * `list` / `table` / `grid`), so a row of labels builds one after another
+   * instead of together. Paint, like the rest of `life`: it glides, draws
+   * nothing from the RNG, and on screens where density scaling changes the
+   * count the whole build takes (count − 1) × stagger. **Native:** ignored ⇒
+   * every entity enters together.
    */
-  life?: { enter?: number; exit?: number; fade?: number };
+  life?: { enter?: number; exit?: number; fade?: number; stagger?: number };
+  /**
+   * A swing back and forth: each entity rotates `amp` degrees either side of
+   * its resting angle (`rotate` plus any `spin`), once per `period` ms, on a
+   * seeded per-entity phase — a boat on a swell, a hanging sign, a lantern,
+   * a jellyfish's lean. A `clock` replaces the seeded phase like `pulse`'s,
+   * so a clocked layer swings in step. Structural (baked per entity like
+   * `pulse`). Its phase is one seeded draw per entity, made last and only
+   * when declared, so existing specs keep identical streams. **Native:**
+   * ignored ⇒ no swing.
+   */
+  rock?: { amp: number; period: number };
   /**
    * Sparse events — marks that appear, expand and fade in place, one at a time,
    * with long silences between (the "one ping" primitive). Each entity is dark
@@ -497,6 +527,8 @@ export type SpriteSpec =
       curve?: 'smooth' | 'linear';
       taper?: boolean;
       orient?: boolean;
+      /** Draw-on: the stretch of the mark that is painted — see `StrokeDraw`. Absent ⇒ the whole mark. */
+      draw?: StrokeDraw;
       colors?: string[];
       colorWeights?: number[];
     }
@@ -542,7 +574,29 @@ export type SpriteSpec =
       opacity?: number;
       /** See `TextRole`. Absent ⇒ no legibility advisories, no pixel change. */
       role?: TextRole;
+      /** A number the block shows instead of `text` — see `TextNumber`. */
+      number?: TextNumber;
     };
+
+/**
+ * A counter: the block paints `prefix + value + suffix` instead of `text`,
+ * with `value` rounded to `decimals` places (default 0) and, unless
+ * `grouping: false`, its thousands separated by commas — formatted the same
+ * way on every device (never by locale). `value` is **paint**: steer
+ * `sprite.number.value` (or key it on the timeline) and the digits roll
+ * there over the glide. Line-breaking runs on the formatted string, so a
+ * counter that gains a digit can re-wrap — give it room (`maxWidth`) or an
+ * `anchor` that pins the edge you want still. `text` stays what clients
+ * that do not read `number` show — author it as the counter's rest value.
+ * **Native:** ignored ⇒ `text`.
+ */
+export interface TextNumber {
+  value: number;
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
+  grouping?: boolean;
+}
 
 /**
  * What a text layer is *for* — a declaration, not a pixel. `read` says the
@@ -600,6 +654,14 @@ export interface TextRevealSpec {
    * wave of overlapping fades. Ignored by the other modes.
    */
   fade?: number;
+  /**
+   * `glyphFade` only: each glyph rises into place as it fades in, from
+   * `rise` em below its line (0..1, default 0) — the caption that lifts as
+   * it appears. A pure function of the glyph's fade, so it glides, deletes
+   * and seeks like the rest of reveal; layout never moves. **Native:**
+   * ignored ⇒ no rise.
+   */
+  rise?: number;
 }
 
 /** Rotate through sprite variants over time. Each entity offsets by its seeded phase. */
@@ -773,6 +835,12 @@ export const LIMITS = {
   minPolygonSides: 3,
   maxPolygonSides: 12,
   maxShapePoints: 24, // polygon.points / stroke.points
+  maxTextNumberDecimals: 6,
+  maxTextAffix: 64, // characters of a counter's prefix / suffix
+  maxRevealRise: 1, // em
+  maxRockAmp: 45, // degrees either side of rest — a swing, not a spin
+  minRockPeriod: 1000, // ms — a calm swing; at most once a second
+  maxLifeStagger: 60000, // ms between successive entities' entrances
   minEaseTau: 100, // ms
   maxEaseTau: 120000, // ms
 } as const;
@@ -802,7 +870,30 @@ export type SequenceTransition =
    * structural requirement). Hosts on the `basic`/`minimal` capability tier
    * render it as `cut` (see `SequenceMountContext.capabilityTier`).
    */
-  | { type: 'fade'; dur: number };
+  | { type: 'fade'; dur: number }
+  /**
+   * Wipe into the next segment over `dur` ms: the incoming segment is
+   * revealed through a moving edge instead of a dissolve — `shape: 'circle'`
+   * (default) is an iris opening from `origin` ({x, y} 0..1, default the
+   * centre) until it clears the farthest corner; `'line'` sweeps a straight
+   * edge across the frame along `angle` degrees (0 = left to right, 90 = top
+   * to bottom). `feather` (0..1, default 0.08) softens the edge, as a
+   * fraction of the distance it travels. Works between unlike segments,
+   * like `fade`, on the same two-live-segment machinery and the same tier
+   * gate (`basic` / `minimal` hosts cut). Every pixel changes once, so it is
+   * a spatial ramp, never a flash. **Native:** cross-fades over `dur`.
+   */
+  | WipeTransition;
+
+/** See the `wipe` member of `SequenceTransition`. */
+export interface WipeTransition {
+  type: 'wipe';
+  dur: number;
+  shape?: 'circle' | 'line';
+  origin?: { x: number; y: number };
+  angle?: number;
+  feather?: number;
+}
 
 export interface SequenceSegment {
   key: string;
@@ -871,8 +962,23 @@ export type PathGradient =
   | { type: 'radial'; center: [number, number]; radius: number; focus?: [number, number]; stops: PathGradientStop[]; units?: 'box' | 'part' };
 export interface PathGradientStop { at: number; color: string; opacity?: number }
 
-/** An outline drawn along every subpath of a path polygon (open ones too). `width` is in unit-box units. */
-export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square' }
+/**
+ * An outline drawn along every subpath of a path polygon (open ones too).
+ * `width` is in unit-box units. `draw` paints only a stretch of it — see
+ * `StrokeDraw`: every subpath of the part counts as one pen line, in the
+ * order the path draws them.
+ */
+export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square'; draw?: StrokeDraw }
+
+/**
+ * Draw-on for a line: only the stretch from `start` to `end` (fractions of
+ * the line's arc length, 0..1, defaults 0 and 1) is painted, so gliding
+ * `end` from 0 to 1 draws the line on as if by a pen, and gliding `start`
+ * after it erases it from the tail. Paint: both glide under a steer, a
+ * `timeline` key or a `morph` without a rebuild. `start ≥ end` paints
+ * nothing. **Native:** ignored ⇒ the whole line.
+ */
+export interface StrokeDraw { start?: number; end?: number }
 
 /**
  * One piece of a multi-colour path drawing (`polygon.parts`), drawn back to

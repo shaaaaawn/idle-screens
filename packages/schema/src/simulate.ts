@@ -1,5 +1,5 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor } from './types';
+import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor, TextNumber } from './types';
 import { LIMITS } from './types';
 import { isShapedSprite } from './shapes';
 
@@ -97,6 +97,8 @@ export interface Entity {
   ease?: { type: 'settle' | 'buoyant'; tau: number };
   /** Static rotation (radians), added to any spin. Only set when `layer.rotate` is declared. */
   rotate?: number;
+  /** `rock`: amplitude (radians), period (ms) and phase (radians; a clock's shared phase when clocked). */
+  rock?: { amp: number; period: number; phase: number };
   /** Spline params (pts in px, shared per layer). Only set for path motion. */
   path?: {
     pts: Array<{ x: number; y: number }>;
@@ -506,12 +508,41 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       out[out.length - 1]!.pulsePhase = clockPhase - ((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
     }
   }
+  if (layer.rock) {
+    // One seeded phase per entity, drawn in a pass AFTER the loop and only
+    // when declared: every existing spec keeps its stream, and declaring
+    // `rock` re-seats nothing else in this layer. A clock's shared phase
+    // replaces the seeded one (the draw still happens, for stream parity).
+    const amp = (layer.rock.amp * Math.PI) / 180;
+    for (const ent of out) {
+      const ph = rng.range(0, Math.PI * 2);
+      ent.rock = { amp, period: layer.rock.period, phase: layer.clock ? clockPhase : ph };
+    }
+  }
   if (layer.emit) {
     // Assigned after the loop and without any rng draw (see emitParams), so
     // toggling `emit` rearranges nothing — not this layer, not the ones after.
     for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length);
   }
   return out;
+}
+
+/**
+ * The string a `textBlock` paints: its `text`, or with `number` the
+ * counter's `prefix + value + suffix` — rounded to `decimals`, thousands
+ * grouped with commas unless `grouping: false`. Locale-free, so every
+ * device draws the same digits.
+ */
+export function textBlockText(s: { text: string; number?: TextNumber }): string {
+  const n = s.number;
+  if (!n) return s.text;
+  const d = Math.max(0, Math.min(LIMITS.maxTextNumberDecimals, Math.round(n.decimals ?? 0)));
+  const v = Number.isFinite(n.value) ? n.value : 0;
+  const fixed = Math.abs(v).toFixed(d);
+  const [whole, frac] = fixed.split('.');
+  const grouped = n.grouping === false ? whole! : whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const neg = v < 0 && Number(fixed) !== 0;
+  return `${n.prefix ?? ''}${neg ? '-' : ''}${grouped}${frac !== undefined ? `.${frac}` : ''}${n.suffix ?? ''}`;
 }
 
 /** Depth of a warp entity at time t: wraps from far (1) to near (WARP_NEAR). Pure. */
@@ -603,14 +634,21 @@ export function sizeAt(e: Entity, t: number): number {
  * `rotate` is for).
  */
 export function rotationAt(e: Entity, t: number): number {
-  const base = e.rotate ?? 0;
+  let base = e.rotate ?? 0;
+  if (e.rock) base += e.rock.amp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.rock.period + e.rock.phase);
   if (!e.spinSpeed) return base;
   return base + e.spinPhase + e.spinSpeed * (t / 1000);
 }
 
-/** Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is unset. */
-export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number } | undefined, t: number): number {
+/**
+ * Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is
+ * unset. With `stagger` this is the layer's GATE only — 0 before the first
+ * entity enters, else 1 — and each entity's own envelope is
+ * `lifeStaggerAt(life, t, i)`.
+ */
+export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number; stagger?: number } | undefined, t: number): number {
   if (!life) return 1;
+  if (life.stagger) return life.enter !== undefined && t < life.enter ? 0 : 1;
   const fade = life.fade ?? 1000;
   let a = 1;
   if (life.enter !== undefined) {
@@ -621,6 +659,16 @@ export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number
     a *= fade > 0 ? Math.max(0, 1 - (t - life.exit) / fade) : 0;
   }
   return a;
+}
+
+/**
+ * Entity i's share of a staggered `life`: its whole envelope shifted by
+ * i × stagger. 1 without a stagger (the layer's `lifeAlphaAt` already
+ * carries the envelope), so callers multiply it in unconditionally.
+ */
+export function lifeStaggerAt(life: { enter?: number; exit?: number; fade?: number; stagger?: number } | undefined, t: number, i: number): number {
+  if (!life?.stagger) return 1;
+  return lifeAlphaAt({ enter: life.enter, exit: life.exit, fade: life.fade }, t - i * life.stagger);
 }
 
 function wrap(v: number, min: number, max: number): number {
