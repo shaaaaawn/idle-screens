@@ -72,7 +72,7 @@ struct SpecSubset: Decodable, Equatable {
     struct Background: Decodable, Equatable {
         /// Solid fill color (background.type == 'solid').
         var color: String?
-        /// Vertical gradient stops (background.type == 'gradient'). Band/drift ignored.
+        /// Vertical gradient stops (background.type == 'gradient').
         var stops: [GradientStop]?
         /// Slow oscillation of the gradient's stop positions.
         var drift: Drift?
