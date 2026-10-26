@@ -80,7 +80,9 @@ enum ChannelWSEvent: Equatable, Sendable {
     case wake
     case overlay(text: String?, ttl: Int?)
     /// A paired phone pushed a channel change to this device.
-    case switchChannel(channelId: String?)
+    /// A paired phone retargeted this screen: a channel, and optionally one
+    /// stored scene of it to pin (`sceneId`; nil = live).
+    case switchChannel(channelId: String?, sceneId: Int? = nil)
 }
 
 // MARK: - Scene transitions
@@ -292,7 +294,9 @@ actor ChannelWSClient {
                 ttl: message["ttl"]?.intValue
             )
         case "switch":
-            return .switchChannel(channelId: message["channelId"]?.stringValue)
+            let scene = message["sceneId"]?.intValue
+            return .switchChannel(channelId: message["channelId"]?.stringValue,
+                                  sceneId: scene.flatMap { $0 > 0 ? $0 : nil })
         default:
             return nil
         }

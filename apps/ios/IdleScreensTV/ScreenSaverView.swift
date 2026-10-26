@@ -270,6 +270,7 @@ struct ScreenSaverView: View {
     private var timelineKey: String { PlayerChrome.timelineKey(app.timeline) }
 
     private var pastLine: String {
+        if case .pinned = app.timeline { return app.pastScene?.label ?? "Earlier" }
         guard case .past(let i) = app.timeline, app.historyStops.indices.contains(i)
         else { return "Earlier" }
         return PlayerChrome.pastLine(stop: app.historyStops[i], sceneLabel: app.pastScene?.label)

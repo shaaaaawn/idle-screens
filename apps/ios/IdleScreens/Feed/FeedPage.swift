@@ -43,6 +43,7 @@ struct FeedPage: View {
     @Binding var chromeHidden: Bool
     @FocusState private var keyFocus: Bool
     @State private var showComposer = false
+    @State private var showCast = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
     @State private var history: [ChannelEvent] = []
@@ -225,6 +226,20 @@ struct FeedPage: View {
                 chrome.transition(.opacity)
             }
             toastLayer
+        }
+        .sheet(isPresented: $showCast) {
+            CastSheet(channelId: channelId, channelLabel: channel.displayLabel,
+                      sceneId: currentStop?.sceneId,
+                      sceneTitle: currentStop == nil ? nil : sceneTitle) { flash($0) }
+                // Full height: at half, Keep in sync sat under the Send button.
+                .presentationDetents([.large])
+        }
+        // Sync: when this is the page on screen and it settles somewhere new
+        // (another channel, another moment), the following screens go too.
+        .onChange(of: syncKey, initial: true) { _, _ in
+            guard isActive else { return }
+            let stop = stops.first { Self.key($0) == settledMoment }
+            app.syncFollow(channelId: channelId, sceneId: stop?.sceneId)
         }
         .sheet(isPresented: $showComposer) {
             ComposerSheet(channelId: channelId, session: session)
@@ -851,6 +866,10 @@ struct FeedPage: View {
         DispatchQueue.main.async { captionEntered = true }
     }
 
+    /// Changes when sync should look again: this page activating, or settling
+    /// on another moment.
+    private var syncKey: String { "\(isActive)|\(settledMoment ?? "live")" }
+
     private var sceneTitle: String {
         if let stop = currentStop {
             return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.label
@@ -942,12 +961,11 @@ struct FeedPage: View {
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
             if !app.pairedScreens.isEmpty {
-                railButton("play.tv", label: "Play on your screens") {
-                    Task {
-                        let n = await app.pushToAllScreens(channelId: channelId)
-                        flash(n > 0 ? "sent to \(n) screen\(n == 1 ? "" : "s")"
-                                    : app.pairPushError ?? "couldn't reach your screens")
-                    }
+                // Which screens, live or this scene, and Sync — not a blind
+                // push of the live channel to everything.
+                railButton(app.isSyncing ? "play.tv.fill" : "play.tv",
+                           label: app.isSyncing ? "Synced to your screens" : "Send to your screens") {
+                    showCast = true
                 }
             }
             ShareLink(item: app.gallery.viewerURL(for: channelId)) {

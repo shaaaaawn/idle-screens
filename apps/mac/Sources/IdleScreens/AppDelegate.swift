@@ -141,11 +141,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Always-on control socket: keeps this Mac reachable for phone pushes
     // even when the saver isn't showing (otherwise pairing looks connected on
     // the phone but every push 409s).
-    PairLink.shared.onSwitch = { [weak self] channelId in
+    PairLink.shared.onSwitch = { [weak self] channelId, sceneId in
       guard let self else { return }
       self.defaults.set(channelId, forKey: Self.channelKey)
-      self.applyConfigToSaver()
+      self.pushedScene = sceneId.map { (channelId, $0) }
       self.statusItem.menu = self.buildMenu()
+      // Showing: the viewer inside is on this device id too and has already
+      // followed the push (another channel, a pinned scene, or back to live)
+      // — reloading it here raced that, and restarted the saver on every
+      // sync step. Not showing: start it where the phone asked.
+      guard !self.saver.isShowing else { return }
+      self.applyConfigToSaver()
       self.startSaver()
     }
     PairLink.shared.onStateChange = { [weak self] in
@@ -239,7 +245,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.showActivity = defaults.bool(forKey: Self.activityHUDKey)
     let channelId = defaults.string(forKey: Self.channelKey)
     PairLink.shared.start(channelId: channelId)
-    saver.channelURL = channelId.flatMap { $0.isEmpty ? nil : Self.channelURL(for: $0) }
+    saver.channelURL = channelId.flatMap { id -> URL? in
+      guard !id.isEmpty else { return nil }
+      // A scene the phone pinned, only while it is still that channel's.
+      let scene = pushedScene.flatMap { $0.channelId == id ? $0.sceneId : nil }
+      return Self.channelURL(for: id, scene: scene)
+    }
     saver.perDisplayChannelURL = perDisplayChannel.compactMapValues { id in
       id.isEmpty ? nil : Self.channelURL(for: id)
     }
@@ -247,10 +258,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// The viewer URL for a channel. `device` registers this Mac's viewer socket
   /// so a paired iPhone can retarget the display with a "switch" push.
-  private static func channelURL(for id: String) -> URL? {
-    ServerEndpoint.url(
-      "/channel/\(id)", query: [URLQueryItem(name: "device", value: PairDevice.deviceId)])
+  private static func channelURL(for id: String, scene: Int? = nil) -> URL? {
+    var query = [URLQueryItem(name: "device", value: PairDevice.deviceId)]
+    if let scene { query.append(URLQueryItem(name: "scene", value: String(scene))) }
+    return ServerEndpoint.url("/channel/\(id)", query: query)
   }
+
+  /// The stored scene a paired phone last pinned, and the channel it belongs to.
+  private var pushedScene: (channelId: String, sceneId: Int)?
 
   /// Idle-triggered start honors all the "should we?" gates. Manual start
   /// (menu / hotkey) bypasses them — the user asked explicitly.

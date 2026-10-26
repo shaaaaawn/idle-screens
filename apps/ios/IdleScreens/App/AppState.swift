@@ -42,6 +42,10 @@ final class AppState {
     var isPairing = false
     /// Failure pushing a channel to an already-paired screen.
     var pairPushError: String?
+    /// Screens following what this device watches (Sync). Empty = not syncing.
+    var syncTargets: [String] = []
+    @ObservationIgnored var syncTask: Task<Void, Never>?
+    @ObservationIgnored var lastSynced: SyncTarget?
     /// Failure claiming a pair code. Separate from `pairPushError` so a failed
     /// push doesn't surface as a stale error inside "Add a screen".
     var pairClaimError: String?

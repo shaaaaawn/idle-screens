@@ -316,6 +316,9 @@ final class TVAppState {
         case live
         /// Index into `historyStops`, 0 = the scene before the live one.
         case past(Int)
+        /// A stored scene a paired phone sent, not (yet) placed among the
+        /// loaded `historyStops`.
+        case pinned(sceneId: Int)
     }
 
     private(set) var timeline: Timeline = .live
@@ -337,6 +340,26 @@ final class TVAppState {
         case (.live, false): return .live
         case (.past(let i), true): return .past(Swift.min(i + 1, Swift.max(0, stops - 1)))
         case (.past(let i), false): return i <= 0 ? .live : .past(i - 1)
+        // From a scene the phone sent: Left starts the history, Right is live.
+        case (.pinned, true): return stops > 0 ? .past(0) : .live
+        case (.pinned, false): return .live
+        }
+    }
+
+    /// Show one stored scene of the current channel, as a paired phone asked.
+    /// Placed on the remote's timeline when the loaded history already holds
+    /// it, so Left/Right step on from there.
+    func pinScene(_ sceneId: Int) {
+        guard let channelId = selectedChannelId else { return }
+        historyTask?.cancel()
+        historyTask = Task { [weak self] in
+            guard let self,
+                  let scene = try? await self.gallery.fetchScene(channelId: channelId, sceneId: sceneId),
+                  !Task.isCancelled, self.selectedChannelId == channelId else { return }
+            self.timeline = self.historyStops.firstIndex { $0.sceneId == sceneId }
+                .map { .past($0) } ?? .pinned(sceneId: sceneId)
+            self.pastScene = scene
+            self.show(scene)
         }
     }
 
@@ -374,6 +397,8 @@ final class TVAppState {
                 self.timeline = target
                 self.pastScene = scene
                 self.show(scene)
+            case .pinned:
+                break   // only a phone's push pins; stepping never lands here
             }
         }
     }
@@ -521,8 +546,8 @@ final class TVAppState {
                     guard !Task.isCancelled else { break }
                     if watching {
                         self.handle(event)
-                    } else if case .switchChannel(let target) = event {
-                        self.handle(.switchChannel(channelId: target))
+                    } else if case .switchChannel(let target, let scene) = event {
+                        self.handle(.switchChannel(channelId: target, sceneId: scene))
                     }
                 }
             } catch {
@@ -581,13 +606,22 @@ final class TVAppState {
             }
         case .delta:
             break
-        case .switchChannel(let channelId):
+        case .switchChannel(let channelId, let sceneId):
             // Any switch push proves a paired phone is steering this TV —
             // the pairing screen uses it as its "✓ Paired" cue (the phone
             // sends a same-channel ack right after claiming).
             phonePushAt = Date()
-            if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
+            guard let channelId, !channelId.isEmpty else { break }
+            if channelId != selectedChannelId {
                 selectChannel(channelId, from: .grid)
+                // After the switch: selecting resets the timeline.
+                if let sceneId { pinScene(sceneId) }
+            } else if let sceneId {
+                pinScene(sceneId)
+            } else {
+                // Same channel, no scene: the phone wants it live (sync mode
+                // following the phone back to live, or "send live").
+                returnToLive()
             }
         }
     }
