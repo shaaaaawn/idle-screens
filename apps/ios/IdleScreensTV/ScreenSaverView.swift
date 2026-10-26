@@ -96,6 +96,7 @@ struct ScreenSaverView: View {
                             watchdog: app.watchdog,
                             onDowngrade: { app.watchdogDidTrigger() },
                             transparentGround: app.hasBed,
+                            clockOffset: app.sceneClockOffset,
                             seed: app.specSeed
                         )
                     case .t2:
@@ -105,6 +106,7 @@ struct ScreenSaverView: View {
                             layers: app.compiledScene,
                             background: app.specBackground,
                             transparentGround: app.hasBed,
+                            clockOffset: app.sceneClockOffset,
                             seed: app.specSeed
                         )
                     case .t1:
@@ -139,7 +141,7 @@ struct ScreenSaverView: View {
                 // dissolve and scene together), as the web presents it.
                 if let finish = app.specFinish, finish.isVisible,
                    app.effectiveTier == .t3 || app.effectiveTier == .t2 {
-                    FinishOverlay(finish: finish, seed: normalizedRenderSeed(app.specSeed),
+                    FinishOverlay(finish: finish, seed: normalizedRenderSeed(app.finishSeed),
                                   animateAllowed: app.effectiveTier == .t3)
                 }
             }
@@ -230,9 +232,10 @@ struct ScreenSaverView: View {
         if app.effectiveTier == .t3 {
             NativeSceneView(layers: app.bedScene, background: app.bedBackground,
                             ghosting: app.bedGhosting, renderClass: app.renderClass, tier: .t3,
-                            seed: app.bedSeed)
+                            clockOffset: app.bedClockOffset, seed: app.bedSeed)
         } else {
-            SpriteSceneView(layers: app.bedScene, background: app.bedBackground, seed: app.bedSeed)
+            SpriteSceneView(layers: app.bedScene, background: app.bedBackground,
+                            clockOffset: app.bedClockOffset, seed: app.bedSeed)
         }
     }
 

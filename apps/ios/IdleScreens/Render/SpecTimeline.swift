@@ -173,6 +173,68 @@ enum SpecTimeline {
         return nil
     }
 
+    // MARK: - Live steers on a timeline scene (compile.ts `TimelineOverride`)
+
+    /// The next key on `path` after scene time `t` (ms): when it starts and
+    /// how long it glides — nil when no key will ever touch the path.
+    static func nextKeyAfter(_ spec: JSONValue, path: String, t: Double) -> (at: Double, dur: Double)? {
+        guard let tl = timeline(of: spec), let cp = canonicalPath(withoutTimeline(spec), path),
+              let keys = tracks(of: spec).first(where: { $0.path == cp })?.keys, let first = keys.first else { return nil }
+        let tt = localTime(tl, t)
+        if let next = keys.first(where: { $0.t > tt }) { return (t + (next.t - tt), next.dur ?? defaultKeyDur) }
+        if tl.loop, let d = tl.duration, d > 0 { return (t + (d - tt) + first.t, first.dur ?? defaultKeyDur) }
+        return nil
+    }
+
+    /// The steering rule: a steer glides in over `dur`, holds until the path's
+    /// next key (or forever when no key will touch it), then glides back to
+    /// the timeline over that key's `dur` and expires.
+    struct Override: Equatable, Sendable {
+        let leaf: String
+        let from: JSONValue?
+        let to: JSONValue
+        let t0: Double
+        let dur: Double
+        let until: Double
+        let outDur: Double
+        let ease: String?
+
+        init(spec: JSONValue, path: String, from: JSONValue?, to: JSONValue, now: Double, glide: Double, ease: String?) {
+            let next = SpecTimeline.nextKeyAfter(spec, path: path, t: now)
+            leaf = path.split(separator: ".").last.map(String.init) ?? path
+            self.from = from; self.to = to; t0 = now; dur = glide
+            until = next?.at ?? .infinity; outDur = next?.dur ?? 0; self.ease = ease
+        }
+
+        private func held(at t: Double) -> JSONValue {
+            let k = dur > 0 ? SpecTimeline.easeGlide(ease, (t - t0) / dur) : 1
+            return k >= 1 ? to : SpecTimeline.lerpValue(from, to, k, rootKey: leaf)
+        }
+
+        /// The value at `t`, or nil once it has handed the path back.
+        func value(at t: Double, timeline: () -> JSONValue?) -> JSONValue? {
+            if t < until { return held(at: t) }
+            if outDur > 0, t < until + outDur {
+                return SpecTimeline.lerpValue(held(at: until), timeline() ?? to, SpecTimeline.easeSmooth((t - until) / outDur), rootKey: leaf)
+            }
+            return nil
+        }
+    }
+
+    /// `resolved` with every live override written over the timeline's value;
+    /// the overrides still in force come back beside it.
+    static func applyOverrides(_ resolved: JSONValue, _ overrides: [String: Override], at t: Double)
+        -> (JSONValue, [String: Override]) {
+        var out = resolved
+        var live: [String: Override] = [:]
+        for (path, o) in overrides {
+            guard let v = o.value(at: t, timeline: { read(resolved, path) }) else { continue }
+            write(&out, path, v)
+            live[path] = o
+        }
+        return (out, live)
+    }
+
     // MARK: - Paths (steer.ts resolveSpecPath / canonicalSpecPath)
 
     private static let unsafeKeys: Set<String> = ["__proto__", "constructor", "prototype"]

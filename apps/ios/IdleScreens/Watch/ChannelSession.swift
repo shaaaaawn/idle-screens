@@ -154,7 +154,7 @@ final class ChannelSession {
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 decode(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed, _, _):
+        case .scene(let spec, let seed, _, _, _):
             if let spec { decode(spec, fallbackSeed: seed) }
         case .sleep:
             sleeping = true
@@ -170,7 +170,7 @@ final class ChannelSession {
                 try? await Task.sleep(for: .milliseconds(ttlMs))
                 self?.overlayText = nil
             }
-        case .delta, .track, .switchChannel:
+        case .delta, .track, .reseed, .switchChannel:
             break
         }
     }

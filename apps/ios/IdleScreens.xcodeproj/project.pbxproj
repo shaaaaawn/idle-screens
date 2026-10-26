@@ -110,6 +110,7 @@
 		7668B788559B0C493AD6123C /* Spec39Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89EA7A8B8F55814E1624C25 /* Spec39Tests.swift */; };
 		768BD6D9358B257C813A95B3 /* ChannelTokenFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8CDE5CE42D53831512C8FB /* ChannelTokenFormat.swift */; };
 		784A037DD2D489D970C82ACB /* FeedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7CCE04A15329FC69EA8D34 /* FeedPage.swift */; };
+		785125CD0D2EC131A6834289 /* SteeringRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2206769BD59D11C81EA1C84C /* SteeringRuleTests.swift */; };
 		78635F9B5D1E1CD7A434CDFA /* FishMixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE2BF9976AB386DD3408F32 /* FishMixTests.swift */; };
 		791C3C15DA09CFF41821BA91 /* HeroChannelCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */; };
 		7A47F321D6901C9BC1260706 /* AppState+Pair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 193F27EA5CA4F1DF5743170E /* AppState+Pair.swift */; };
@@ -305,6 +306,7 @@
 		212796CA3B1CF2A7C5513499 /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
 		21BAE676F8B19370998A9EEE /* ChannelDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDeckView.swift; sourceTree = "<group>"; };
 		21E7FC58CC5ADF102F507CE7 /* RenderGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderGuard.swift; sourceTree = "<group>"; };
+		2206769BD59D11C81EA1C84C /* SteeringRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteeringRuleTests.swift; sourceTree = "<group>"; };
 		2226F884FD690065486D008D /* RenderBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderBudgetTests.swift; sourceTree = "<group>"; };
 		25991C9226373806DB93E2A6 /* WebScenePoolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebScenePoolTests.swift; sourceTree = "<group>"; };
 		27CD119F35F5A08573558331 /* PathDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathDrawing.swift; sourceTree = "<group>"; };
@@ -660,6 +662,7 @@
 				BAE91315ED7ED3B3F01FD1F1 /* SpecSubsetTests.swift */,
 				39188ADF328EE80DAD0DE53F /* SpecTimelineTests.swift */,
 				C7AD8E363D29E25B7F6C3129 /* SpriteTierParityTests.swift */,
+				2206769BD59D11C81EA1C84C /* SteeringRuleTests.swift */,
 				71C18320DD748C7D9E8C1BF9 /* StreamParityTests.swift */,
 				A89EE3BA24A0E222953586F9 /* TankParityTests.swift */,
 				88DE0542BC47C9CC2E295A36 /* TextBlockHelpersTests.swift */,
@@ -1232,6 +1235,7 @@
 				0DCCB4B6A0098FC9D312E3DE /* SpecSubsetTests.swift in Sources */,
 				0F3CC7041A45521C9BA9CFB1 /* SpecTimelineTests.swift in Sources */,
 				BC478D2EB4CA9A10966B3559 /* SpriteTierParityTests.swift in Sources */,
+				785125CD0D2EC131A6834289 /* SteeringRuleTests.swift in Sources */,
 				162BD6368B52DCC8FA3A1391 /* StreamParityTests.swift in Sources */,
 				BAD86EDB566CD0657E381C05 /* TankParityTests.swift in Sources */,
 				BF6188FF2BF538BA62DD8728 /* TextBlockHelpersTests.swift in Sources */,

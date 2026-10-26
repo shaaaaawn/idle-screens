@@ -94,7 +94,7 @@ struct SpriteSceneView: UIViewRepresentable {
 final class CompiledSpriteScene: SKScene {
     /// Total on-screen node budget. SpriteKit on A8 comfortably animates
     /// hundreds of textured quads at 1080p; thin by stride above this.
-    private static let nodeBudget = 500
+    private static let nodeBudget = 800   // the format's own entity ceiling (LIMITS.maxTotal)
 
     private var layersData: [CompiledLayer]
     private var bg: SpecSubset.Background?
@@ -342,7 +342,8 @@ final class CompiledSpriteScene: SKScene {
             let isEmoji: Bool = { if case .emoji = sprite { return true } else { return false } }()
             let style = isEmoji ? nil : layer.textSprite
             let node = SKSpriteNode(texture: glyphTexture(glyph: glyph, size: px, style: style,
-                                                          units: layer.units, dim: dim))
+                                                          units: layer.units, dim: dim,
+                                                          reference: layer.referenceViewport))
             if let style {
                 let ax: CGFloat = style.align == "left" || style.align == "start" ? 0
                     : style.align == "right" || style.align == "end" ? 1 : 0.5
@@ -720,11 +721,11 @@ final class CompiledSpriteScene: SKScene {
     /// One glyph or string, white (words are tinted; emoji keep their colours),
     /// in a text sprite's CSS face when it names one.
     private func glyphTexture(glyph: String, size: CGFloat, style: SpecSubset.TextSpriteStyle?,
-                              units: SpecSubset.Units, dim: CGFloat) -> SKTexture {
+                              units: SpecSubset.Units, dim: CGFloat, reference: Double = 1080) -> SKTexture {
         var px = size
         if let f = style?.font, let r = f.range(of: #"(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px"#, options: .regularExpression),
            let n = Double(f[r].dropLast(2)) {
-            px = n * (units == .px ? 1 : dim / 1080)
+            px = n * (units == .px ? 1 : dim / reference)
         }
         return texture(key: "g|\(glyph)|\(Int(px * 4))|\(style?.font ?? "")") {
             let font = style?.font != nil ? TextBlockFont.uiFont(css: style?.font, size: px) : UIFont.systemFont(ofSize: px)

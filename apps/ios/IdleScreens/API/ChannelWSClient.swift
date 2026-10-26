@@ -68,6 +68,8 @@ struct ChannelSnapshot: Equatable, Sendable {
     var sleeping: Bool?
     var viewers: Int?
     var presets: [String]?
+    /// The server's wall clock when it sent this (ms): the device's skew.
+    var now: Int?
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
@@ -75,7 +77,12 @@ enum ChannelWSEvent: Equatable, Sendable {
     /// A new scene went live (publish, recall, a scheduled entry). `transition`
     /// is how the agent asked screens to replace the old one; nil = the default.
     /// `epoch`: the publish time (ms) the channel's shared clock counts from.
-    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil)
+    /// `track`: the scene's control track — kept steers, and a publish's own
+    /// glide (`fromPublish`) that each screen plays from its mount.
+    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
+               track: JSONValue? = nil)
+    /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
+    case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
     /// The channel's whole control track after a steer (the server sends it
     /// beside every `delta` so screens converge instead of stacking steers).
@@ -278,15 +285,19 @@ actor ChannelWSClient {
                 epoch: message["epoch"]?.intValue,
                 sleeping: message["sleeping"]?.boolValue,
                 viewers: message["viewers"]?.intValue,
-                presets: message["presets"]?.stringArray
+                presets: message["presets"]?.stringArray,
+                now: message["now"]?.intValue
             ))
         case "scene":
             return .scene(
                 spec: message["spec"]?.normalizedSpec(),
                 seed: message["seed"]?.intValue,
                 transition: SceneTransition(message["transition"]),
-                epoch: message["epoch"]?.intValue
+                epoch: message["epoch"]?.intValue,
+                track: message["track"]
             )
+        case "seed":
+            return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
         case "delta":
             // The server spreads the delta's fields onto the message itself.
             return .delta(message["delta"] ?? message["patch"] ?? .object(message.filter { $0.key != "type" }))

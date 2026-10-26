@@ -456,6 +456,11 @@ struct NativeSceneView: View {
             var a = links.alpha ?? SceneMotion.pulsedAlpha(of: entities[lo], layer: layer, at: t)
             if links.falloff == true, maxDist.isFinite { a *= max(0, 1 - dist / maxDist) }
             a *= lifeAlpha
+            // Under `life.stagger` a link fades in with both of its ends.
+            if let life = layer.life, life.stagger != nil {
+                a *= min(life.alpha(at: t * 1000, entity: entities[lo].order),
+                         life.alpha(at: t * 1000, entity: entities[hi].order))
+            }
             guard a > 0.004 else { return }
             // Glyph layers link in the text ink, everything else in its own colour.
             let glyphLayer: Bool = { switch layer.sprite { case .emoji, .text: return true; default: return false } }()
@@ -662,7 +667,8 @@ struct NativeSceneView: View {
                 layer.scaleBy(x: -1, y: 1)
             }
             if case .text = sprite, let style = owner?.textSprite {
-                drawTextSprite(glyph, size: size * dim, style: style, color: color, dim: dim, units: units, ctx: &layer)
+                drawTextSprite(glyph, size: size * dim, style: style, color: color, dim: dim, units: units,
+                               reference: owner?.referenceViewport ?? 1080, ctx: &layer)
             } else {
                 layer.draw(Text(glyph).font(.system(size: size * dim)).foregroundStyle(color),
                            at: .zero, anchor: .center)
@@ -768,12 +774,13 @@ struct NativeSceneView: View {
     /// the shorthand is used as written (scaled with the viewport) — aligned
     /// and baselined about the point, squeezed to `maxWidth` when wider.
     private func drawTextSprite(_ text: String, size: Double, style: SpecSubset.TextSpriteStyle, color: Color,
-                                dim: CGFloat, units: SpecSubset.Units, ctx: inout GraphicsContext) {
+                                dim: CGFloat, units: SpecSubset.Units, reference: Double = 1080,
+                                ctx: inout GraphicsContext) {
         #if canImport(UIKit)
         var px = size
         if let f = style.font, let r = f.range(of: #"(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px"#, options: .regularExpression),
            let n = Double(f[r].dropLast(2)) {
-            px = n * (units == .px ? 1 : dim / 1080)
+            px = n * (units == .px ? 1 : dim / reference)
         }
         let uiFont = TextBlockFont.uiFont(css: style.font, size: px)
         let width = (text as NSString).size(withAttributes: [.font: uiFont]).width

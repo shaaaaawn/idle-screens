@@ -985,6 +985,9 @@ struct CompiledLayer: Equatable, Sendable {
     var textSprite: SpecSubset.TextSpriteStyle?
     /// A stroke sprite's draw-on span.
     var strokeDraw: StrokeDraw?
+    /// The scene's `referenceViewport`: a px size inside a text `font` scales by
+    /// min(w,h) / referenceViewport.
+    var referenceViewport: Double = 1080
 }
 
 /// simulate.ts `motionSeconds`: `settle` travels τ(1 − e^(−t/τ)), `buoyant`
@@ -1095,7 +1098,7 @@ extension SpecSubset {
         var countScale = resolvedUnits == .px ? 1 : minDim / (referenceViewport ?? 1080)
         if countScale > 1 {
             let raw = layers.reduce(0) { $0 + Int(FieldSampler.jsRound(Double($1.count) * countScale)) }
-            if raw > 4000 { countScale *= 4000 / Double(raw) }
+            if raw > 800 { countScale *= 800 / Double(raw) }   // LIMITS.maxTotal
         }
         let requested = kept.reduce(0) { $0 + max(0, min($1.count, 400)) }
         // Uniform stride keeps every layer represented; dropping trailing
@@ -1105,7 +1108,8 @@ extension SpecSubset {
             : 1
         return kept.map { layer in
             var compiled = layer.compile(rng: &rng, units: resolvedUnits, stride: stride,
-                                         viewport: viewport, countScale: countScale)
+                                         viewport: viewport, countScale: countScale,
+                                         referenceViewport: referenceViewport ?? 1080)
             // A member paints through its group: opacity multiplies, and the
             // group's transform (always about the viewport centre) wraps the
             // layer's own. A group name that matches nothing is no group.
@@ -1181,7 +1185,8 @@ extension SpecSubset.Layer {
     /// placement holds at any size; `viewport` is consulted only where the
     /// web reads the frame's aspect (a grid's automatic columns, a pulse wave).
     func compile(rng: inout SpecRng, units: SpecSubset.Units, stride: Int = 1,
-                 viewport: CGSize = SpecSubset.composeViewport, countScale: Double = 1) -> CompiledLayer {
+                 viewport: CGSize = SpecSubset.composeViewport, countScale: Double = 1,
+                 referenceViewport: Double = 1080) -> CompiledLayer {
         var entities: [CompiledEntity] = []
         var index = 0
         let vw = Double(viewport.width), vh = Double(viewport.height)
@@ -1512,7 +1517,8 @@ extension SpecSubset.Layer {
             },
             flip: flip == true,
             textSprite: textSprite,
-            strokeDraw: strokeDraw
+            strokeDraw: strokeDraw,
+            referenceViewport: referenceViewport
         )
     }
 

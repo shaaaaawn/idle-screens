@@ -52,7 +52,9 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
 
     /// The bed's seed: its own, else `seq.seed + 24` (past every segment's).
     func bedSeed(fallback: Int) -> Int {
-        bed?.seed ?? ((seed ?? fallback) + 24)
+        // `seq.seed + maxSegments` only when the sequence has a seed (compile.ts
+        // `bedScene`); otherwise the host's seed, as the web mounts it.
+        bed?.seed ?? seed.map { $0 + 24 } ?? fallback
     }
 
     private enum CodingKeys: String, CodingKey { case format, id, label, seed, loop, sync, wrapMorph, segments, bed, finish }
