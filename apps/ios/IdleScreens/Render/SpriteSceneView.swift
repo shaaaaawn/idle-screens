@@ -18,6 +18,8 @@ struct SpriteSceneView: UIViewRepresentable {
     var transparentGround: Bool = false
     /// Seconds the scene has already been running (a copy drawn under its replacement).
     var clockOffset: TimeInterval = 0
+    /// The scene's seed, which a `field` background hashes.
+    var seed: Int = 0
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -67,11 +69,11 @@ struct SpriteSceneView: UIViewRepresentable {
         // this view only exists while the saver should be animating.
         view.isPaused = false
         view.scene?.isPaused = false
-        if let scene = view.scene as? CompiledSpriteScene, scene.matches(layers) {
+        if let scene = view.scene as? CompiledSpriteScene, scene.matches(layers, background) {
             return  // same scene data — keep animating, no rebuild
         }
         let scene = CompiledSpriteScene(layers: layers, background: background,
-                                        transparentGround: transparentGround)
+                                        transparentGround: transparentGround, seed: seed)
         scene.clockOffset = clockOffset
         // A recompile of the same channel (keyframes, a steer) keeps the clock:
         // restarting it would snap every entity back to where it was at t=0.
@@ -97,18 +99,27 @@ final class CompiledSpriteScene: SKScene {
     private var builtForSize: CGSize = .zero
 
     private let transparentGround: Bool
+    private let seed: UInt32
+    /// The ground node, and the key of what it shows: a drifting gradient or
+    /// field re-textures when its key moves on (the web's 100 ms field bucket).
+    private var groundNode: SKSpriteNode?
+    private var groundKey: String?
 
-    init(layers: [CompiledLayer], background: SpecSubset.Background?, transparentGround: Bool = false) {
+    init(layers: [CompiledLayer], background: SpecSubset.Background?, transparentGround: Bool = false,
+         seed: Int = 0) {
         self.layersData = layers
         self.bg = background
         self.transparentGround = transparentGround
+        self.seed = normalizedRenderSeed(seed)
         super.init(size: .zero)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
-    func matches(_ layers: [CompiledLayer]) -> Bool { layersData == layers }
+    func matches(_ layers: [CompiledLayer], _ background: SpecSubset.Background?) -> Bool {
+        layersData == layers && bg == background
+    }
 
     override func didMove(to view: SKView) {
         backgroundColor = transparentGround ? .clear : .black
@@ -135,30 +146,67 @@ final class CompiledSpriteScene: SKScene {
     // MARK: - Build
 
     private func buildBackground() {
-        let node = SKSpriteNode(texture: backgroundTexture())
+        let node = SKSpriteNode(texture: nil)
         node.size = size
         node.position = CGPoint(x: size.width / 2, y: size.height / 2)
         node.zPosition = -1
         addChild(node)
+        groundNode = node
+        groundKey = nil
+        updateGround(t: 0)
     }
 
-    private func backgroundTexture() -> SKTexture {
-        // 1pt-wide vertical strip, stretched by the node — cheap and smooth.
-        let h = max(2, Int(size.height / 4))
+    /// What the ground shows at `t` (seconds): changes only when a drift moves
+    /// it far enough to see (a gradient at 10 Hz, a field per 100 ms bucket).
+    private func groundKey(at t: TimeInterval) -> String {
+        guard let bg else { return "none" }
+        if bg.isField { return "field|\(FieldSampler.sampleTime(bg, t * 1000))" }
+        if bg.drift != nil, bg.stops != nil { return "grad|\(Int(t * 10))" }
+        return "static"
+    }
+
+    private func updateGround(t: TimeInterval) {
+        guard let node = groundNode else { return }
+        let key = groundKey(at: t)
+        guard key != groundKey else { return }
+        groundKey = key
+        if let bg, bg.isField,
+           let ras = FieldRaster.raster(bg, seed: seed, width: size.width, height: size.height,
+                                        t: t * 1000, shortSide: FieldSampler.shortSideLow) {
+            let tex = SKTexture(cgImage: ras.image)
+            tex.filteringMode = ras.crisp ? .nearest : .linear
+            node.texture = tex
+            return
+        }
+        node.texture = backgroundTexture(t: t)
+    }
+
+    private func backgroundTexture(t: TimeInterval) -> SKTexture {
+        // 1pt-wide vertical strip at full height, stretched across — cheap,
+        // and a band's edge stays where the spec puts it.
+        let h = max(2, Int(size.height))
         let img = UIGraphicsImageRenderer(size: CGSize(width: 1, height: CGFloat(h))).image { ctx in
             let cg = ctx.cgContext
-            if let stops = bg?.stops, !stops.isEmpty {
+            if let bg, let raw = bg.stops, !raw.isEmpty {
+                // Drifted and sorted the way the Canvas tier (and the web) does.
+                let stops = bg.driftedStops(at: t * 1000).enumerated()
+                    .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
+                    .map(\.element)
                 let colors = stops.map { UIColor(hexString: $0.color).cgColor } as CFArray
                 let locations = stops.map { CGFloat(min(1, max(0, $0.at))) }
                 if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                                              colors: colors, locations: locations) {
-                    cg.drawLinearGradient(gradient, start: .zero,
-                                          end: CGPoint(x: 0, y: h), options: [])
+                    cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: h),
+                                          options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+                }
+                // A band belongs to a gradient ground, in the spec's units.
+                if let band = bg.band, band.height > 0 {
+                    let px = layersData.first?.units == .px
+                    let bh = band.height * (px ? 1 : min(size.width, size.height)) * CGFloat(h) / size.height
+                    UIColor(hexString: band.color).setFill()
+                    cg.fill(CGRect(x: 0, y: CGFloat(h) - bh, width: 1, height: bh))
                 }
             } else {
-                // A solid ground, or a `field`'s key band (not rasterised
-                // natively) — the same stand-in the Canvas tier paints, never
-                // black for a scene that has a ground.
                 UIColor(hexString: bg?.primaryColor ?? "05050a").setFill()
                 cg.fill(CGRect(x: 0, y: 0, width: 1, height: h))
             }
@@ -511,6 +559,7 @@ final class CompiledSpriteScene: SKScene {
             skLog.notice("first tick scene=\(ObjectIdentifier(self).debugDescription)")
         }
         let t = currentTime - start
+        updateGround(t: t)
 
         for (node, entity, li) in driven {
             let layer = layersData[li]

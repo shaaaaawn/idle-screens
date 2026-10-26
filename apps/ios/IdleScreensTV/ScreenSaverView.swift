@@ -86,7 +86,8 @@ struct ScreenSaverView: View {
                             tier: .t3,
                             watchdog: app.watchdog,
                             onDowngrade: { app.watchdogDidTrigger() },
-                            transparentGround: app.hasBed
+                            transparentGround: app.hasBed,
+                            seed: app.specSeed
                         )
                     case .t2:
                         // GPU sprite renderer — no watchdog; SpriteKit maintains
@@ -94,7 +95,8 @@ struct ScreenSaverView: View {
                         SpriteSceneView(
                             layers: app.compiledScene,
                             background: app.specBackground,
-                            transparentGround: app.hasBed
+                            transparentGround: app.hasBed,
+                            seed: app.specSeed
                         )
                     case .t1:
                         ThumbStreamView(channelId: app.selectedChannelId ?? "")
@@ -115,6 +117,13 @@ struct ScreenSaverView: View {
                 // renderer being removed stops drawing, so the outgoing copy
                 // underneath carries the old picture instead.
                 .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                // The print finish, last of all, over the composed frame (bed,
+                // dissolve and scene together), as the web presents it.
+                if let finish = app.specFinish, finish.isVisible,
+                   app.effectiveTier == .t3 || app.effectiveTier == .t2 {
+                    FinishOverlay(finish: finish, seed: normalizedRenderSeed(app.specSeed),
+                                  animateAllowed: app.effectiveTier == .t3)
+                }
             }
 
             if let overlay = app.overlayText {
@@ -180,18 +189,19 @@ struct ScreenSaverView: View {
             if let bed = out.bed {
                 if app.effectiveTier == .t3 {
                     NativeSceneView(layers: bed.layers, background: bed.background, ghosting: bed.ghosting,
-                                    renderClass: app.renderClass, tier: .t3, clockOffset: bed.elapsed)
+                                    renderClass: app.renderClass, tier: .t3, clockOffset: bed.elapsed, seed: bed.seed)
                 } else {
-                    SpriteSceneView(layers: bed.layers, background: bed.background, clockOffset: bed.elapsed)
+                    SpriteSceneView(layers: bed.layers, background: bed.background, clockOffset: bed.elapsed,
+                                    seed: bed.seed)
                 }
             }
             if app.effectiveTier == .t3 {
                 NativeSceneView(layers: out.layers, background: out.background, ghosting: out.ghosting,
                                 renderClass: app.renderClass, tier: .t3, transparentGround: out.transparent,
-                                clockOffset: out.elapsed)
+                                clockOffset: out.elapsed, seed: out.seed)
             } else {
                 SpriteSceneView(layers: out.layers, background: out.background,
-                                transparentGround: out.transparent, clockOffset: out.elapsed)
+                                transparentGround: out.transparent, clockOffset: out.elapsed, seed: out.seed)
             }
         }
     }
@@ -201,9 +211,10 @@ struct ScreenSaverView: View {
     @ViewBuilder private var bedRenderer: some View {
         if app.effectiveTier == .t3 {
             NativeSceneView(layers: app.bedScene, background: app.bedBackground,
-                            ghosting: app.bedGhosting, renderClass: app.renderClass, tier: .t3)
+                            ghosting: app.bedGhosting, renderClass: app.renderClass, tier: .t3,
+                            seed: app.bedSeed)
         } else {
-            SpriteSceneView(layers: app.bedScene, background: app.bedBackground)
+            SpriteSceneView(layers: app.bedScene, background: app.bedBackground, seed: app.bedSeed)
         }
     }
 

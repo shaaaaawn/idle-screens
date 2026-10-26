@@ -38,13 +38,15 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
     /// transparently over it: their own `background` and `ghosting` are
     /// ignored (FORMAT.md **Bed**).
     var bed: SpecSubset?
+    /// One print pass over the composed frame; wins over a segment's own.
+    var finish: SpecSubset.Finish?
 
     /// The bed's seed: its own, else `seq.seed + 24` (past every segment's).
     func bedSeed(fallback: Int) -> Int {
         bed?.seed ?? ((seed ?? fallback) + 24)
     }
 
-    private enum CodingKeys: String, CodingKey { case format, id, label, seed, loop, segments, bed }
+    private enum CodingKeys: String, CodingKey { case format, id, label, seed, loop, segments, bed, finish }
 
     init(format: String? = nil, id: String? = nil, label: String? = nil, seed: Int? = nil,
          loop: Bool? = nil, segments: [Segment], bed: SpecSubset? = nil) {
@@ -63,6 +65,7 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
         // A bed the native decoder can't read is no bed — the segments still
         // play — rather than a sequence dropped to the thumbnail path.
         bed = (try? c.decodeIfPresent(SpecSubset.self, forKey: .bed)) ?? nil
+        finish = (try? c.decodeIfPresent(SpecSubset.Finish.self, forKey: .finish)) ?? nil
     }
 
     struct Segment: Decodable, Equatable, Sendable {

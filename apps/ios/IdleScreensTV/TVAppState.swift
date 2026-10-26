@@ -53,6 +53,11 @@ final class TVAppState {
     var specBackground: SpecSubset.Background?
     /// 0…1 frame persistence declared by the scene (motion smear).
     var specGhosting: Double = 0
+    /// The on-screen scene's render seed (a `field` background and the
+    /// `finish` grain hash it) and its print finish — a sequence's own
+    /// finish wins over its segment's (FORMAT.md `finish`).
+    var specSeed: Int = 0
+    var specFinish: SpecSubset.Finish?
     /// True when the channel runs a non-schema spec (e.g. classic saver
     /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
     var isClassicSpec = false
@@ -248,6 +253,7 @@ final class TVAppState {
         compiledScene = []
         specBackground = nil
         specGhosting = 0
+        specFinish = nil
         isClassicSpec = false
         classicSaverId = nil
         thumbFailed = false
@@ -265,8 +271,7 @@ final class TVAppState {
         // the spinner until the snapshot routes them to the thumb stream).
         if let cached = channels.first(where: { $0.id == channelId })?.spec {
             compiledScene = cached.compile(seed: cached.seed ?? 0, budget: sceneBudget)
-            specBackground = cached.background
-            specGhosting = cached.ghosting ?? 0
+            setGround(cached, seed: cached.seed ?? 0)
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
@@ -440,8 +445,7 @@ final class TVAppState {
             classicSaverId = nil
             let seed = scene.seed ?? spec.seed ?? 0
             compiledScene = spec.compile(seed: seed, budget: sceneBudget)
-            specBackground = spec.background
-            specGhosting = spec.ghosting ?? 0
+            setGround(spec, seed: seed)
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
             // A timed piece in the past plays its keyframes too, not its base.
             if let raw = scene.rawSpec { startKeyframes(raw, seed: seed) }
@@ -452,8 +456,7 @@ final class TVAppState {
             classicParams = [:]
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
-            specBackground = nil
-            specGhosting = 0
+            setGround(nil, seed: 0)
         }
     }
 
@@ -695,8 +698,7 @@ final class TVAppState {
             // survives re-publishes and matches the grid poster exactly.
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
-            specBackground = nil
-            specGhosting = 0
+            setGround(nil, seed: 0)
             return
         }
         // A valid schema spec clears the classic flag (re-publish scenario).
@@ -708,8 +710,7 @@ final class TVAppState {
         // would flash the un-keyed scene, and restarting would rewind it.
         if isDrivingKeyframes(json, seed: seed) { return }
         compiledScene = spec.compile(seed: seed, budget: sceneBudget)
-        specBackground = spec.background
-        specGhosting = spec.ghosting ?? 0
+        setGround(spec, seed: seed)
         complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         startKeyframes(json, seed: seed)
     }
@@ -738,6 +739,7 @@ final class TVAppState {
         let layers: [CompiledLayer]
         let background: SpecSubset.Background?
         let ghosting: Double
+        let seed: Int
         /// Seconds it had been running, so the copy carries on from there.
         let elapsed: TimeInterval
         /// Drawn over a bed, so see-through, as the live renderer paints it.
@@ -750,6 +752,7 @@ final class TVAppState {
             let layers: [CompiledLayer]
             let background: SpecSubset.Background?
             let ghosting: Double
+            let seed: Int
             let elapsed: TimeInterval
         }
     }
@@ -778,9 +781,9 @@ final class TVAppState {
               effectiveTier == .t3 || effectiveTier == .t2 else { return }
         outgoingSerial &+= 1
         let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
-                                            elapsed: now.timeIntervalSince(bedMountedAt)) : nil
+                                            seed: bedSeed, elapsed: now.timeIntervalSince(bedMountedAt)) : nil
         outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
-                                 ghosting: specGhosting, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt),
                                  transparent: hasBed, bed: bed)
         outgoingOpacity = 1
         let serial = outgoingSerial
@@ -816,6 +819,7 @@ final class TVAppState {
     private(set) var bedScene: [CompiledLayer] = []
     private(set) var bedBackground: SpecSubset.Background?
     private(set) var bedGhosting: Double = 0
+    private(set) var bedSeed: Int = 0
     /// True while the active sequence has a bed (even one with no layers —
     /// its ground alone still replaces every segment's background).
     private(set) var hasBed = false
@@ -827,7 +831,8 @@ final class TVAppState {
         activeSequence = seq
         sequenceEpoch = Date()
         if let bed = seq.bed {
-            bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
+            bedSeed = seq.bedSeed(fallback: fallbackSeed ?? 0)
+            bedScene = bed.compile(seed: bedSeed, budget: sceneBudget)
             bedBackground = bed.background
             bedGhosting = bed.ghosting ?? 0
             if !hasBed { bedMountedAt = Date() }
@@ -877,8 +882,9 @@ final class TVAppState {
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)
         // Over a bed, a segment paints transparently: the bed owns the
         // ground, and a smear needs an opaque ground to decay into.
-        specBackground = hasBed ? nil : scene.background
-        specGhosting = hasBed ? 0 : (scene.ghosting ?? 0)
+        setGround(scene, seed: seed)
+        if hasBed { specBackground = nil; specGhosting = 0 }
+        specFinish = seq.finish ?? scene.finish
         complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
         // A segment's own keyframes run on its local clock (from 0 at entry).
         if case .object(let root)? = currentSpecJSON,
@@ -961,6 +967,14 @@ final class TVAppState {
         }
     }
 
+    /// The ground, smear, seed and finish of the scene now on screen.
+    private func setGround(_ spec: SpecSubset?, seed: Int) {
+        specBackground = spec?.background
+        specGhosting = spec?.ghosting ?? 0
+        specSeed = seed
+        specFinish = spec?.finish
+    }
+
     /// One resolved keyframe state on screen. False when it no longer decodes.
     private func applyKeyframe(_ json: JSONValue, seed: Int) -> Bool {
         guard let data = try? JSONEncoder().encode(json),
@@ -970,6 +984,7 @@ final class TVAppState {
             specBackground = spec.background
             specGhosting = spec.ghosting ?? 0
         }
+        if activeSequence?.finish == nil { specFinish = spec.finish }
         return true
     }
 

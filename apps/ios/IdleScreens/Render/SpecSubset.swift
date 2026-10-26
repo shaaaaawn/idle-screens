@@ -35,6 +35,30 @@ struct SpecSubset: Decodable, Equatable {
     var ghosting: Double?
     /// Named paint groups: a multi-layer subject moved/faded as one (3.11).
     var groups: Groups?
+    /// The print pass over the finished frame (FinishOverlay).
+    var finish: Finish?
+
+    /// `{grain?, dither?, animate?}` — strengths 0…1. Lenient per field: a
+    /// bad value is no finish for that field, never a dropped scene.
+    struct Finish: Decodable, Equatable, Sendable {
+        var grain: Double?
+        var dither: Double?
+        var animate: Bool?
+
+        init(grain: Double? = nil, dither: Double? = nil, animate: Bool? = nil) {
+            self.grain = grain; self.dither = dither; self.animate = animate
+        }
+        private enum CodingKeys: String, CodingKey { case grain, dither, animate }
+        init(from decoder: Decoder) throws {
+            guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+            grain = try? c.decodeIfPresent(Double.self, forKey: .grain)
+            dither = try? c.decodeIfPresent(Double.self, forKey: .dither)
+            animate = try? c.decodeIfPresent(Bool.self, forKey: .animate)
+        }
+
+        /// True when it paints anything.
+        var isVisible: Bool { (grain ?? 0) > 0 || (dither ?? 0) > 0 }
+    }
 
     /// Dimensional unit system. 'viewport' (default) = sizes/speeds are fractions
     /// of min(w,h); 'px' = raw pixels. The server migrates legacy specs to "px".
@@ -51,10 +75,20 @@ struct SpecSubset: Decodable, Equatable {
         var drift: Drift?
         /// A flat strip along the bottom edge — a horizon, a floor.
         var band: Band?
-        /// `field` backgrounds (seeded noise quantised into bands). Not
-        /// rasterised natively yet; the middle band stands in so the scene
-        /// keeps its key colour instead of dropping to black.
+        /// `solid` | `gradient` | `field`; absent reads by shape (color / stops).
+        var type: String?
+        /// `field` backgrounds: seeded noise read through the `bands` ramp
+        /// (FieldSampler). The middle band is the scene's key colour where a
+        /// single colour is wanted (thumbnails, the visibility gate).
         var bands: [String]?
+        /// `field` knobs (FORMAT.md `background`): features across the short
+        /// side, octaves 1…4, domain warp 0…1, posterise levels (0 = smooth),
+        /// and the field's own seed.
+        var scale: Double?
+        var octaves: Double?
+        var warp: Double?
+        var quantize: Double?
+        var seed: Double?
 
         var primaryColor: String? {
             color ?? stops?.first?.color ?? bands.flatMap { $0.isEmpty ? nil : $0[$0.count / 2] }

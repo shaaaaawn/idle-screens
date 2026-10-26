@@ -41,6 +41,9 @@ struct NativeSceneView: View {
     /// Seconds the scene has already been running: a copy kept drawing under
     /// its replacement carries the original's clock instead of restarting at 0.
     var clockOffset: TimeInterval = 0
+    /// The scene's seed, which a `field` background hashes (normalised as
+    /// the web's SpecInstance does).
+    var seed: Int = 0
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -478,6 +481,14 @@ struct NativeSceneView: View {
     private func drawBackground(ctx: GraphicsContext, size: CGSize, t: TimeInterval) {
         let rect = CGRect(origin: .zero, size: size)
         let path = Path(rect)
+        if let background, background.isField,
+           let ras = FieldRaster.raster(background, seed: normalizedRenderSeed(seed),
+                                        width: size.width, height: size.height, t: t * 1000,
+                                        shortSide: tier == .t3 ? FieldSampler.shortSide : FieldSampler.shortSideLow) {
+            // The web's low-res raster stretched over the frame (compile.ts drawField).
+            ctx.draw(Image(decorative: ras.image, scale: 1).interpolation(ras.crisp ? .none : .medium), in: rect)
+            return
+        }
         if let background, let raw = background.stops, !raw.isEmpty {
             // Drift can carry one stop past its neighbour; a canvas gradient
             // sorts by offset, so do the same (stably) before handing over.
@@ -496,10 +507,13 @@ struct NativeSceneView: View {
             ))
         } else if let color = background?.primaryColor {
             ctx.fill(path, with: .color(Color(hex: color)))
+            return
         } else {
             // The web engine's own default, not pure black.
             ctx.fill(path, with: .color(Color(hex: "05050a")))
+            return
         }
+        // A band belongs to a gradient ground (the web paints it nowhere else).
         if let band = background?.band, band.height > 0 {
             // Band height is dimensional, so it follows the spec's units —
             // which every compiled layer carries.
