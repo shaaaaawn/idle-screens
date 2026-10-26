@@ -383,8 +383,26 @@ export interface LayerSpec {
    * Layer lifecycle for act structure — a pure function of t, no state. Alpha is 0
    * before `enter` (ms), ramps up over `fade` ms (default 1000), holds at 1, then
    * ramps down starting at `exit`. Entities are skipped entirely while at alpha 0.
+   * `stagger` (ms, default 0) shifts entity i's whole envelope — its enter and
+   * its exit — by i × stagger, in the layer's entity order (reading order for
+   * `list` / `table` / `grid`), so a row of labels builds one after another
+   * instead of together. Paint, like the rest of `life`: it glides, draws
+   * nothing from the RNG, and on screens where density scaling changes the
+   * count the whole build takes (count − 1) × stagger. **Native:** ignored ⇒
+   * every entity enters together.
    */
-  life?: { enter?: number; exit?: number; fade?: number };
+  life?: { enter?: number; exit?: number; fade?: number; stagger?: number };
+  /**
+   * A swing back and forth: each entity rotates `amp` degrees either side of
+   * its resting angle (`rotate` plus any `spin`), once per `period` ms, on a
+   * seeded per-entity phase — a boat on a swell, a hanging sign, a lantern,
+   * a jellyfish's lean. A `clock` replaces the seeded phase like `pulse`'s,
+   * so a clocked layer swings in step. Structural (baked per entity like
+   * `pulse`). Its phase is one seeded draw per entity, made last and only
+   * when declared, so existing specs keep identical streams. **Native:**
+   * ignored ⇒ no swing.
+   */
+  rock?: { amp: number; period: number };
   /**
    * Sparse events — marks that appear, expand and fade in place, one at a time,
    * with long silences between (the "one ping" primitive). Each entity is dark
@@ -787,6 +805,9 @@ export const LIMITS = {
   minPolygonSides: 3,
   maxPolygonSides: 12,
   maxShapePoints: 24, // polygon.points / stroke.points
+  maxRockAmp: 45, // degrees either side of rest — a swing, not a spin
+  minRockPeriod: 1000, // ms — a calm swing; at most once a second
+  maxLifeStagger: 60000, // ms between successive entities' entrances
   minEaseTau: 100, // ms
   maxEaseTau: 120000, // ms
 } as const;

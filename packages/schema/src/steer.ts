@@ -587,6 +587,8 @@ export function structuralSignature(spec: SaverSpec): string {
         // Static rotation is baked into entities (a range draws a seeded
         // angle). Appended only when set — same rule as `anchor` above.
         ...(l.rotate !== undefined ? [l.rotate] : []),
+        // `rock` is baked per entity like `pulse` (and draws a seeded phase).
+        ...(l.rock !== undefined ? [{ rock: l.rock }] : []),
       ];
     }),
   ]);

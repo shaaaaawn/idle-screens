@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { drawSpan, pathLength, pathParts, partInkArea, strokeDrawnSamples, strokeSamples, trimLines, trimPolyline } from './shapes';
 import { validateSpec } from './validate';
 import { luminanceGrid } from './perceive';
+import { createRng } from '@idle-screens/core';
+import { buildEntities, lifeAlphaAt, lifeStaggerAt, rotationAt } from './simulate';
+import { scenePeriod } from './period';
+import { adviseSpec } from './advise';
 import { easeGlide, easeSmooth, steerablePaths, structuralSignature } from './steer';
 import { resolveTimelineAt } from './timeline';
 import type { LayerSpec, SaverSpec } from './types';
@@ -160,5 +164,114 @@ describe('foreign-vocabulary hints', () => {
 
   it('leaves a plain unknown field as it was', () => {
     expect(msg(scene([{ ...line(), zorp: 1 } as never]), 'layers[0].zorp')).toBe("unknown layer property 'zorp' — will be ignored");
+  });
+});
+
+describe('rock — a swing about the resting angle', () => {
+  const rocking = (extra: Partial<LayerSpec> = {}): LayerSpec => ({
+    count: 3,
+    motion: { type: 'static' },
+    sprite: { kind: 'rect', width: [0.05, 0.05], color: '#ffffff' },
+    rock: { amp: 10, period: 4000 },
+    ...extra,
+  });
+
+  it('swings within ±amp of rest, on a seeded phase, and repeats every period', () => {
+    const es = buildEntities(rocking({ rotate: 30 }), createRng(7), 1000, 1000, 1000);
+    const rest = (30 * Math.PI) / 180;
+    const amp = (10 * Math.PI) / 180;
+    for (const e of es) {
+      for (let t = 0; t < 8000; t += 250) {
+        const a = rotationAt(e, t);
+        expect(Math.abs(a - rest)).toBeLessThanOrEqual(amp + 1e-9);
+        expect(rotationAt(e, t + 4000)).toBeCloseTo(a, 9);
+      }
+    }
+    const phases = new Set(es.map((e) => e.rock!.phase.toFixed(6)));
+    expect(phases.size).toBe(3);
+  });
+
+  it('a clock locks every entity to one phase', () => {
+    const es = buildEntities(rocking({ clock: { phase: 0.25 } }), createRng(7), 1000, 1000, 1000);
+    expect(new Set(es.map((e) => e.rock!.phase)).size).toBe(1);
+  });
+
+  it('draws only when declared, after the layer: declaring it re-seats nothing else in the layer', () => {
+    const { rock: _r, ...noRock } = rocking();
+    const a = buildEntities(noRock, createRng(3), 1000, 1000, 1000);
+    const b = buildEntities(rocking(), createRng(3), 1000, 1000, 1000);
+    expect(b.map(({ rock: _x, ...rest }) => rest)).toEqual(a);
+  });
+
+  it('validates its bounds and is structural', () => {
+    expect(validateSpec(scene([rocking()])).valid).toBe(true);
+    expect(validateSpec(scene([rocking({ rock: { amp: 90, period: 4000 } })])).valid).toBe(false);
+    expect(validateSpec(scene([rocking({ rock: { amp: 10, period: 200 } })])).valid).toBe(false);
+    expect(validateSpec(scene([rocking({ rock: { amp: 10, period: 1500 }, clock: { rate: 2 } })])).valid).toBe(false);
+    expect(structuralSignature(scene([rocking()]))).not.toBe(structuralSignature(scene([rocking({ rock: { amp: 12, period: 4000 } })])));
+  });
+});
+
+describe('life.stagger — entities enter one after another', () => {
+  const row = (stagger?: number): LayerSpec => ({
+    count: 4,
+    layout: { type: 'list', gap: 0.1 },
+    position: { x: 0.2, y: 0.2 },
+    motion: { type: 'static' },
+    sprite: { kind: 'rect', width: [0.05, 0.05], color: '#ffffff' },
+    life: { enter: 1000, fade: 500, ...(stagger !== undefined ? { stagger } : {}) },
+  });
+
+  it('shifts entity i by i × stagger, enter and exit alike', () => {
+    const life = { enter: 1000, exit: 5000, fade: 500, stagger: 300 };
+    expect(lifeAlphaAt(life, 900)).toBe(0);
+    expect(lifeAlphaAt(life, 1000)).toBe(1); // the gate opens with the first entity
+    expect(lifeStaggerAt(life, 1250, 0)).toBeCloseTo(0.5, 9);
+    expect(lifeStaggerAt(life, 1250, 1)).toBe(0);
+    expect(lifeStaggerAt(life, 1550, 1)).toBeCloseTo(0.5, 9);
+    expect(lifeStaggerAt(life, 5300, 1)).toBe(1); // the second exits 300 ms later
+    expect(lifeStaggerAt(life, 5300, 0)).toBeLessThan(1);
+    expect(lifeStaggerAt({ enter: 1000 }, 1250, 3)).toBe(1); // no stagger: the layer envelope carries it
+  });
+
+  it('perception sees the build: fewer entities lit mid-build', () => {
+    const lit = (s: SaverSpec, t: number): number => luminanceGrid(s, { viewport: { width: 960, height: 540 }, t }).coverage;
+    const together = lit(scene([row()]), 1600);
+    const staggered = lit(scene([row(400)]), 1600);
+    expect(staggered).toBeGreaterThan(0);
+    expect(staggered).toBeLessThan(together);
+    expect(lit(scene([row(400)]), 4000)).toBeCloseTo(together, 6);
+  });
+
+  it('validates and stays paint', () => {
+    expect(validateSpec(scene([row(250)])).valid).toBe(true);
+    expect(validateSpec(scene([row(-1)])).valid).toBe(false);
+    expect(structuralSignature(scene([row(100)]))).toBe(structuralSignature(scene([row(900)])));
+  });
+});
+
+describe('scenePeriod and the loop-seam advisory', () => {
+  const pulsing = (period: number): LayerSpec => ({
+    count: 5,
+    motion: { type: 'static' },
+    sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' },
+    pulse: { amp: 0.2, period },
+  });
+
+  it('is the LCM of the periodic parts, 0 when static, null when anything never repeats', () => {
+    expect(scenePeriod(scene([pulsing(4000), { ...pulsing(6000), rock: { amp: 5, period: 3000 } }])).period).toBe(12000);
+    expect(scenePeriod(scene([{ ...line() }])).period).toBe(0);
+    const drift = scenePeriod(scene([{ ...pulsing(4000), motion: { type: 'drift', speed: [0.01, 0.02] } }]));
+    expect(drift.period).toBeNull();
+    expect(drift.reasons.join(' ')).toContain('drift');
+  });
+
+  it('fires only when a looping timeline does not fit the rest of the scene', () => {
+    const codes = (s: SaverSpec): string[] => adviseSpec(s, { width: 960, height: 540 }).map((w) => w.code);
+    const tl = (duration: number): SaverSpec['timeline'] => ({ loop: true, duration, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] });
+    const base = (duration?: number): SaverSpec => scene([{ ...pulsing(4000), key: 'p', opacity: 1 }], duration ? { timeline: tl(duration) } : {});
+    expect(codes(base())).not.toContain('loop-seam');
+    expect(codes(base(8000))).not.toContain('loop-seam');
+    expect(codes(base(6000))).toContain('loop-seam');
   });
 });

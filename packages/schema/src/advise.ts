@@ -9,6 +9,7 @@ import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
 import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
+import { periodWithoutTimeline } from './period';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -408,6 +409,26 @@ export function adviseSpec(
       code: 'flash-near-limit',
       message: `the timeline flickers ${flicker.flashesPerSecond} times a second over ${Math.round(flicker.area * 100)}% of the frame around ${Math.round(flicker.at)} ms — at or near WCAG 2.3.1's limit of 3; space opposing luminance changes ≥ 500 ms apart, or lower the contrast between the two states`,
     });
+  }
+
+  // Loop seam: a looping timeline says "this lap is the piece". When the
+  // rest of the scene repeats too, but on a period that does not divide the
+  // lap, one lap cannot come round to its own first frame — and the fix is
+  // one number. A scene whose other motion never repeats (drifting stars) is
+  // not judged: that is ambient by design, and the wall does not need a seam.
+  if (authored.timeline?.loop && (authored.timeline.duration ?? 0) > 0) {
+    const lap = Math.round(authored.timeline.duration!);
+    const rest = periodWithoutTimeline(authored);
+    if (rest.period !== null && rest.period > 0 && lap % rest.period !== 0) {
+      let a = lap;
+      let b = rest.period;
+      while (b) [a, b] = [b, a % b];
+      warnings.push({
+        path: 'timeline.duration',
+        code: 'loop-seam',
+        message: `the timeline loops every ${lap} ms but the rest of the scene repeats every ${rest.period} ms (${rest.parts.join(', ')}), so the whole scene only repeats every ${(lap / a) * rest.period} ms — make the lap a multiple of ${rest.period} ms for one lap to loop`,
+      });
+    }
   }
 
   // Link starvation: links layer where few edges actually form.

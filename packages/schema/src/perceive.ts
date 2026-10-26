@@ -27,6 +27,7 @@ import {
   headingAt,
   isFullWidth,
   lifeAlphaAt,
+  lifeStaggerAt,
   linkEdges,
   linkMaxDistPx,
   positionAt,
@@ -669,9 +670,12 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const lifeA = layer.opacity === undefined && layer.group === undefined ? lifeAlphaAt(layer.life, tPass) : lifeAlphaAt(layer.life, tPass) * paintOpacity(spec, layer);
     if (lifeA <= 0) continue;
 
-    for (const e of entities) {
-      splatTrail(layer, e, tPass, lifeA, alphaScale, entities.length);
-      const a = Math.min(1, alphaAt(e, tPass) * lifeA) * alphaScale;
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
+      const entA = layer.life?.stagger ? lifeA * lifeStaggerAt(layer.life, tPass, ei) : lifeA;
+      if (entA <= 0) continue;
+      splatTrail(layer, e, tPass, entA, alphaScale, entities.length);
+      const a = Math.min(1, alphaAt(e, tPass) * entA) * alphaScale;
       if (a <= 0.004) continue;
       const lum = spriteLuma(layer, e);
       const p = posOf(scene, e, tPass);
@@ -1242,8 +1246,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
     const areaScale = painted ? paintSize(spec, layer) ** 2 : 1;
     let area = 0;
     let lumAcc = 0;
-    for (const e of entities) {
-      const a = alphaAt(e, t) * lifeA;
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei);
       const sz = sizeAt(e, t);
       const s = layer.sprite;
       let entArea: number;
@@ -1506,10 +1511,11 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       wb += c.b * weight;
       wsum += weight;
     };
-    for (const e of entities) {
+    for (let ei = 0; ei < entities.length; ei++) {
+      const e = entities[ei]!;
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      const a = alphaAt(e, t) * lifeA * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
       if (a <= 0) continue;
       // A path drawing is the colours its parts paint, by the ink each lays
       // down: a part at opacity 0 adds nothing (X609).

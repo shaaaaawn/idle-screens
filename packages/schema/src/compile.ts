@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
@@ -1742,10 +1742,15 @@ class SpecInstance implements SaverInstance {
     ctx.globalCompositeOperation = built.layer.blend ?? 'source-over';
     this.drawLinks(built, t, lifeA, parentE);
     const override = this.paintOverrides?.get(li) ?? null;
-    for (const e of built.entities) {
-      this.drawTrail(built, e, t, lifeA, parentE);
+    const life = built.layer.life;
+    for (let ei = 0; ei < built.entities.length; ei++) {
+      const e = built.entities[ei]!;
+      // `life.stagger`: each entity's own shifted envelope (1 without one).
+      const entA = life?.stagger ? lifeA * lifeStaggerAt(life, t, ei) : lifeA;
+      if (entA <= 0) continue;
+      this.drawTrail(built, e, t, entA, parentE);
       if (override === null) {
-        this.drawEntity(built, e, t, lifeA, parentE);
+        this.drawEntity(built, e, t, entA, parentE);
         continue;
       }
       // A text cross-fade: the previous words fading out under the new
@@ -1754,8 +1759,8 @@ class SpecInstance implements SaverInstance {
       const [aOut, aIn] = override.mode === 'dip'
         ? [Math.max(0, 1 - 2 * override.k), Math.max(0, 2 * override.k - 1)]
         : [1 - override.k, override.k];
-      if (aOut > 0) this.drawEntity(built, e, t, lifeA, parentE, { sprite: override.outgoing, alpha: aOut });
-      if (aIn > 0) this.drawEntity(built, e, t, lifeA, parentE, { alpha: aIn });
+      if (aOut > 0) this.drawEntity(built, e, t, entA, parentE, { sprite: override.outgoing, alpha: aOut });
+      if (aIn > 0) this.drawEntity(built, e, t, entA, parentE, { alpha: aIn });
     }
     if (tf || gtf) ctx.restore();
   }
@@ -1813,10 +1818,12 @@ class SpecInstance implements SaverInstance {
     if (group?.opacity !== undefined) lifeA *= clamp01(group.opacity);
     let sig = `${pathPaintSig(built.layer.sprite as PolygonSprite)}:${lifeA.toFixed(4)}:${JSON.stringify(built.layer.transform ?? null)}:${JSON.stringify(group?.transform ?? null)}`;
     const parentE = this.parentEntityFor(built);
-    for (const e of built.entities) {
+    const life = built.layer.life;
+    built.entities.forEach((e, ei) => {
       const p = this.entityPos(e, t, parentE);
-      sig += `|${p.x.toFixed(2)},${p.y.toFixed(2)},${sizeAt(e, t).toFixed(3)},${rotationAt(e, t).toFixed(5)},${alphaAt(e, t).toFixed(4)},${e.colorIndex}`;
-    }
+      const a = life?.stagger ? alphaAt(e, t) * lifeStaggerAt(life, t, ei) : alphaAt(e, t);
+      sig += `|${p.x.toFixed(2)},${p.y.toFixed(2)},${sizeAt(e, t).toFixed(3)},${rotationAt(e, t).toFixed(5)},${a.toFixed(4)},${e.colorIndex}`;
+    });
     return sig;
   }
 

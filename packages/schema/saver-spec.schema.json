@@ -796,6 +796,16 @@
             }
           ]
         },
+        "rock": {
+          "type": "object",
+          "required": ["amp", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 45, "description": "Degrees either side of the resting angle." },
+            "period": { "type": "number", "minimum": 1000, "description": "One swing there and back, ms (floor 1000; with a clock, period / rate >= 1000)." }
+          },
+          "description": "A swing back and forth about each entity's resting angle (rotate + spin), on a seeded per-entity phase (a clock's shared phase when clocked). Structural. Native: ignored (no swing)."
+        },
         "clock": {
           "type": "object",
           "additionalProperties": false,
@@ -833,6 +843,12 @@
               "type": "number",
               "minimum": 0,
               "description": "Fade ramp duration in ms. Default 1000."
+            },
+            "stagger": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60000,
+              "description": "ms between successive entities' envelopes: entity i enters (and exits) i x stagger later, in entity order (reading order for list/table/grid). Paint; glides. Native: ignored (all together)."
             }
           },
           "description": "Layer lifecycle for act structure (stars first, dancers at t=3000). Pure function of t \u2014 deterministic and seekable."

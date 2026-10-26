@@ -17,7 +17,7 @@ const KNOWN_FINISH = new Set(['grain', 'dither', 'animate']);
 const KNOWN_LAYER = new Set([
   'count', 'sprite', 'motion', 'size', 'wrap', 'flip', 'alpha', 'blend',
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
-  'layout', 'life', 'emit', 'clock', 'rotate', 'opacity', 'transform', 'group',
+  'layout', 'life', 'emit', 'clock', 'rotate', 'rock', 'opacity', 'transform', 'group',
 ]);
 const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate', 'origin']);
 const KNOWN_GROUP = new Set(['transform', 'opacity']);
@@ -138,7 +138,7 @@ const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 
 const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
 
 // Layer-level properties that models commonly misplace inside sprite
-const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate']);
+const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate', 'rock']);
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -909,6 +909,27 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (layer.life.fade !== undefined && (!isNum(layer.life.fade) || layer.life.fade < 0)) {
         err(`${path}.life.fade`, 'must be >= 0 (ms)');
       }
+      if (layer.life.stagger !== undefined && (!isNum(layer.life.stagger) || layer.life.stagger < 0 || layer.life.stagger > LIMITS.maxLifeStagger)) {
+        err(`${path}.life.stagger`, `must be 0..${LIMITS.maxLifeStagger} ms (between successive entities' entrances)`);
+      }
+      for (const k of unknownKeys(layer.life, new Set(['enter', 'exit', 'fade', 'stagger']))) {
+        warn(`${path}.life.${k}`, 'unknown-property', `unknown life property '${k}' — will be ignored`);
+      }
+    }
+  }
+
+  if (layer.rock !== undefined) {
+    if (!isObj(layer.rock)) err(`${path}.rock`, 'must be an object { amp, period }');
+    else {
+      if (!isNum(layer.rock.amp) || layer.rock.amp <= 0 || layer.rock.amp > LIMITS.maxRockAmp) {
+        err(`${path}.rock.amp`, `must be > 0 and <= ${LIMITS.maxRockAmp} (degrees either side of rest)`);
+      }
+      if (!isNum(layer.rock.period) || layer.rock.period < LIMITS.minRockPeriod) {
+        err(`${path}.rock.period`, `must be >= ${LIMITS.minRockPeriod} ms (one swing there and back)`);
+      }
+      for (const k of unknownKeys(layer.rock, new Set(['amp', 'period']))) {
+        warn(`${path}.rock.${k}`, 'unknown-property', `unknown rock property '${k}' — will be ignored`);
+      }
     }
   }
 
@@ -975,6 +996,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         }
         if (isObj(layer.grow) && isNum(layer.grow.period) && layer.grow.period < floor) {
           err(`${path}.grow.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
+        }
+        if (isObj(layer.rock) && isNum(layer.rock.period) && layer.rock.period < floor) {
+          err(`${path}.rock.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
         }
         const sp = layer.sprite;
         if (isObj(sp) && isObj(sp.cycle) && isNum(sp.cycle.period) && sp.cycle.period < floor) {
