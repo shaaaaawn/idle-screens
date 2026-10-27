@@ -19,6 +19,11 @@ enum ClassicSaverKind: String, CaseIterable, Sendable {
         id.flatMap(ClassicSaverKind.init(rawValue:))
     }
 
+    /// The native port is a stand-in, not the saver: the 3D tank needs WebGL,
+    /// so a server-rendered thumb of the real tank beats the 2D still when
+    /// one exists. Posters show the still first and swap the thumb in.
+    var prefersServerThumb: Bool { self == .metaquarium }
+
     /// Seed a classic saver from its channel id (FNV-1a), not the publish
     /// epoch: the field then stays put across re-publishes AND the grid
     /// poster shows the same field the viewer will open into.
@@ -94,6 +99,65 @@ struct ClassicSaverView: View {
                 .draw(in: &ctx, size: size, t: t, tier: tier)
         }
     }
+}
+
+// MARK: - Poster stills
+
+/// A classic saver's poster, drawn ONCE into an image and cached.
+///
+/// A wall of tanks as `ClassicSaverView(live: false)` keeps one Canvas layer
+/// per card alive, and the aquarium's field cache holds only a handful of
+/// looks, so ~30 distinct tanks rebuilt their fields on every redraw. An
+/// image per (look, size) costs one draw per card, ever.
+struct ClassicPosterImage: View {
+    let kind: ClassicSaverKind
+    let seed: Int
+    var params: [String: String] = [:]
+    var tier: CapabilityTier = .t3
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var image: UIImage?
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if let image {
+                    Image(uiImage: image).resizable()
+                } else {
+                    // Deep water for the frame before the still lands.
+                    Color(hex: "08131F")
+                }
+            }
+            .task(id: key(for: geo.size)) {
+                image = render(size: geo.size)
+            }
+        }
+    }
+
+    private func key(for size: CGSize) -> String {
+        let look = params.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        return "\(kind.rawValue)|\(seed)|\(tier.rawValue)|\(look)|\(Int(size.width))x\(Int(size.height))@\(displayScale)"
+    }
+
+    @MainActor private func render(size: CGSize) -> UIImage? {
+        guard size.width >= 1, size.height >= 1 else { return nil }
+        let key = key(for: size) as NSString
+        if let hit = Self.cache.object(forKey: key) { return hit }
+        let renderer = ImageRenderer(content:
+            ClassicSaverView(kind: kind, seed: seed, tier: tier, live: false, params: params)
+                .frame(width: size.width, height: size.height))
+        renderer.scale = displayScale
+        guard let still = renderer.uiImage else { return nil }
+        Self.cache.setObject(still, forKey: key)
+        return still
+    }
+
+    /// NSCache is thread-safe and gives memory back under pressure.
+    nonisolated(unsafe) private static let cache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 120
+        return cache
+    }()
 }
 
 // MARK: - Warp (port of savers-classic/src/warp.ts)

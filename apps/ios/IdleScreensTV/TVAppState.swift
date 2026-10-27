@@ -30,7 +30,9 @@ final class TVAppState {
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
-    /// Editorial shelf catalog, server-ordered.
+    /// Channels this viewer hid (Report → Hide), filtered out of `channels`
+    /// at every load. Injected so tests never touch the real list.
+    let hidden: HiddenChannels
     var categories: [ChannelCategory] = []
     var isLoadingGallery = false
     var galleryError: String?
@@ -148,7 +150,9 @@ final class TVAppState {
     private var baseURL: URL
     private var wsTask: Task<Void, Never>?
 
-    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL) {
+    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL,
+         hidden: HiddenChannels = HiddenChannels(storage: .inMemory)) {
+        self.hidden = hidden
         self.gallery = gallery
         self.mcp = mcp
         self.ws = ws
@@ -177,7 +181,8 @@ final class TVAppState {
             mcp: MCPClient(baseURL: baseURL, transport: transport, confirmer: MCPConfirmPrompt.confirmer),
             ws: ChannelWSClient(),
             pair: PairClient(baseURL: baseURL, transport: transport),
-            baseURL: baseURL
+            baseURL: baseURL,
+            hidden: HiddenChannels()
         )
     }
 
@@ -188,13 +193,13 @@ final class TVAppState {
         // specs make it fully renderable), then let the network refresh
         // replace it. A cold boot shows real content in one frame.
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
-            channels = cached
+            channels = hidden.visible(cached)
         }
         if categories.isEmpty, let cached = await gallery.cachedCategories() {
             categories = cached
         }
         do {
-            channels = try await gallery.fetchChannels()
+            channels = hidden.visible(try await gallery.fetchChannels())
             galleryError = nil
         } catch {
             // Keep showing cached content on refresh failure; only surface
@@ -305,6 +310,28 @@ final class TVAppState {
             .filter { $0.sleeping != true || $0.id == selectedChannelId }
         guard let i = ring.firstIndex(where: { $0.id == selectedChannelId }) else { return nil }
         return (i + 1, ring.count)
+    }
+
+    /// Take a channel off this TV, now and on every reload. Hidden while it
+    /// is playing: on to the next channel, or back to the grid if none.
+    func hideChannel(_ channelId: String) {
+        let next = selectedChannelId == channelId
+            ? Self.surfTarget(from: channelId, step: 1, in: channels) : nil
+        hidden.hide(channelId)
+        channels.removeAll { $0.id == channelId }
+        guard selectedChannelId == channelId else { return }
+        if let next, next != channelId {
+            selectChannel(next, from: presentingSurface)
+        } else {
+            exitChannel()
+        }
+    }
+
+    /// File a viewer's report on a channel (see `ContentReport`).
+    func reportChannel(_ channelId: String, reason: ContentReport.Reason) async throws {
+        try await mcp.reportChannel(channelId: channelId,
+                                    label: channels.first { $0.id == channelId }?.label,
+                                    reason: reason)
     }
 
     func surf(_ step: Int) {
@@ -683,26 +710,10 @@ final class TVAppState {
         }
     }
 
-    /// Flatten a classic scene's track into last-write-wins string params.
-    /// Only t=0 "set" deltas matter here — the TV interprets the scene's
-    /// standing state, not its glide timing.
+    /// Flatten a classic scene's track into last-write-wins string params
+    /// (shared with the phone's posters: `PublicChannel.classicParams`).
     static func trackParams(from scene: JSONValue?) -> [String: String] {
-        guard case .object(let obj)? = scene,
-              case .object(let track)? = obj["track"],
-              case .array(let deltas)? = track["deltas"] else { return [:] }
-        var out: [String: String] = [:]
-        for delta in deltas {
-            guard case .object(let d) = delta,
-                  case .string(let path)? = d["path"] else { continue }
-            switch d["value"] {
-            case .string(let v): out[path] = v
-            case .int(let v): out[path] = String(v)
-            case .double(let v): out[path] = v == v.rounded() ? String(Int(v)) : String(v)
-            case .bool(let v): out[path] = String(v)
-            default: break
-            }
-        }
-        return out
+        PublicChannel.trackParams(from: scene)
     }
 
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {

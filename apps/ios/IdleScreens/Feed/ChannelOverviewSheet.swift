@@ -165,7 +165,7 @@ struct ChannelOverviewSheet: View {
                 } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId) {
                     ClassicSaverView(kind: kind,
                                      seed: ClassicSaverKind.seed(forChannel: channel.id),
-                                     tier: .t2, live: false)
+                                     tier: .t2, live: false, params: channel.classicParams)
                 } else {
                     ProceduralChannelArt(channelId: channel.id)
                 }

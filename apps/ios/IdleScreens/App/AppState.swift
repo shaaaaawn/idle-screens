@@ -21,6 +21,9 @@ final class AppState {
     let scenes = RecordedSceneStore()
     /// Channels this person follows — theirs alone, synced by iCloud Keychain.
     let follows = FollowStore()
+    /// Channels this person hid (Report → Hide). Filtered out of `channels`
+    /// wherever the wall is loaded, so no surface has to remember to.
+    let hidden = HiddenChannels()
     var isLoadingGallery = false
     var galleryError: String?
     /// A gallery fetch has come back (either way). Until then an empty list
@@ -67,7 +70,7 @@ final class AppState {
         // The wall as it was last time, on the very first frame: launch opens
         // onto a channel, not onto a loading state. A small file; reading it
         // here beats a frame of nothing.
-        self.channels = gallery.cachedChannels() ?? []
+        self.channels = hidden.visible(gallery.cachedChannels() ?? [])
         self.categories = gallery.cachedCategories() ?? []
     }
 

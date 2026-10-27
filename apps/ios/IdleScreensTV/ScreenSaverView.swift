@@ -8,6 +8,13 @@ struct ScreenSaverView: View {
     @Environment(TVAppState.self) private var app
     @State private var showChrome = false
     @State private var chromeTask: Task<Void, Never>?
+    /// Play/Pause: Report or Hide this channel. `-options` / `-report` open
+    /// them on arrival (QA and store shots — simctl cannot press the remote).
+    @State private var showOptions = ProcessInfo.processInfo.arguments.contains("-options")
+    @State private var showReport = ProcessInfo.processInfo.arguments.contains("-report")
+    /// The channel the Report flow is about, pinned when it opens: the
+    /// "hide it too?" alert must not follow an auto-rotate to the next one.
+    @State private var reportTarget: String?
 
     var body: some View {
         ZStack {
@@ -194,7 +201,26 @@ struct ScreenSaverView: View {
             }
             revealChrome()
         }
-        .onPlayPauseCommand { revealChrome() }
+        .onPlayPauseCommand {
+            revealChrome()
+            showOptions = true
+        }
+        .confirmationDialog(channelLabel, isPresented: $showOptions, titleVisibility: .visible) {
+            Button("Report this channel…") { showReport = true }
+            Button("Hide this channel", role: .destructive) {
+                if let id = app.selectedChannelId { app.hideChannel(id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: showReport, initial: true) { _, open in
+            if open { reportTarget = app.selectedChannelId }
+        }
+        .reportChannelFlow(isPresented: $showReport, channelLabel: reportLabel,
+                           report: { reason in
+                               guard let id = reportTarget else { return }
+                               try await app.reportChannel(id, reason: reason)
+                           },
+                           hide: { if let id = reportTarget { app.hideChannel(id) } })
         .onTapGesture { revealChrome() }
         .onAppear { revealChrome() }
         .onDisappear { chromeTask?.cancel() }
@@ -280,6 +306,7 @@ struct ScreenSaverView: View {
                         Label(position, systemImage: app.timeline == .live
                               ? "chevron.up.chevron.down" : "chevron.left.chevron.right")
                     }
+                    Label("Options", systemImage: "playpause")
                     Label("Back to browse", systemImage: "chevron.backward")
                 }
                 .font(.tvMeta)
@@ -306,6 +333,11 @@ struct ScreenSaverView: View {
         guard case .past(let i) = app.timeline, app.historyStops.indices.contains(i)
         else { return "Earlier" }
         return PlayerChrome.pastLine(stop: app.historyStops[i], sceneLabel: app.pastScene?.label)
+    }
+
+    private var reportLabel: String {
+        guard let id = reportTarget else { return channelLabel }
+        return app.channels.first(where: { $0.id == id })?.displayLabel ?? id
     }
 
     private var channelLabel: String {

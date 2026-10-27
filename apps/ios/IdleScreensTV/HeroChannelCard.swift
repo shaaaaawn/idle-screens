@@ -42,10 +42,17 @@ struct HeroChannelCard: View {
                 }
         } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId),
                   let tier = app.classicRenderTier {
-            ClassicSaverView(kind: kind,
-                             seed: ClassicSaverKind.seed(forChannel: channel.id),
-                             tier: tier,
-                             live: false)
+            let still = ClassicPosterImage(kind: kind,
+                                           seed: ClassicSaverKind.seed(forChannel: channel.id),
+                                           params: channel.classicParams,
+                                           tier: tier)
+            if kind.prefersServerThumb {
+                // The server's render of the real 3D tank once it has one; the
+                // native still meanwhile and on a 404.
+                ThumbImage(url: app.gallery.thumbURL(for: channel.id)) { still }
+            } else {
+                still
+            }
         } else {
             ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
                 ProceduralChannelArt(channelId: channel.id)
