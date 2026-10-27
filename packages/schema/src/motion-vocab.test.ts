@@ -327,13 +327,16 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 0 } }])).period).toBe(0);
   });
 
-  it('treats a staggered instant entrance as a one-shot build when there is more than one entity', () => {
+  it('treats a staggered instant entrance as a one-shot build, whatever the layer count', () => {
+    // The drawn count scales with the viewport, so a count of 1 can draw several and a count of 2 just one.
     const dots = (count: number): LayerSpec => ({ ...pulsing(4000), pulse: undefined, count, life: { enter: 0, fade: 0, stagger: 1000 } });
-    const many = scenePeriod(scene([dots(4)]));
-    expect(many.period).toBeNull();
-    expect(many.reasons.join(' ')).toContain('life builds in or out once');
-    // One entity has nothing to stagger: entity 0 is never delayed.
-    expect(scenePeriod(scene([dots(1)])).period).toBe(0);
+    for (const count of [1, 2, 4]) {
+      const r = scenePeriod(scene([dots(count)]));
+      expect(r.period).toBeNull();
+      expect(r.reasons.join(' ')).toContain('life builds in or out once');
+    }
+    // Without a stagger the same instant entrance is still static.
+    expect(scenePeriod(scene([{ ...dots(4), life: { enter: 0, fade: 0 } }])).period).toBe(0);
   });
 
   it('is aperiodic when a timeline key moves a period or rate', () => {

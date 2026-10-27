@@ -92,8 +92,11 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     const rate = layer.clock?.rate ?? 1;
     const life = layer.life;
     // `stagger` shifts entity i's enter by i × stagger, so even an instant
-    // enter at 0 builds the layer up once when it has more than one entity.
-    const staggered = (life?.stagger ?? 0) > 0 && layer.count > 1;
+    // enter at 0 builds the layer up once when it draws more than one entity.
+    // The drawn count is round(count × countScale), which depends on the
+    // viewport (a `count: 1` layer draws several at 4K, `count: 2` draws one
+    // small), and this period is viewport-independent, so any stagger counts.
+    const staggered = (life?.stagger ?? 0) > 0;
     if (life && (life.exit !== undefined || (life.enter !== undefined && ((life.enter ?? 0) > 0 || (life.fade ?? 1000) > 0 || staggered)))) reasons.push(`${at} life builds in or out once`);
     if (layer.pulse) add(`${at} pulse`, layer.pulse.period / rate);
     if (layer.grow) add(`${at} grow`, layer.grow.period / rate);
