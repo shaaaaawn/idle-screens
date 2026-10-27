@@ -188,8 +188,8 @@ struct ChannelFeedView: View {
         // Tap-to-hide is "just the scene": the tab bar goes with the rest of
         // the chrome, on the same animation (the tap wraps it in withAnimation).
         .toolbar(chromeHidden || sideways ? .hidden : .visible, for: .tabBar)
-        // Artwork, not chrome: dark in either appearance, tab bar included.
-        .toolbarColorScheme(.dark, for: .tabBar)
+        // Artwork, not chrome: dark in either appearance (the window goes
+        // dark with it — see ContentView.scheme).
         .environment(\.colorScheme, .dark)
         // Turning sideways shows the controls for a moment, then gets out of
         // the way; any time they come back while sideways, they fade again.
