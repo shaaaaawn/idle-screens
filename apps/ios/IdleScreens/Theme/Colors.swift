@@ -18,14 +18,18 @@ extension Color {
     static let textTertiary     = Color(hex: "48484A")
 
     init(hex: String) {
-        let hex = hex.trimmingCharacters(in: .alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8) & 0xFF) / 255
-        let b = Double(int & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        let c = parseHexRGB(hex)
+        self.init(red: c.0, green: c.1, blue: c.2)
     }
+}
+
+/// `#rrggbb` or `#rgb` (each digit doubled, as CSS reads it) → sRGB 0…1.
+func parseHexRGB(_ hex: String) -> (Double, Double, Double) {
+    var digits = hex.trimmingCharacters(in: .alphanumerics.inverted)
+    if digits.count == 3 { digits = digits.map { "\($0)\($0)" }.joined() }
+    var int: UInt64 = 0
+    Scanner(string: digits).scanHexInt64(&int)
+    return (Double((int >> 16) & 0xFF) / 255, Double((int >> 8) & 0xFF) / 255, Double(int & 0xFF) / 255)
 }
 
 // Allow `.foregroundStyle(.textPrimary)` inside Button labels and other

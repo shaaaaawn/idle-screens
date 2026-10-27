@@ -82,6 +82,28 @@ final class AppStateFlowTests: XCTestCase {
         XCTAssertNil(app.pastScene)
     }
 
+    // MARK: - Live steering
+
+    func testALiveSteerReachesTheTelevision() async throws {
+        let app = makeApp()
+        await app.loadGallery()
+        app.selectChannel("newest")
+        app.handle(.scene(spec: json(dots), seed: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#fff")
+        // The server sends the whole track after every steer; dur 0 is a cut.
+        app.handle(.track(json(##"{"deltas":[{"t":5,"path":"layers.0.sprite.color","value":"#00ff00","dur":0}]}"##), epoch: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#00ff00")
+        // A glide lands on its target, positions untouched.
+        let before = app.compiledScene.first?.entities.map(\.x)
+        app.handle(.track(json(##"{"deltas":[{"t":5,"path":"layers.0.sprite.color","value":"#00ff00","dur":0},{"t":9,"path":"layers.0.sprite.radius","value":[0.03,0.03],"dur":120,"ease":"out"}]}"##), epoch: 1))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.size ?? 0, 0.03, accuracy: 1e-9)
+        XCTAssertEqual(app.compiledScene.first?.entities.map(\.x), before, "a paint glide re-seats nothing")
+        // A repeat of the same track changes nothing; a new scene clears the steers.
+        app.handle(.scene(spec: json(dots), seed: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#fff")
+    }
+
     func testSurfOnAnEmptyGalleryIsANoOp() {
         let app = makeApp(routes: [:])
         app.selectChannel("solo")

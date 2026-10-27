@@ -93,14 +93,30 @@ enum SpecTimeline {
         return c * c * (3 - 2 * c)
     }
 
-    private static func ease(_ k: Key, _ x: Double) -> Double {
-        let c = x <= 0 ? 0 : x >= 1 ? 1 : x
-        switch k.ease {
+    /// ω of the `spring` ease: settles to within 0.3 % of its target by the glide's end.
+    private static let springOmega = 8.0
+    private static let springEnd = 1 - (1 + springOmega) * exp(-springOmega)
+
+    /// steer.ts `easeGlide`: a glide's progress curve by name, 0 → 1 and
+    /// monotone. `in` / `out` are cubic; `spring` is the critically damped
+    /// step response normalised to land on 1; anything unknown is `smooth`.
+    static func easeGlide(_ ease: String?, _ k: Double) -> Double {
+        let c = Swift.max(0, Swift.min(1, k))
+        switch ease {
         case "step": return c >= 1 ? 1 : 0
         case "linear": return c
-        default: return easeSmooth(c)
+        case "in": return c * c * c
+        case "out": let u = 1 - c; return 1 - u * u * u
+        case "spring": return c >= 1 ? 1 : (1 - (1 + springOmega * c) * exp(-springOmega * c)) / springEnd
+        default: return c * c * (3 - 2 * c)
         }
     }
+
+    /// The eases a live steer honours (`STEER_EASES`): older names on stored
+    /// tracks keep meaning smooth.
+    static let steerEases: Set<String> = ["in", "out", "spring"]
+
+    private static func ease(_ k: Key, _ x: Double) -> Double { easeGlide(k.ease, x) }
 
     /// One path's value at timeline-local time `tt`, starting from `start`.
     private static func evalTrack(_ keys: [Key], start: JSONValue?, tt: Double, leaf: String) -> JSONValue? {
@@ -157,6 +173,68 @@ enum SpecTimeline {
         return nil
     }
 
+    // MARK: - Live steers on a timeline scene (compile.ts `TimelineOverride`)
+
+    /// The next key on `path` after scene time `t` (ms): when it starts and
+    /// how long it glides — nil when no key will ever touch the path.
+    static func nextKeyAfter(_ spec: JSONValue, path: String, t: Double) -> (at: Double, dur: Double)? {
+        guard let tl = timeline(of: spec), let cp = canonicalPath(withoutTimeline(spec), path),
+              let keys = tracks(of: spec).first(where: { $0.path == cp })?.keys, let first = keys.first else { return nil }
+        let tt = localTime(tl, t)
+        if let next = keys.first(where: { $0.t > tt }) { return (t + (next.t - tt), next.dur ?? defaultKeyDur) }
+        if tl.loop, let d = tl.duration, d > 0 { return (t + (d - tt) + first.t, first.dur ?? defaultKeyDur) }
+        return nil
+    }
+
+    /// The steering rule: a steer glides in over `dur`, holds until the path's
+    /// next key (or forever when no key will touch it), then glides back to
+    /// the timeline over that key's `dur` and expires.
+    struct Override: Equatable, Sendable {
+        let leaf: String
+        let from: JSONValue?
+        let to: JSONValue
+        let t0: Double
+        let dur: Double
+        let until: Double
+        let outDur: Double
+        let ease: String?
+
+        init(spec: JSONValue, path: String, from: JSONValue?, to: JSONValue, now: Double, glide: Double, ease: String?) {
+            let next = SpecTimeline.nextKeyAfter(spec, path: path, t: now)
+            leaf = path.split(separator: ".").last.map(String.init) ?? path
+            self.from = from; self.to = to; t0 = now; dur = glide
+            until = next?.at ?? .infinity; outDur = next?.dur ?? 0; self.ease = ease
+        }
+
+        private func held(at t: Double) -> JSONValue {
+            let k = dur > 0 ? SpecTimeline.easeGlide(ease, (t - t0) / dur) : 1
+            return k >= 1 ? to : SpecTimeline.lerpValue(from, to, k, rootKey: leaf)
+        }
+
+        /// The value at `t`, or nil once it has handed the path back.
+        func value(at t: Double, timeline: () -> JSONValue?) -> JSONValue? {
+            if t < until { return held(at: t) }
+            if outDur > 0, t < until + outDur {
+                return SpecTimeline.lerpValue(held(at: until), timeline() ?? to, SpecTimeline.easeSmooth((t - until) / outDur), rootKey: leaf)
+            }
+            return nil
+        }
+    }
+
+    /// `resolved` with every live override written over the timeline's value;
+    /// the overrides still in force come back beside it.
+    static func applyOverrides(_ resolved: JSONValue, _ overrides: [String: Override], at t: Double)
+        -> (JSONValue, [String: Override]) {
+        var out = resolved
+        var live: [String: Override] = [:]
+        for (path, o) in overrides {
+            guard let v = o.value(at: t, timeline: { read(resolved, path) }) else { continue }
+            write(&out, path, v)
+            live[path] = o
+        }
+        return (out, live)
+    }
+
     // MARK: - Paths (steer.ts resolveSpecPath / canonicalSpecPath)
 
     private static let unsafeKeys: Set<String> = ["__proto__", "constructor", "prototype"]
@@ -209,6 +287,14 @@ enum SpecTimeline {
             }
         }
         return node
+    }
+
+    /// steer.ts `applyDeltasToSpec`: each delta's value written at its path,
+    /// last wins; a path that does not resolve is skipped.
+    static func applyDeltas(_ spec: JSONValue, _ deltas: [(path: String, value: JSONValue)]) -> JSONValue {
+        var out = spec
+        for d in deltas { write(&out, d.path, d.value) }
+        return out
     }
 
     private static func write(_ spec: inout JSONValue, _ path: String, _ value: JSONValue) {
@@ -278,6 +364,63 @@ enum SpecTimeline {
         return walk(a, b ?? to, kk, key: rootKey)
     }
 
+    /// `lerpSpec`: two whole scenes at progress `k`. A layer `opacity`,
+    /// `transform` or `group` (and a group's paint) present on one end only
+    /// glides from its identity instead of stepping, and a root `timeline`
+    /// steps — two timelines' key times never blend.
+    static func lerpSpec(_ from: JSONValue, _ to: JSONValue, _ k: Double) -> JSONValue {
+        let (a, b) = alignPaintFields(from, to)
+        let kk = Swift.max(0, Swift.min(1, k))
+        guard case .object(let oa) = a, case .object(let ob) = b else { return walk(a, b, kk, key: nil) }
+        var out: [String: JSONValue] = [:]
+        for (name, bv) in ob {
+            // A field only the target has is JS `undefined` at k = 0: absent.
+            if oa[name] == nil, kk <= 0 { continue }
+            out[name] = name == "timeline" ? (kk > 0 ? bv : oa[name] ?? .null) : walk(oa[name], bv, kk, key: name)
+        }
+        return .object(out)
+    }
+
+    /// steer.ts `alignPaintFields`.
+    private static func alignPaintFields(_ a: JSONValue, _ b: JSONValue) -> (JSONValue, JSONValue) {
+        guard case .object(var ra) = a, case .object(var rb) = b else { return (a, b) }
+        if case .array(var la)? = ra["layers"], case .array(var lb)? = rb["layers"] {
+            for i in 0..<Swift.min(la.count, lb.count) {
+                guard case .object(var x) = la[i], case .object(var y) = lb[i] else { continue }
+                if (x["group"] == nil) != (y["group"] == nil) {
+                    if x["group"] == nil { x["group"] = y["group"] } else { y["group"] = x["group"] }
+                }
+                if (x["opacity"] == nil) != (y["opacity"] == nil) {
+                    if x["opacity"] == nil { x["opacity"] = .double(1) } else { y["opacity"] = .double(1) }
+                }
+                if x["transform"] != nil || y["transform"] != nil {
+                    let (fx, fy) = alignTransform(x["transform"] ?? .object([:]), y["transform"] ?? .object([:]))
+                    x["transform"] = fx; y["transform"] = fy
+                }
+                la[i] = .object(x); lb[i] = .object(y)
+            }
+            ra["layers"] = .array(la); rb["layers"] = .array(lb)
+        }
+        let ga: [String: JSONValue]? = { if case .object(let g)? = ra["groups"] { return g } else { return nil } }()
+        let gb: [String: JSONValue]? = { if case .object(let g)? = rb["groups"] { return g } else { return nil } }()
+        if ga != nil || gb != nil {
+            var na = ga ?? [:], nb = gb ?? [:]
+            for name in Set(na.keys).union(nb.keys) {
+                var x: [String: JSONValue] = { if case .object(let o)? = na[name] { return o } else { return [:] } }()
+                var y: [String: JSONValue] = { if case .object(let o)? = nb[name] { return o } else { return [:] } }()
+                if (x["opacity"] == nil) != (y["opacity"] == nil) {
+                    if x["opacity"] == nil { x["opacity"] = .double(1) } else { y["opacity"] = .double(1) }
+                }
+                if (x["transform"] == nil) != (y["transform"] == nil) {
+                    if x["transform"] == nil { x["transform"] = .object([:]) } else { y["transform"] = .object([:]) }
+                }
+                na[name] = .object(x); nb[name] = .object(y)
+            }
+            ra["groups"] = .object(na); rb["groups"] = .object(nb)
+        }
+        return (.object(ra), .object(rb))
+    }
+
     private static func walk(_ a: JSONValue?, _ b: JSONValue, _ kk: Double, key: String?) -> JSONValue {
         if let x = a?.number, let y = b.number, a?.isNumber == true, b.isNumber {
             let v = x + (y - x) * kk
@@ -289,12 +432,17 @@ enum SpecTimeline {
         if case .string(let sa)? = a, case .string(let sb) = b, isHex(sa), isHex(sb) {
             return .string(lerpHex(sa, sb, kk))
         }
+        if key == "path", case .string(let sa)? = a, case .string(let sb) = b, sa != sb,
+           let m = lerpPathD(sa, sb, kk) {
+            return .string(m)
+        }
         if case .array(let xa)? = a, case .array(let xb) = b, xa.count == xb.count {
             return .array(xb.indices.map { walk(xa[$0], xb[$0], kk, key: String($0)) })
         }
         if case .object(let oa)? = a, case .object(let ob) = b {
             var out: [String: JSONValue] = [:]
             for (name, bv) in ob {
+                if oa[name] == nil, kk <= 0 { continue }
                 if name == "transform" {
                     let (fa, fb) = alignTransform(oa[name], bv)
                     out[name] = walk(fa, fb ?? bv, kk, key: name)
@@ -309,6 +457,44 @@ enum SpecTimeline {
 
     /// JavaScript's Math.round (halves toward +∞).
     private static func jsRound(_ v: Double) -> Double { (v + 0.5).rounded(.down) }
+
+    /// steer.ts `lerpPathD`: two SVG paths with the same commands and number
+    /// count morph number by number (arc flags round); nil when they differ.
+    static func lerpPathD(_ a: String, _ b: String, _ k: Double) -> String? {
+        let ta = pathTokens(a), tb = pathTokens(b)
+        guard ta.count == tb.count else { return nil }
+        var out: [String] = []
+        var cmd = "", argIndex = 0
+        for (x, y) in zip(ta, tb) {
+            let isCmdA = x.count == 1 && x.first!.isLetter, isCmdB = y.count == 1 && y.first!.isLetter
+            if isCmdA != isCmdB { return nil }
+            if isCmdA {
+                if x != y { return nil }
+                cmd = x.uppercased(); argIndex = 0
+                out.append(x)
+                continue
+            }
+            guard let va = Double(x), let vb = Double(y) else { return nil }
+            let flag = cmd == "A" && (argIndex % 7 == 3 || argIndex % 7 == 4)
+            argIndex += 1
+            let v = va + (vb - va) * k
+            out.append(flag ? jsNumber(jsRound(v)) : jsNumber((v * 100_000).rounded() / 100_000))
+        }
+        return out.joined(separator: " ")
+    }
+
+    /// `/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g`
+    private static func pathTokens(_ d: String) -> [String] {
+        let re = try! NSRegularExpression(pattern: #"[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"#)
+        let ns = d as NSString
+        return re.matches(in: d, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+    }
+
+    /// A number as JS `String(n)` prints it for the values a path carries.
+    private static func jsNumber(_ v: Double) -> String {
+        if v == v.rounded(), abs(v) < 1e15 { return String(Int(v)) }
+        return String(v)
+    }
 }
 
 extension JSONValue {

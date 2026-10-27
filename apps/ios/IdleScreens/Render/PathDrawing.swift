@@ -28,6 +28,8 @@ final class PathDrawing: Equatable, @unchecked Sendable {
         var opacity: Double?
         var join: String?
         var cap: String?
+        /// Draw-on: only this arc-length span of the part's lines is stroked.
+        var draw: StrokeDraw?
     }
     struct PartSpec: Codable, Equatable {
         var path: String
@@ -232,10 +234,11 @@ enum PathRaster {
                 }
                 cg.restoreGState()
             }
-            if let st = p.stroke, !p.flat.lines.isEmpty {
+            let lines = p.stroke?.draw?.span.map { DrawOn.trim(p.flat.lines, $0.0, $0.1) } ?? p.flat.lines
+            if let st = p.stroke, !lines.isEmpty {
                 // Strokes in px: width from the uniform radius, never stretched by a span.
                 let path = CGMutablePath()
-                for l in p.flat.lines where l.points.count >= 2 {
+                for l in lines where l.points.count >= 2 {
                     path.addLines(between: l.points.map(toPx))
                     if l.closed { path.closeSubpath() }
                 }
