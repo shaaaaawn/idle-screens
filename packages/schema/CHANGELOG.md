@@ -1,5 +1,34 @@
 # @idle-screens/schema
 
+## 3.15.0
+
+### Minor Changes
+
+- 15f20a1: Motion vocabulary (#316): the moves a scene author reaches for first, without a timeline.
+  
+  - `draw` on `stroke` sprites and path strokes: a line that draws itself on, holds and draws off.
+  - `in` / `out` / `spring` glide eases on timeline keys and live steers.
+  - `rock` motion, `life.stagger` for a wave across a layer, and `reveal.rise` for text that rises in.
+  - `textBlock.number`: a counter that eases between values.
+  - The `wipe` transition between sequence segments.
+  - `scenePeriod` and the `loop-seam` advisory, so a looping scene can say how long its loop is and hear when the seam shows.
+  - Hints when a spec uses another tool's motion words, and the draw-span helpers (`drawSpan`, `trimPolyline`, `trimLines`, `strokeLines`, `strokeDrawnSamples`) exported for hosts.
+  - The `ink-tide` example shows all of it in one scene.
+
+### Patch Changes
+
+- cfdcb89: Timeline flash gate: no false refusal for a busy wave of small things (F125 regression). `timelineFlashReport` now counts paint-key boundaries per cell of its 16 × 9 grid, from the keys on the layers that can paint each cell, and skips a dense window where too few cells could flash for a quarter of the frame to. A staggered wave of 28 small static dots, refused on 3.14.0 with "0 flashes a second over 0%", passes without a frame resolved; the full-frame three-path strobe still fails at 5 flashes a second. Moving, emitting and linked layers, and layers whose geometry is keyed, count as reaching every cell. When a dense window is still past the 512-frame budget, the report keeps failing closed and adds `boundariesPerSecond`, so a gate can say the timeline is too dense to verify instead of quoting zeros as a strobe. New export from perception: `layerCellFootprints`.
+- e176117: Validator, JSON Schema and FORMAT.md agree (F128, F74):
+  
+  - `layout: { type: 'list', gap: { x?, y? } }` validates as documented (X615); `gap.x` on a one-column list warns `no-effect`.
+  - drift `bob` / rise `sway` are documented in min(w,h) units (not px), and an amplitude above 0.25 warns `motion-amplitude` (X575). A warning, not an error, so stored scenes with px-sized values still recall.
+  - A timeline key whose path collapses to nothing (an eye blinking shut) draws nothing at that moment instead of rejecting the scene; a live steer on that layer is accepted too (X583). A base path must still draw something.
+  - `fillRule: 'auto'` treats a subpath touching its container's edge as inside it, so a notch cut from the rim is a hole on every edge, not only some (X585).
+  - A `color` key on a part or path sprite with a `gradient` warns `timeline-key-no-effect` (X588).
+  - FORMAT.md: a per-motion-type field table (checked against the validator's allowlist and the JSON Schema by a test), the keyable path-drawing fields, and the layer transform's order (rotate/scale about the origin, then translate in screen space) (F74, X588, X563).
+- 3b58f3b: Live-render fixes (F129). A `curve: "linear"` stroke now samples every authored vertex, so a path of a few long segments keeps its corners instead of being chamfered by the 24-sample resampler (X566). The textBlock width table counts full-width glyphs (CJK ideographs, kana, Hangul, fullwidth forms) as a whole em instead of 0.55, so a centre-anchored CJK line is centred on screen, and `text-off-screen` and perception see its real extent (X614).
+- e5bdefe: FORMAT.md: the timeline-steering note no longer calls `sync: 'epoch'` unwired on the site. Inside an epoch-synced sequence every viewer shares the channel clock (the idlescreens.com viewer passes `sequenceBaseT` since idle-server PR 247); a standalone timed scene or a `mount` sequence still runs on each screen's own clock.
+
 ## 3.14.0
 
 ### Minor Changes
