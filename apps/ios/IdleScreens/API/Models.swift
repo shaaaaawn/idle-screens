@@ -41,6 +41,10 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     /// rather than a schema scene — those carry no layers, so `spec` is nil
     /// and the poster comes from the native classic port instead.
     let classicSaverId: String?
+    /// A classic saver's steered params (`environment`, `fishMix`, …), from
+    /// the scene's control track — the bare `{"id":"metaquarium"}` document
+    /// carries none, so without these every tank posters as the default reef.
+    let classicParams: [String: String]
     /// The same spec as untouched JSON. `SpecSubset` is a lossy, decode-only
     /// view (custom decoders, no encoder), so re-publishing it would drop
     /// every field the renderer doesn't read. Mixing a scene onto another
@@ -93,7 +97,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     init(channelId: String?, label: String?, tags: [String]?, viewers: Int?,
          sleeping: Bool? = nil, spec: SpecSubset? = nil, rawSpec: JSONValue? = nil,
          categoryId: String? = nil, categorySort: Int? = nil,
-         classicSaverId: String? = nil,
+         classicSaverId: String? = nil, classicParams: [String: String] = [:],
          createdAt: Int? = nil, lastEventAt: Int? = nil,
          saverLabel: String? = nil,
          lastSteer: Steer? = nil, isProtected: Bool? = nil,
@@ -108,6 +112,7 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.categoryId = categoryId
         self.categorySort = categorySort
         self.classicSaverId = classicSaverId
+        self.classicParams = classicParams
         self.createdAt = createdAt
         self.lastEventAt = lastEventAt
         self.saverLabel = saverLabel
@@ -165,10 +170,38 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         } else {
             classicSaverId = nil
         }
+        // Only a classic saver needs its track read; a schema scene's steers
+        // are already folded into `resolvedSpec`.
+        classicParams = classicSaverId == nil ? [:]
+            : Self.trackParams(from: (try? c.decodeIfPresent(JSONValue.self, forKey: .scene)) ?? nil)
         // Same precedence for the verbatim copy, so mixing publishes exactly
         // what the viewer is showing.
         rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .resolvedSpec))
             ?? scene?.rawSpec
+    }
+}
+
+extension PublicChannel {
+    /// Flatten a classic scene's track into last-write-wins string params.
+    /// Only t=0 "set" deltas matter here — the native ports interpret the
+    /// scene's standing state, not its glide timing.
+    static func trackParams(from scene: JSONValue?) -> [String: String] {
+        guard case .object(let obj)? = scene,
+              case .object(let track)? = obj["track"],
+              case .array(let deltas)? = track["deltas"] else { return [:] }
+        var out: [String: String] = [:]
+        for delta in deltas {
+            guard case .object(let d) = delta,
+                  case .string(let path)? = d["path"] else { continue }
+            switch d["value"] {
+            case .string(let v): out[path] = v
+            case .int(let v): out[path] = String(v)
+            case .double(let v): out[path] = v == v.rounded() ? String(Int(v)) : String(v)
+            case .bool(let v): out[path] = String(v)
+            default: break
+            }
+        }
+        return out
     }
 }
 

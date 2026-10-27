@@ -48,6 +48,8 @@ struct ChannelFeedView: View {
     /// and sits there frozen. Re-sorted only on pull-to-refresh or reopening.
     @State private var order: [String] = []
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
     /// Away long enough that the page should let go of its web view and
     /// socket. A glance at another app, the app switcher or Control Center is
     /// not that: the page used to be torn down on any of them, and coming
@@ -57,8 +59,10 @@ struct ChannelFeedView: View {
     /// How long a backgrounded page keeps its scene alive.
     static let backgroundGrace: Duration = .seconds(120)
 
-    /// The caller's channels, in the held order.
-    private var pages: [PublicChannel] { FeedOrder.arrange(channels, by: order) }
+    /// The caller's channels, in the held order, minus any this person hid —
+    /// a shelf opened from the Channels tab holds its own copy of the list,
+    /// so hiding has to be applied here and not only to `app.channels`.
+    private var pages: [PublicChannel] { FeedOrder.arrange(app.hidden.visible(channels), by: order) }
 
     init(channels: [PublicChannel], start: String? = nil, showsBack: Bool = false,
          onRefresh: (() async -> Void)? = nil) {
@@ -116,6 +120,16 @@ struct ChannelFeedView: View {
             // does not: an id set before its row is laid out is dropped.
             .onChange(of: order) { _, _ in resync(reader) }
             .onChange(of: selection) { _, id in SwipeTiming.start("channel \(id ?? "-")") }
+            // Hid the channel on screen: move on to the next one (else the
+            // one before), or leave a shelf that has nothing left to show.
+            .onChange(of: app.hidden.ids) { _, hidden in
+                guard let here = selection, hidden.contains(here) else { return }
+                guard let next = FeedOrder.successor(of: here, in: order, among: pages.map(\.id)) else {
+                    if showsBack { dismiss() }
+                    return
+                }
+                select(next, reader: reader, animated: true)
+            }
             .onChange(of: channels) { _, refreshed in
                 if order.isEmpty { order = refreshed.map(\.id) }
                 if selection == nil || !refreshed.contains(where: { $0.id == selection }) {
@@ -243,6 +257,15 @@ enum FeedOrder {
         let byId = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let known = Set(ids)
         return ids.compactMap { byId[$0] } + channels.filter { !known.contains($0.id) }
+    }
+
+    /// Where to land when `id` leaves the feed: the next remaining page after
+    /// it in `order`, else the nearest one before it, else nil.
+    static func successor(of id: String, in order: [String], among remaining: [String]) -> String? {
+        let left = Set(remaining)
+        guard let at = order.firstIndex(of: id) else { return remaining.first }
+        return order[(at + 1)...].first(where: left.contains)
+            ?? order[..<at].last(where: left.contains)
     }
 }
 

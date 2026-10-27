@@ -52,6 +52,25 @@ final class AppStateFlowTests: XCTestCase {
 
     // MARK: - Surfing
 
+    /// Report → Hide while watching: the channel leaves the wall and the
+    /// player moves on rather than holding a channel the viewer refused.
+    func testHidingThePlayingChannelSurfsOnAndStaysHidden() async {
+        let app = makeApp()
+        await app.loadGallery()
+        app.selectChannel("newest", from: .search)
+
+        app.hideChannel("newest")
+        XCTAssertEqual(app.selectedChannelId, "mid")
+        XCTAssertEqual(app.presentingSurface, .search)
+        XCTAssertFalse(app.channels.contains { $0.id == "newest" })
+
+        await app.loadGallery()
+        XCTAssertFalse(app.channels.contains { $0.id == "newest" }, "a reload must not bring it back")
+
+        app.hideChannel("mid"); app.hideChannel("old")
+        XCTAssertNil(app.selectedChannelId, "nothing left to surf to: back to browse")
+    }
+
     func testSurfWalksTheFeedOrderAndKeepsTheSurface() async {
         let app = makeApp()
         await app.loadGallery()

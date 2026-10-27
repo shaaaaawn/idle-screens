@@ -71,7 +71,8 @@ xcrun simctl io "$UDID" screenshot /tmp/shot.png    # output is in pixels, not p
 Debug launch arguments jump straight to one surface instead of walking there
 with the remote: `-channel <id>` (add `-past <n>` to step n scenes into its history),
 `-classic <warp|rainstorm|metaquarium>`, `-poster <id>`, `-pair`, `-settings`,
-`-search [-q <query>]`, `-fallback`.
+`-search [-q <query>]`, `-fallback`; with `-channel`, `-options` / `-report`
+open the player's Report-or-Hide dialog (Play/Pause on a real remote).
 
 **In the player the remote is a dial.** Up/Down surf channels in the iPhone
 feed's order (most recently steered first, sleeping channels skipped);

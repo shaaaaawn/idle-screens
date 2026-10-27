@@ -68,6 +68,23 @@ struct SettingsView: View {
                     Text("Open a channel that isn't listed in the gallery — including unlisted ones.")
                 }
 
+                if !app.hidden.ids.isEmpty {
+                    Section {
+                        ForEach(app.hidden.ids.sorted(), id: \.self) { id in
+                            Button {
+                                app.hidden.unhide(id)
+                                Task { await app.loadGallery() }
+                            } label: {
+                                LabeledContent(id, value: "Show again")
+                            }
+                        }
+                    } header: {
+                        Text("Hidden channels")
+                    } footer: {
+                        Text("Hidden on this Apple TV only. Hold Select on a channel, or press Play/Pause while watching, to hide or report one.")
+                    }
+                }
+
                 Section("Diagnostics") {
                     LabeledContent("Hardware", value: app.machine)
                     LabeledContent("Rendering at", value: Self.tierLabel(app.effectiveTier))

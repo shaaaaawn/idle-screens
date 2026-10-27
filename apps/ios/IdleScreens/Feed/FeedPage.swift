@@ -44,6 +44,8 @@ struct FeedPage: View {
     @FocusState private var keyFocus: Bool
     @State private var showComposer = false
     @State private var showCast = false
+    /// The Report flow (reason → filed → offer to hide).
+    @State private var showReport = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
     @State private var history: [ChannelEvent] = []
@@ -227,6 +229,12 @@ struct FeedPage: View {
             }
             toastLayer
         }
+        .reportChannelFlow(isPresented: $showReport, channelLabel: channel.displayLabel,
+                           report: { reason in
+                               try await app.mcp.reportChannel(channelId: channelId,
+                                                               label: channel.label, reason: reason)
+                           },
+                           hide: { app.hideChannel(channelId) })
         .sheet(isPresented: $showCast) {
             CastSheet(channelId: channelId, channelLabel: channel.displayLabel,
                       sceneId: currentStop?.sceneId,
@@ -263,6 +271,12 @@ struct FeedPage: View {
                 launchPicture = WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt)
             }
             if isActive { activate() }
+            // QA / store shots: `-channel <id> -report` opens the Report
+            // dialog on that one page, once.
+            if Self.launchReportChannel == channelId {
+                Self.launchReportChannel = nil
+                showReport = true
+            }
         }
         .onChange(of: refreshToken) { _, _ in
             if isActive { Task { await loadHistory() } }
@@ -492,13 +506,16 @@ struct FeedPage: View {
         }
     }
 
-    /// The tank's look, as the 2D stand-in reads it: environment and fish mix.
+    /// The tank's look, as the 2D stand-in reads it. Prod's resolved spec is
+    /// the bare `{"id":"metaquarium"}`; the look lives in the scene's track
+    /// (`classicParams`). A spec that inlines `params` still wins.
     private var tankParams: [String: String] {
-        guard case .object(let root)? = channel.rawSpec,
-              case .object(let params)? = root["params"] else { return [:] }
-        var out: [String: String] = [:]
-        for key in ["environment", "fishMix"] {
-            if let value = params[key]?.string { out[key] = value }
+        var out = channel.classicParams
+        if case .object(let root)? = channel.rawSpec,
+           case .object(let params)? = root["params"] {
+            for (key, value) in params {
+                if let string = value.string { out[key] = string }
+            }
         }
         return out
     }
@@ -976,7 +993,34 @@ struct FeedPage: View {
                     .glassCapsule(shape: Circle())
             }
             .accessibilityLabel("Share channel")
+            moreMenu
         }
+    }
+
+    private static var launchReportChannel: String? = {
+        let args = ProcessInfo.processInfo.arguments
+        guard args.contains("-report"), let i = args.firstIndex(of: "-channel"),
+              args.indices.contains(i + 1) else { return nil }
+        return args[i + 1]
+    }()
+
+    /// Report and Hide: rare, so behind one ⋯ rather than two rail buttons.
+    private var moreMenu: some View {
+        Menu {
+            Button { showReport = true } label: {
+                Label("Report channel…", systemImage: "flag")
+            }
+            Button(role: .destructive) { app.hideChannel(channelId) } label: {
+                Label("Hide this channel", systemImage: "eye.slash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17 * scale, weight: .medium))
+                .foregroundStyle(Color.primary)
+                .frame(width: 46 * scale, height: 46 * scale)
+                .glassCapsule(shape: Circle())
+        }
+        .accessibilityLabel("More")
     }
 
     private func railButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {

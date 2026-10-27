@@ -28,6 +28,7 @@ struct SettingsView: View {
                     screensSection
                     keysSection
                     followingSection
+                    hiddenSection
                     aboutSection
                 }
                 .padding(.horizontal, 20)
@@ -258,6 +259,33 @@ struct SettingsView: View {
                         Spacer()
                         Button("Unfollow") {
                             withAnimation { _ = app.follows.toggle(id) }
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.appPrimary)
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Hidden
+
+    /// Channels hidden from this device (Report → Hide). Only shown once
+    /// there is one: an empty "hidden" card would read as an accusation.
+    @ViewBuilder
+    private var hiddenSection: some View {
+        let hidden = app.hidden.ids.sorted()
+        if !hidden.isEmpty {
+            section("hidden channels", footer: "Hidden on this device only. Nobody is told.") {
+                ForEach(hidden, id: \.self) { id in
+                    HStack {
+                        Text(id)
+                            .foregroundStyle(Color.textPrimary)
+                            .lineLimit(1)
+                        Spacer()
+                        Button("Show again") {
+                            Task { await app.unhideChannel(id) }
                         }
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.appPrimary)
