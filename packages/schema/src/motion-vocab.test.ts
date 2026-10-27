@@ -310,9 +310,30 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(scenePeriod(field(10000)).period).toBe(10000);
   });
 
+  it('takes no period from a still field (drift amount 0), so a looping timeline fits it', () => {
+    const still = (extra: Partial<SaverSpec> = {}): SaverSpec =>
+      scene([{ ...pulsing(3000), key: 'p', opacity: 1 }], {
+        background: { type: 'field', scale: 2, bands: ['#000000', '#ffffff'], drift: { amount: 0, period: 10000 } } as never,
+        ...extra,
+      });
+    expect(scenePeriod(still()).period).toBe(3000);
+    const looped = still({ timeline: { loop: true, duration: 6000, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] } });
+    expect(scenePeriod(looped).period).toBe(6000);
+    expect(adviseSpec(looped, { width: 960, height: 540 }).map((w) => w.code)).not.toContain('loop-seam');
+  });
+
   it('treats a zero-start fade as a one-shot build, not a static scene', () => {
     expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 1000 } }])).period).toBeNull();
     expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 0 } }])).period).toBe(0);
+  });
+
+  it('treats a staggered instant entrance as a one-shot build when there is more than one entity', () => {
+    const dots = (count: number): LayerSpec => ({ ...pulsing(4000), pulse: undefined, count, life: { enter: 0, fade: 0, stagger: 1000 } });
+    const many = scenePeriod(scene([dots(4)]));
+    expect(many.period).toBeNull();
+    expect(many.reasons.join(' ')).toContain('life builds in or out once');
+    // One entity has nothing to stagger: entity 0 is never delayed.
+    expect(scenePeriod(scene([dots(1)])).period).toBe(0);
   });
 
   it('is aperiodic when a timeline key moves a period or rate', () => {
