@@ -205,15 +205,19 @@ final class CompiledSpriteScene: SKScene {
         guard let node = groundNode else { return }
         let key = groundKey(at: t)
         guard key != groundKey else { return }
-        groundKey = key
         if let bg, bg.isField,
            let ras = FieldRaster.raster(bg, seed: seed, width: size.width, height: size.height,
                                         t: t * 1000, shortSide: FieldSampler.shortSideLow) {
+            // A bucket still sampling in the background shows the previous
+            // raster: keep asking until the requested one is ready.
+            groundKey = FieldRaster.isReady(bg, seed: seed, width: size.width, height: size.height,
+                                            t: t * 1000, shortSide: FieldSampler.shortSideLow) ? key : nil
             let tex = SKTexture(cgImage: ras.image)
             tex.filteringMode = ras.crisp ? .nearest : .linear
             node.texture = tex
             return
         }
+        groundKey = key
         node.texture = backgroundTexture(t: t)
     }
 
@@ -664,7 +668,7 @@ final class CompiledSpriteScene: SKScene {
         let canvasH = ceil(max(1, CGFloat(lines.count) * lh))
         let state = reveal.map { Self.revealKey(text: text, maxWidth: maxWidth, fontSize: fontSize, style: style,
                                                reveal: $0, dim: dim, t: t) } ?? "all"
-        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(align)|\(color)|\(style?.font ?? "")|\(state)"
+        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(align)|\(color)|\(style?.font ?? "")|\(Int(lh * 100))|\(reveal?.rise ?? 0)|\(reveal?.caret?.color ?? "")|\(state)"
         return texture(key: key) {
             let font = TextBlockFont.uiFont(css: style?.font, size: fsPx)
             let ui = UIColor(hexString: color)

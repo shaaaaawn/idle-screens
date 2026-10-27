@@ -594,6 +594,9 @@ final class TVAppState {
             }
         case .reseed(let seed, let epoch):
             if let epoch { channelEpochMs = epoch }
+            // The saved live scene takes the new seed too, so returning from
+            // history (or a reseed received while browsing it) keeps it.
+            if let live = liveScene { liveScene = (live.json, seed ?? 42) }
             guard timeline == .live, let json = currentSpecJSON else { break }
             // A new arrangement: the steered scene remounts on the new seed.
             let shown = steeredJSON ?? json
@@ -822,9 +825,9 @@ final class TVAppState {
               effectiveTier == .t3 || effectiveTier == .t2 else { return }
         outgoingSerial &+= 1
         let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
-                                            seed: bedSeed, elapsed: now.timeIntervalSince(bedMountedAt)) : nil
+                                            seed: bedSeed, elapsed: now.timeIntervalSince(bedMountedAt) + bedClockOffset) : nil
         outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
-                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt) + sceneClockOffset,
                                  transparent: hasBed, bed: bed)
         outgoingOpacity = 1
         let serial = outgoingSerial
@@ -1040,6 +1043,8 @@ final class TVAppState {
             guard var layers = Self.compileJSON(lerped, seed: seed, budget: self.sceneBudget) else { return false }
             if twoPass { MorphText.applyCrossfade(&layers, from: a, to: b, lerped: lerped, k: k, dip: text == "dip") }
             self.compiledScene = layers
+            // The ground glides with the foreground (no bed owns it).
+            if !self.hasBed, let spec = Self.decodeSpec(lerped) { self.specBackground = spec.background }
             return true
         }
         _ = frame(Date().timeIntervalSince(entered))
@@ -1063,9 +1068,12 @@ final class TVAppState {
     /// A raw scene compiled the way a decoded one is; nil when it no longer decodes.
     nonisolated static func compileJSON(_ json: JSONValue, seed: Int,
                                         budget: (layers: Int, entities: Int)) -> [CompiledLayer]? {
-        guard let data = try? JSONEncoder().encode(json),
-              let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return nil }
-        return spec.compile(seed: seed, budget: budget)
+        decodeSpec(json)?.compile(seed: seed, budget: budget)
+    }
+
+    nonisolated static func decodeSpec(_ json: JSONValue) -> SpecSubset? {
+        guard let data = try? JSONEncoder().encode(json) else { return nil }
+        return try? JSONDecoder().decode(SpecSubset.self, from: data)
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {

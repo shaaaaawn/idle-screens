@@ -141,7 +141,13 @@ enum FieldRaster {
     }
 
     // NSCache is thread-safe; its values are immutable rasters.
-    nonisolated(unsafe) private static let cache = NSCache<NSString, Box>()
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Box> = {
+        // A drifting field keys a raster per 100 ms bucket and a screensaver
+        // runs for hours: bound it rather than wait for memory pressure.
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 48
+        return c
+    }()
     private final class Box { let r: Raster; init(_ r: Raster) { self.r = r } }
 
     /// The latest raster per config and frame (any time bucket), and the
@@ -150,6 +156,17 @@ enum FieldRaster {
     nonisolated(unsafe) private static var inFlight: Set<String> = []
     private static let lock = NSLock()
     private static let queue = DispatchQueue(label: "field-raster", qos: .userInitiated)
+
+    /// Whether the raster for exactly this bucket is already sampled.
+    static func isReady(_ bg: SpecSubset.Background, seed: UInt32, width w: Double, height h: Double,
+                        t: Double, shortSide: Int = FieldSampler.shortSide) -> Bool {
+        let short = Swift.max(1, Swift.min(w, h))
+        let cols = Swift.max(1, Int(FieldSampler.jsRound(Double(shortSide) * w / short)))
+        let rows = Swift.max(1, Int(FieldSampler.jsRound(Double(shortSide) * h / short)))
+        let ft = FieldSampler.sampleTime(bg, t)
+        let key = "\(bg.fieldKey)|\(seed)|\(w)x\(h)|\(cols)x\(rows)|\(ft)" as NSString
+        return cache.object(forKey: key) != nil
+    }
 
     /// Raster for a `w`×`h` frame at scene time `t` (ms). `seed` is the
     /// instance seed, normalised (`(seed >>> 0) || 1`). A drifting field's

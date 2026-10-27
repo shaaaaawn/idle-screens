@@ -347,14 +347,17 @@ struct TextNumber: Decodable, Equatable, Sendable {
         return (prefix ?? "") + (neg ? "-" : "") + whole + frac + (suffix ?? "")
     }
 
-    /// JS `toFixed`: an exact half rounds up (printf rounds it to even).
+    /// JS `toFixed`: rounds the stored binary value, so only a tie that is
+    /// exact in binary (0.5, 2.5, 0.125) rounds up; printf rounds that one to
+    /// even. A decimal like 2.55 is stored just below its half and rounds
+    /// down. No multiplication, which would round the value onto a tie.
     static func toFixed(_ x: Double, _ d: Int) -> String {
-        let scale = pow(10.0, Double(d))
-        let scaled = x * scale
-        if scaled - scaled.rounded(.down) == 0.5 {
-            let n = scaled.rounded(.up) / scale
-            return String(format: "%.\(d)f", n)
-        }
-        return String(format: "%.\(d)f", x)
+        guard x.isFinite else { return String(format: "%.\(d)f", x) }
+        let a = x.magnitude
+        // 30 more places than shown: a tie is a 5 followed by only zeros.
+        let tail = String(format: "%.\(d + 30)f", a).suffix(30)
+        let tie = tail.first == "5" && tail.dropFirst().allSatisfy { $0 == "0" }
+        let body = String(format: "%.\(d)f", tie ? a.nextUp : a)
+        return x < 0 ? "-" + body : body
     }
 }

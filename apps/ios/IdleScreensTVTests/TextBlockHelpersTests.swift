@@ -264,4 +264,14 @@ final class TextBlockHelpersTests: XCTestCase {
             XCTAssertEqual(layers1[1].entities[i].size, layers2[1].entities[i].size, accuracy: 1e-15)
         }
     }
+
+    // MARK: - textBlock.number rounding (JS toFixed)
+
+    func testToFixedMatchesJavaScript() {
+        XCTAssertEqual(TextNumber.toFixed(2.55, 1), "2.5")   // stored below 2.55
+        XCTAssertEqual(TextNumber.toFixed(2.5, 0), "3")      // exact tie rounds up
+        XCTAssertEqual(TextNumber.toFixed(0.125, 2), "0.13")
+        XCTAssertEqual(TextNumber.toFixed(1.005, 2), "1.00")
+        XCTAssertEqual(TextNumber.toFixed(10.235, 2), "10.23")
+    }
 }
