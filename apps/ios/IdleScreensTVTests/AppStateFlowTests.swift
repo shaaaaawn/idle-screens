@@ -254,4 +254,41 @@ final class AppStateFlowTests: XCTestCase {
         app.rotateMinutes = 0
         XCTAssertEqual(makeApp().rotateMinutes, 0)
     }
+
+    // MARK: - Pair pushes racing
+
+    /// Greptile on #322: the phone sends a stored scene, then live, before the
+    /// scene's download finishes. The late download must not pin over live.
+    func testALivePushCancelsAStoredSceneStillDownloading() async throws {
+        let scene = ##"{"id":2,"label":"Tidal Drift","seed":5,"spec":{"seed":5,"layers":[{"count":7,"sprite":{"kind":"circle","radius":[0.02,0.04],"color":"#fff"},"motion":{"type":"static"}}]}}"##
+        let base = URL(string: "https://flow-stub.test")!
+        let transport = SlowSceneTransport(inner: StubTransport(routes: [
+            "/api/channels": Self.gallery, "/c/tide/scene/2": scene,
+        ]))
+        let app = TVAppState(gallery: GalleryClient(baseURL: base, transport: transport),
+                             mcp: MCPClient(baseURL: base, transport: transport),
+                             ws: ChannelWSClient(),
+                             pair: PairClient(baseURL: base, transport: transport),
+                             baseURL: base)
+        app.selectChannel("tide")
+
+        app.handle(.switchChannel(channelId: "tide", sceneId: 2))
+        app.handle(.switchChannel(channelId: "tide", sceneId: nil))
+        try await Task.sleep(for: .milliseconds(600))   // past the download
+
+        XCTAssertEqual(app.timeline, .live)
+        XCTAssertNil(app.pastScene)
+    }
+}
+
+/// Answers like StubTransport, but a stored scene takes 300 ms to arrive.
+private struct SlowSceneTransport: HTTPTransport {
+    let inner: StubTransport
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if request.url?.path.contains("/scene/") == true {
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        return try await inner.data(for: request)
+    }
 }

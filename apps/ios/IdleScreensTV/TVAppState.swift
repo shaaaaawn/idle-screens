@@ -620,7 +620,12 @@ final class TVAppState {
                 pinScene(sceneId)
             } else {
                 // Same channel, no scene: the phone wants it live (sync mode
-                // following the phone back to live, or "send live").
+                // following the phone back to live, or "send live"). A
+                // stored scene still downloading from an earlier push would
+                // land after this and pin over live, so it goes first, even
+                // when the timeline already reads live.
+                historyTask?.cancel()
+                historyTask = nil
                 returnToLive()
             }
         }

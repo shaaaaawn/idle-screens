@@ -46,6 +46,8 @@ final class AppState {
     var syncTargets: [String] = []
     @ObservationIgnored var syncTask: Task<Void, Never>?
     @ObservationIgnored var lastSynced: SyncTarget?
+    /// The target a sync send is waiting to settle on; nil once it is sent.
+    @ObservationIgnored var pendingSync: SyncTarget?
     /// Failure claiming a pair code. Separate from `pairPushError` so a failed
     /// push doesn't surface as a stale error inside "Add a screen".
     var pairClaimError: String?

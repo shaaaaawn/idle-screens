@@ -335,6 +335,7 @@ extension AppState {
     func startSync(_ deviceIds: [String], channelId: String, sceneId: Int?) {
         syncTargets = deviceIds.filter { id in pairedScreens.contains { $0.deviceId == id && canSync($0) } }
         lastSynced = nil
+        pendingSync = nil
         syncFollow(channelId: channelId, sceneId: sceneId, immediately: true)
     }
 
@@ -343,6 +344,7 @@ extension AppState {
         syncTask?.cancel()
         syncTask = nil
         lastSynced = nil
+        pendingSync = nil
     }
 
     var isSyncing: Bool { !syncTargets.isEmpty }
@@ -352,11 +354,24 @@ extension AppState {
     func syncFollow(channelId: String, sceneId: Int?, immediately: Bool = false) {
         guard isSyncing else { return }
         let target = SyncTarget(channelId: channelId, sceneId: sceneId)
-        guard target != lastSynced else { return }
+        if target == lastSynced {
+            // Back on what the screens already show: drop a send still
+            // waiting for a swipe to settle, or they follow the abandoned
+            // swipe (A, then B, then A inside 450 ms sent B). A send already
+            // under way is the one for this target; leave it to finish.
+            if pendingSync != nil {
+                syncTask?.cancel()
+                syncTask = nil
+                pendingSync = nil
+            }
+            return
+        }
         syncTask?.cancel()
+        pendingSync = target
         syncTask = Task { @MainActor [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(450)) }
             guard let self, !Task.isCancelled, self.isSyncing else { return }
+            self.pendingSync = nil
             self.lastSynced = target
             _ = await self.push(channelId: channelId, sceneId: sceneId, to: self.syncTargets, quiet: true)
         }
