@@ -699,7 +699,7 @@ struct ChannelPreviewTile: View {
             if kind.prefersServerThumb {
                 // The real 3D tank when the server has rendered one; the
                 // native still until then, and whenever the thumb 404s.
-                AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
+                ShapedThumb(channelId: channel.id) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()
                     } else {
@@ -710,7 +710,7 @@ struct ChannelPreviewTile: View {
                 still
             }
         } else {
-            AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
+            ShapedThumb(channelId: channel.id) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable().scaledToFill()
@@ -718,6 +718,25 @@ struct ChannelPreviewTile: View {
                     ProceduralChannelArt(channelId: channel.id)
                 }
             }
+        }
+    }
+}
+
+/// The server thumb in the tile's own shape: a card taller than it is wide
+/// asks for the upright picture (`?aspect=portrait`), a wide one for 16:9, so
+/// a tank on the iPhone grid is composed for the card, not cropped from TV art.
+private struct ShapedThumb<Content: View>: View {
+    @Environment(AppState.self) private var app
+    let channelId: String
+    @ViewBuilder let content: (AsyncImagePhase) -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            AsyncImage(url: app.gallery.thumbURL(for: channelId, portrait: geo.size.height > geo.size.width)) { phase in
+                content(phase)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
         }
     }
 }

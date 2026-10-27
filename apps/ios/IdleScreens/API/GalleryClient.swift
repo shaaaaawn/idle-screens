@@ -140,12 +140,17 @@ actor GalleryClient {
         return false
     }
 
-    /// `GET /c/:channelId/thumb` — JPEG thumbnail.
-    nonisolated func thumbURL(for channelId: String) -> URL {
-        baseURL
+    /// `GET /c/:channelId/thumb` — the channel's picture: 16:9 by default, or
+    /// the upright 9:16 one (`?aspect=portrait`) for tall cards. The server
+    /// falls back to the 16:9 picture when it has no upright one yet.
+    nonisolated func thumbURL(for channelId: String, portrait: Bool = false) -> URL {
+        let url = baseURL
             .appendingPathComponent("c")
             .appendingPathComponent(channelId)
             .appendingPathComponent("thumb")
+        guard portrait, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        parts.queryItems = [URLQueryItem(name: "aspect", value: "portrait")]
+        return parts.url ?? url
     }
 
     /// `GET /channel/:channelId` — the hosted viewer web page.
