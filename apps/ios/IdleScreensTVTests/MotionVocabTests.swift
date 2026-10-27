@@ -84,6 +84,16 @@ final class MotionVocabTests: XCTestCase {
         XCTAssertEqual(text, "1,234.5 km")
     }
 
+    /// JS `toFixed` reads the stored value: 2.55 sits just below its decimal
+    /// (2.5), 0.125 and 2.5 are exact ties and round up.
+    func testToFixedRoundsTheStoredValueNotTheProduct() {
+        XCTAssertEqual(TextNumber.toFixed(2.55, 1), "2.5")
+        XCTAssertEqual(TextNumber.toFixed(1.005, 2), "1.00")
+        XCTAssertEqual(TextNumber.toFixed(0.125, 2), "0.13")
+        XCTAssertEqual(TextNumber.toFixed(2.5, 0), "3")
+        XCTAssertEqual(TextNumber.toFixed(0.5, 0), "1")
+    }
+
     func testStaggeredLifeMatchesTheWeb() throws {
         for s in try golden().stagger {
             for a in s.at {

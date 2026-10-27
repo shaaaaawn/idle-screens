@@ -138,10 +138,17 @@ enum FieldRaster {
         let image: CGImage
         /// Quantised bands draw without interpolation.
         let crisp: Bool
+        /// The sample time (ms) this raster was drawn for.
+        let time: Double
     }
 
     // NSCache is thread-safe; its values are immutable rasters.
-    nonisolated(unsafe) private static let cache = NSCache<NSString, Box>()
+    // Bounded: a drifting field adds a bucket every 100 ms, for hours.
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Box> = {
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 8
+        return c
+    }()
     private final class Box { let r: Raster; init(_ r: Raster) { self.r = r } }
 
     /// The latest raster per config and frame (any time bucket), and the
@@ -214,7 +221,7 @@ enum FieldRaster {
                                   provider: provider, decode: nil, shouldInterpolate: false,
                                   intent: .defaultIntent)
         else { return nil }
-        return Raster(image: image, crisp: Int(FieldSampler.jsRound(bg.quantize ?? Double(bands.count))) >= 2)
+        return Raster(image: image, crisp: Int(FieldSampler.jsRound(bg.quantize ?? Double(bands.count))) >= 2, time: ft)
     }
 }
 

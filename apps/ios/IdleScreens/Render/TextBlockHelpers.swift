@@ -351,7 +351,10 @@ struct TextNumber: Decodable, Equatable, Sendable {
     static func toFixed(_ x: Double, _ d: Int) -> String {
         let scale = pow(10.0, Double(d))
         let scaled = x * scale
-        if scaled - scaled.rounded(.down) == 0.5 {
+        // A tie only if x * 10^d is exactly n + ½: the product itself rounds,
+        // so 2.55 (stored just below) would otherwise multiply into 25.5.
+        let residual = (-scaled).addingProduct(x, scale)
+        if residual == 0, scaled - scaled.rounded(.down) == 0.5 {
             let n = scaled.rounded(.up) / scale
             return String(format: "%.\(d)f", n)
         }

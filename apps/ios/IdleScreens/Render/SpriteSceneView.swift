@@ -205,15 +205,19 @@ final class CompiledSpriteScene: SKScene {
         guard let node = groundNode else { return }
         let key = groundKey(at: t)
         guard key != groundKey else { return }
-        groundKey = key
         if let bg, bg.isField,
            let ras = FieldRaster.raster(bg, seed: seed, width: size.width, height: size.height,
                                         t: t * 1000, shortSide: FieldSampler.shortSideLow) {
             let tex = SKTexture(cgImage: ras.image)
             tex.filteringMode = ras.crisp ? .nearest : .linear
             node.texture = tex
+            // A drifting field's next bucket samples in the background and the
+            // previous raster stands in meanwhile: keep asking each frame
+            // until the requested bucket arrives, or it never gets shown.
+            if ras.time == FieldSampler.sampleTime(bg, t * 1000) { groundKey = key }
             return
         }
+        groundKey = key
         node.texture = backgroundTexture(t: t)
     }
 
@@ -475,8 +479,10 @@ final class CompiledSpriteScene: SKScene {
         }
         if let caret = reveal.caret {
             let hz = min(3.0, caret.blink ?? 1.2)
-            key += "|c\(hz <= 0 || Int(t * hz * 2) % 2 == 0 ? 1 : 0)"
+            key += "|c\(hz <= 0 || Int(t * hz * 2) % 2 == 0 ? 1 : 0)|\(caret.color ?? "")"
         }
+        // The rise is baked into each glyph's position.
+        if reveal.rise != nil { key += "|r\(reveal.rise ?? 0)" }
         return key
     }
 
@@ -664,7 +670,7 @@ final class CompiledSpriteScene: SKScene {
         let canvasH = ceil(max(1, CGFloat(lines.count) * lh))
         let state = reveal.map { Self.revealKey(text: text, maxWidth: maxWidth, fontSize: fontSize, style: style,
                                                reveal: $0, dim: dim, t: t) } ?? "all"
-        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(align)|\(color)|\(style?.font ?? "")|\(state)"
+        let key = "tb|\(text.hashValue)|\(Int(fsPx))|\(Int(canvasW))|\(Int(lh))|\(align)|\(color)|\(style?.font ?? "")|\(state)"
         return texture(key: key) {
             let font = TextBlockFont.uiFont(css: style?.font, size: fsPx)
             let ui = UIColor(hexString: color)
