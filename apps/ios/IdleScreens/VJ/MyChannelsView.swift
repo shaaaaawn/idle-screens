@@ -165,7 +165,7 @@ struct MyChannelsView: View {
                 if channel?.sleeping == true {
                     Label("asleep", systemImage: "moon.fill")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Color.textPrimary)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(.black.opacity(0.55), in: Capsule())

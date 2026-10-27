@@ -521,7 +521,7 @@ private struct ChannelCard: View {
                         if let viewers = channel.viewers, viewers > 0 {
                             Label("\(viewers)", systemImage: "eye.fill")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.textPrimary)
+                                .foregroundStyle(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(.black.opacity(0.55), in: Capsule())
@@ -679,6 +679,13 @@ struct ChannelPreviewTile: View {
     let channel: PublicChannel
 
     var body: some View {
+        // Artwork, so dark in either appearance: the placeholder sits under
+        // white titles, and a light one would swallow them.
+        art.environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder
+    private var art: some View {
         if let spec = channel.spec {
             ScenePreviewView(spec: spec, fallbackSeed: channel.id)
         } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId) {

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import IdleScreens
 
 final class AgentHandoffTests: XCTestCase {
@@ -67,5 +68,26 @@ final class AgentHandoffTests: XCTestCase {
             XCTAssertEqual(q, prompt, app.name)
             XCTAssertEqual(url.scheme, "https")
         }
+    }
+
+    /// The one message sent to a computer carries everything it needs to
+    /// connect without the phone: the address, Claude Code's command, and
+    /// the one-click links.
+    func testSetupNoteCarriesTheAddressCommandAndInstallLinks() throws {
+        let note = AgentHandoff.setupNote(mcp: mcp)
+        XCTAssertTrue(note.contains(mcp))
+        XCTAssertTrue(note.contains("claude mcp add --transport http --scope user idle-screens \(mcp)"))
+        let cursor = try XCTUnwrap(AgentHandoff.cursorInstallLink(mcp: mcp))
+        let vscode = try XCTUnwrap(AgentHandoff.vscodeInstallLink(mcp: mcp))
+        XCTAssertTrue(note.contains(cursor.absoluteString))
+        XCTAssertTrue(note.contains(vscode.absoluteString))
+    }
+
+    /// Automatic hands the choice back to the system; the others pin it.
+    func testAppearanceMapsToAColorScheme() {
+        XCTAssertNil(Appearance.system.colorScheme)
+        XCTAssertEqual(Appearance.light.colorScheme, .light)
+        XCTAssertEqual(Appearance.dark.colorScheme, .dark)
+        XCTAssertEqual(Appearance(rawValue: "dark"), .dark)
     }
 }

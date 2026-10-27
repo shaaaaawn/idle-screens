@@ -16,6 +16,7 @@ struct ContentView: View {
     }()
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    @AppStorage(Appearance.storageKey) private var appearance: Appearance = .system
 
     var body: some View {
         // Measured once, here: every screen sizes its chrome from it.
@@ -58,7 +59,8 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag("settings")
         }
-        .preferredColorScheme(.dark)
+        // The chrome follows Settings → Appearance; the feed pins itself dark.
+        .preferredColorScheme(appearance.colorScheme)
         .tint(.appPrimary)
         .background(Color.appBackground.ignoresSafeArea())
     }

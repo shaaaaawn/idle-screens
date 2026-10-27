@@ -51,6 +51,8 @@ struct WatchFeedView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        // A screen showing artwork, in either appearance.
+        .environment(\.colorScheme, .dark)
         .task {
             if app.channels.isEmpty { await app.loadGallery() }
         }
