@@ -75,13 +75,14 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     else reasons.push('timeline does not loop (it plays once, then holds)');
   }
   const bg = spec.background;
-  if (bg && bg.type !== 'solid' && bg.drift) {
+  // A field with `drift.amount: 0` is held still (one raster, ever), so its
+  // drift period moves nothing. A gradient's amount is always > 0.
+  if (bg && bg.type !== 'solid' && bg.drift && !(bg.type === 'field' && bg.drift.amount === 0)) {
     // A field is rastered once per bucket and held, so it repeats only on a
     // whole number of buckets as well as of drift periods; a gradient's
     // drift is sampled continuously.
     const { period } = bg.drift;
-    const field = bg.type === 'field' && bg.drift.amount !== 0;
-    const r = field ? toRatio(period) : null;
+    const r = bg.type === 'field' ? toRatio(period) : null;
     add('background drift', r ? (r[0] / gcd(r[0], FIELD_BUCKET_MS)) * FIELD_BUCKET_MS : period);
   }
   if (spec.finish?.animate && ((spec.finish.grain ?? 0) > 0 || (spec.finish.dither ?? 0) > 0)) reasons.push('finish.animate steps the grain without repeating');
@@ -90,7 +91,13 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     const at = `layers[${i}]${layer.key ? ` (${layer.key})` : ''}`;
     const rate = layer.clock?.rate ?? 1;
     const life = layer.life;
-    if (life && (life.exit !== undefined || (life.enter !== undefined && ((life.enter ?? 0) > 0 || (life.fade ?? 1000) > 0)))) reasons.push(`${at} life builds in or out once`);
+    // `stagger` shifts entity i's enter by i × stagger, so even an instant
+    // enter at 0 builds the layer up once when it draws more than one entity.
+    // The drawn count is round(count × countScale), which depends on the
+    // viewport (a `count: 1` layer draws several at 4K, `count: 2` draws one
+    // small), and this period is viewport-independent, so any stagger counts.
+    const staggered = (life?.stagger ?? 0) > 0;
+    if (life && (life.exit !== undefined || (life.enter !== undefined && ((life.enter ?? 0) > 0 || (life.fade ?? 1000) > 0 || staggered)))) reasons.push(`${at} life builds in or out once`);
     if (layer.pulse) add(`${at} pulse`, layer.pulse.period / rate);
     if (layer.grow) add(`${at} grow`, layer.grow.period / rate);
     if (layer.rock) add(`${at} rock`, layer.rock.period / rate);
