@@ -150,7 +150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       // followed the push (another channel, a pinned scene, or back to live)
       // — reloading it here raced that, and restarted the saver on every
       // sync step. Not showing: start it where the phone asked.
-      guard !self.saver.isShowing else { return }
+      // Either way the stored config takes the push, so the next session
+      // starts where the phone left it rather than on the old channel.
+      guard !self.saver.isShowing else {
+        self.saver.channelURL = self.savedChannelURL()
+        return
+      }
       self.applyConfigToSaver()
       self.startSaver()
     }
@@ -243,17 +248,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     saver.favorites = Set(defaults.stringArray(forKey: Self.favoritesKey) ?? [])
     saver.hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
     saver.showActivity = defaults.bool(forKey: Self.activityHUDKey)
-    let channelId = defaults.string(forKey: Self.channelKey)
-    PairLink.shared.start(channelId: channelId)
-    saver.channelURL = channelId.flatMap { id -> URL? in
-      guard !id.isEmpty else { return nil }
-      // A scene the phone pinned, only while it is still that channel's.
-      let scene = pushedScene.flatMap { $0.channelId == id ? $0.sceneId : nil }
-      return Self.channelURL(for: id, scene: scene)
-    }
+    PairLink.shared.start(channelId: defaults.string(forKey: Self.channelKey))
+    saver.channelURL = savedChannelURL()
     saver.perDisplayChannelURL = perDisplayChannel.compactMapValues { id in
       id.isEmpty ? nil : Self.channelURL(for: id)
     }
+  }
+
+  /// The channel the saver should open: the stored one, with the scene a
+  /// paired phone pinned while it is still that channel's.
+  private func savedChannelURL() -> URL? {
+    Self.savedChannelURL(channelId: defaults.string(forKey: Self.channelKey), pushedScene: pushedScene)
+  }
+
+  static func savedChannelURL(channelId: String?, pushedScene: (channelId: String, sceneId: Int)?) -> URL? {
+    guard let id = channelId, !id.isEmpty else { return nil }
+    let scene = pushedScene.flatMap { $0.channelId == id ? $0.sceneId : nil }
+    return channelURL(for: id, scene: scene)
   }
 
   /// The viewer URL for a channel. `device` registers this Mac's viewer socket
