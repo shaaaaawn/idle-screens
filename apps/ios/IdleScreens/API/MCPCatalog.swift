@@ -93,6 +93,7 @@ extension MCPClient {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(RPC(id: Int.random(in: 1...1_000_000), method: method, params: params))
         let (data, http) = try await transport.data(for: request)
         guard (200...299).contains(http.statusCode) else {

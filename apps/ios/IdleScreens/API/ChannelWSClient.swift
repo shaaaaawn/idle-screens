@@ -72,13 +72,54 @@ struct ChannelSnapshot: Equatable, Sendable {
 
 enum ChannelWSEvent: Equatable, Sendable {
     case snapshot(ChannelSnapshot)
-    case scene(spec: JSONValue?, seed: Int?)
+    /// A new scene went live (publish, recall, a scheduled entry). `transition`
+    /// is how the agent asked screens to replace the old one; nil = the default.
+    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil)
     case delta(JSONValue?)
     case sleep
     case wake
     case overlay(text: String?, ttl: Int?)
     /// A paired phone pushed a channel change to this device.
-    case switchChannel(channelId: String?)
+    /// A paired phone retargeted this screen: a channel, and optionally one
+    /// stored scene of it to pin (`sceneId`; nil = live).
+    case switchChannel(channelId: String?, sceneId: Int? = nil)
+}
+
+// MARK: - Scene transitions
+
+/// How a screen replaces the scene it shows with a new one (idle-server
+/// transition.ts): `fade` (default) dissolves over `dur` ms, `cut` swaps at
+/// once, `morph` dissolves here until native renderers can glide a spec.
+struct SceneTransition: Equatable, Sendable {
+    enum Kind: String, Sendable { case fade, cut, morph }
+    let kind: Kind
+    /// Milliseconds, when the agent set one.
+    let dur: Double?
+
+    /// The default when a scene message carries none: the web viewer's 0.8 s crossfade.
+    static let defaultSeconds: TimeInterval = 0.8
+
+    init(kind: Kind, dur: Double? = nil) { self.kind = kind; self.dur = dur }
+
+    /// Lenient: a malformed or absent value is nil (the server already refused bad ones).
+    init?(_ json: JSONValue?) {
+        guard case .object(let o)? = json, let raw = o["type"]?.stringValue, let kind = Kind(rawValue: raw) else { return nil }
+        var dur: Double?
+        switch o["dur"] {
+        case .int(let i)?: dur = Double(i)
+        case .double(let d)?: dur = d
+        default: dur = nil
+        }
+        self.kind = kind
+        self.dur = dur.map { min(max($0, 0), 10_000) }
+    }
+
+    /// Seconds to dissolve over, given the scene message's transition (nil = default).
+    static func seconds(for transition: SceneTransition?) -> TimeInterval {
+        guard let transition else { return defaultSeconds }
+        if transition.kind == .cut { return 0 }
+        return (transition.dur.map { $0 / 1000 }) ?? defaultSeconds
+    }
 }
 
 // MARK: - JSONValue lenient accessors
@@ -238,7 +279,8 @@ actor ChannelWSClient {
         case "scene":
             return .scene(
                 spec: message["spec"]?.normalizedSpec(),
-                seed: message["seed"]?.intValue
+                seed: message["seed"]?.intValue,
+                transition: SceneTransition(message["transition"])
             )
         case "delta":
             return .delta(message["delta"] ?? message["patch"])
@@ -252,7 +294,9 @@ actor ChannelWSClient {
                 ttl: message["ttl"]?.intValue
             )
         case "switch":
-            return .switchChannel(channelId: message["channelId"]?.stringValue)
+            let scene = message["sceneId"]?.intValue
+            return .switchChannel(channelId: message["channelId"]?.stringValue,
+                                  sceneId: scene.flatMap { $0 > 0 ? $0 : nil })
         default:
             return nil
         }

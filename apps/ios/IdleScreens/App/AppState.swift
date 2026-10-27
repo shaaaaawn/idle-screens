@@ -42,6 +42,10 @@ final class AppState {
     var isPairing = false
     /// Failure pushing a channel to an already-paired screen.
     var pairPushError: String?
+    /// Screens following what this device watches (Sync). Empty = not syncing.
+    var syncTargets: [String] = []
+    @ObservationIgnored var syncTask: Task<Void, Never>?
+    @ObservationIgnored var lastSynced: SyncTarget?
     /// Failure claiming a pair code. Separate from `pairPushError` so a failed
     /// push doesn't surface as a stale error inside "Add a screen".
     var pairClaimError: String?
@@ -49,7 +53,10 @@ final class AppState {
     init() {
         let baseURL = URL(string: Config.baseURL)!
         let transport = URLSessionTransport()
-        self.mcp = MCPClient(baseURL: baseURL, transport: transport)
+        // Every write is attributed (intent + harness) and any server
+        // confirmation is put to the person — see MCPClient.callTool.
+        self.mcp = MCPClient(baseURL: baseURL, transport: transport,
+                             identity: .current(), confirmer: MCPConfirmPrompt.confirmer)
         self.gallery = GalleryClient(baseURL: baseURL, transport: transport)
         self.pairClient = PairClient(baseURL: baseURL, transport: transport)
         self.store = CredentialStore()

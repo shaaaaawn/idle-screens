@@ -86,15 +86,22 @@ actor PairClient {
         return status
     }
 
-    /// `POST /api/pair/push` — phone side: tell the TV to switch channels.
+    /// `POST /api/pair/push` — phone side: tell the TV what to show. A
+    /// `sceneId` pins one stored scene of the channel; nil means live (the
+    /// field is left out, which every server and screen reads as live).
     @discardableResult
-    func push(pairToken: String, channelId: String) async throws -> PairPushResult {
-        try await post(path: "api/pair/push", body: ["channelId": channelId], token: pairToken)
+    func push(pairToken: String, channelId: String, sceneId: Int? = nil) async throws -> PairPushResult {
+        try await post(path: "api/pair/push", body: PushBody(channelId: channelId, sceneId: sceneId), token: pairToken)
+    }
+
+    private struct PushBody: Encodable {
+        let channelId: String
+        let sceneId: Int?
     }
 
     // MARK: Internals
 
-    private func post<T: Decodable>(path: String, body: [String: String], token: String?) async throws -> T {
+    private func post<T: Decodable, B: Encodable>(path: String, body: B, token: String?) async throws -> T {
         let url = baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

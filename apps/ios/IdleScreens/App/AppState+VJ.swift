@@ -113,7 +113,8 @@ extension AppState {
         defer { isWorking = false }
         try await mcp.publishSpec(
             channelId: channelId, token: token, spec: spec,
-            seed: Self.randomSeed(), intent: "mixed in the scene from \(sourceChannelId)")
+            seed: Self.randomSeed(),
+            intent: "user mixed in the scene from \(sourceChannelId) on the \(mcp.identity.surface) app")
     }
 
     /// The gallery payload carries each channel's spec verbatim — publish
@@ -169,6 +170,21 @@ extension AppState {
         store.removeToken(for: credential.channelId)
     }
 
+    /// Delete a channel on the server — owner key only — then forget it here:
+    /// the key (and so every device it synced to), the wall's copy, and any
+    /// page still warm. "Remove from this device" leaves the channel running;
+    /// this is the one that ends it.
+    func deleteChannel(_ credential: ChannelCredential) async throws {
+        guard let token = store.token(for: credential.channelId) else {
+            throw MissingKeyError(label: credential.label)
+        }
+        try await mcp.deleteChannel(channelId: credential.channelId, token: token)
+        removeChannel(credential)
+        channels.removeAll { $0.id == credential.channelId }
+        if follows.isFollowing(credential.channelId) { _ = follows.toggle(credential.channelId) }
+        WebScenePool.shared.drain(channelId: credential.channelId)
+    }
+
     // MARK: Deck operations
 
     func loadSavers() async {
@@ -187,8 +203,7 @@ extension AppState {
             channelId: channelId,
             token: token,
             saverId: saver.id,
-            seed: Self.randomSeed(),
-            intent: "published from iOS VJ remote"
+            seed: Self.randomSeed()
         )
     }
 
@@ -204,16 +219,16 @@ extension AppState {
     func setSleeping(_ sleeping: Bool, for channelId: String) async throws {
         let token = try requireToken(for: channelId)
         if sleeping {
-            try await mcp.sleep(channelId: channelId, token: token)
+            try await mcp.sleepChannel(channelId: channelId, token: token)
         } else {
-            try await mcp.wake(channelId: channelId, token: token)
+            try await mcp.wakeChannel(channelId: channelId, token: token)
         }
     }
 
     /// Flash ephemeral text over the channel — tag "vj", 4s on screen.
     func sendOverlay(_ text: String, to channelId: String) async throws {
         let token = try requireToken(for: channelId)
-        try await mcp.overlay(channelId: channelId, token: token, text: text, tag: "vj", ttl: 4000)
+        try await mcp.showOverlay(channelId: channelId, token: token, text: text, tag: "vj", ttl: 4000)
     }
 
     /// Public read-only state for the deck's status header.
@@ -233,4 +248,10 @@ extension AppState {
     private static func randomSeed() -> Int {
         Int.random(in: 0...Int(Int32.max))
     }
+}
+
+/// Deleting needs the channel's key, and this device doesn't hold it.
+struct MissingKeyError: LocalizedError {
+    let label: String
+    var errorDescription: String? { "The key for \(label) isn't on this device." }
 }

@@ -43,6 +43,7 @@ struct FeedPage: View {
     @Binding var chromeHidden: Bool
     @FocusState private var keyFocus: Bool
     @State private var showComposer = false
+    @State private var showCast = false
     /// The caption opened up into the scene's full credits.
     @State private var captionExpanded = false
     @State private var history: [ChannelEvent] = []
@@ -59,6 +60,11 @@ struct FeedPage: View {
     /// gating on that showed the site's bare black page for ~1 s.
     @State private var liveWebPainted = false
     @State private var liveStillGone = false
+    /// The live web view is on screen, and how many times it has come back.
+    /// Swiping into a past scene native draws keeps it mounted one page away,
+    /// so a return builds nothing: the count is what has it re-reveal.
+    @State private var liveOnScreen = false
+    @State private var liveReturns = 0
     /// Last session's picture of this channel, chosen once on appearing and
     /// held until the live scene paints over it. Re-checking it against each
     /// refresh pulled it mid-launch whenever the channel had been steered
@@ -220,6 +226,20 @@ struct FeedPage: View {
                 chrome.transition(.opacity)
             }
             toastLayer
+        }
+        .sheet(isPresented: $showCast) {
+            CastSheet(channelId: channelId, channelLabel: channel.displayLabel,
+                      sceneId: currentStop?.sceneId,
+                      sceneTitle: currentStop == nil ? nil : sceneTitle) { flash($0) }
+                // Full height: at half, Keep in sync sat under the Send button.
+                .presentationDetents([.large])
+        }
+        // Sync: when this is the page on screen and it settles somewhere new
+        // (another channel, another moment), the following screens go too.
+        .onChange(of: syncKey, initial: true) { _, _ in
+            guard isActive else { return }
+            let stop = stops.first { Self.key($0) == settledMoment }
+            app.syncFollow(channelId: channelId, sceneId: stop?.sceneId)
         }
         .sheet(isPresented: $showComposer) {
             ComposerSheet(channelId: channelId, session: session)
@@ -398,24 +418,31 @@ struct FeedPage: View {
                     },
                     onAssets: { liveTank.report($0) },
                     onFish: { liveTank.reportFish($0, want: $1) },
-                    onReused: { liveWebPainted = true },
+                    // Never off screen: a reveal that lands after a swipe away
+                    // would come back already revealed (see onDisappear).
+                    onReused: { if liveOnScreen { liveWebPainted = true } },
+                    returnCount: liveReturns,
                     poolable: !isTank,
                     onFailure: { session.hostFailed() }
                 )
                 .ignoresSafeArea()
                 // Hidden until the first frame proves the page is live, so a
                 // slow load shows the channel's colour, not a blank sheet.
-                .onAppear { liveWebPainted = false; liveStillGone = false }
+                .onAppear {
+                    liveWebPainted = false; liveStillGone = false
+                    liveOnScreen = true; liveReturns &+= 1
+                }
                 // Reset on the way OUT too. Left set, the next return mounted
                 // the web view already "revealed" with the still removed, and a
                 // re-attached web view draws black for a frame before onAppear
                 // runs — the dark frame on every swipe back to live.
                 .onDisappear {
                     var quiet = Transaction(); quiet.disablesAnimations = true
-                    withTransaction(quiet) { liveWebPainted = false; liveStillGone = false; liveTankRevealed = false; liveTankStandInGone = false }
+                    withTransaction(quiet) { liveOnScreen = false; liveWebPainted = false; liveStillGone = false; liveTankRevealed = false; liveTankStandInGone = false }
                 }
                 .onChange(of: liveWebPainted) { _, painted in
                     guard painted else { liveStillGone = false; return }
+                    SwipeTiming.mark("live revealing")
                     Task { @MainActor in
                         try? await Task.sleep(for: .seconds(0.5))
                         if liveWebPainted { liveStillGone = true }
@@ -839,6 +866,10 @@ struct FeedPage: View {
         DispatchQueue.main.async { captionEntered = true }
     }
 
+    /// Changes when sync should look again: this page activating, or settling
+    /// on another moment.
+    private var syncKey: String { "\(isActive)|\(settledMoment ?? "live")" }
+
     private var sceneTitle: String {
         if let stop = currentStop {
             return app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.label
@@ -930,12 +961,11 @@ struct FeedPage: View {
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
             if !app.pairedScreens.isEmpty {
-                railButton("play.tv", label: "Play on your screens") {
-                    Task {
-                        let n = await app.pushToAllScreens(channelId: channelId)
-                        flash(n > 0 ? "sent to \(n) screen\(n == 1 ? "" : "s")"
-                                    : app.pairPushError ?? "couldn't reach your screens")
-                    }
+                // Which screens, live or this scene, and Sync — not a blind
+                // push of the live channel to everything.
+                railButton(app.isSyncing ? "play.tv.fill" : "play.tv",
+                           label: app.isSyncing ? "Synced to your screens" : "Send to your screens") {
+                    showCast = true
                 }
             }
             ShareLink(item: app.gallery.viewerURL(for: channelId)) {
@@ -994,10 +1024,12 @@ struct FeedPage: View {
         Task {
             defer { waking = false }
             do {
-                try await app.mcp.wake(channelId: channelId, token: token)
+                try await app.mcp.wakeChannel(channelId: channelId, token: token)
                 session.optimisticallyAwake()
+            } catch where error.isMCPCancellation {
+                // Said no to the server's question: nothing happened.
             } catch {
-                flash("couldn't wake it — try again")
+                flash("couldn't wake it — \(error.mcpDisplayText)")
             }
         }
     }
@@ -1008,13 +1040,14 @@ struct FeedPage: View {
         Task {
             defer { recalling = false }
             do {
-                try await app.mcp.recall(channelId: channelId, token: token, sceneId: stop.sceneId)
+                try await app.mcp.recallScene(channelId: channelId, token: token, sceneId: stop.sceneId)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 flash("it's on air again")
                 withAnimation(.easeInOut(duration: 0.35)) { moment = Self.liveKey }
+            } catch where error.isMCPCancellation {
             } catch {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                flash("couldn't bring that one back")
+                flash("couldn't bring that one back — \(error.mcpDisplayText)")
             }
         }
     }

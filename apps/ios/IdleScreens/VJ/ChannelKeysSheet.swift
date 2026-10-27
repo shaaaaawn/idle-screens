@@ -88,7 +88,15 @@ struct ChannelKeysSheet: View {
                                 }
                             }
                             .swipeActions {
-                                Button("Revoke", role: .destructive) { revoke(grant) }
+                                // Not `role: .destructive`: that makes the List
+                                // drop the row the moment it's tapped, before
+                                // the server's confirm is answered — and a
+                                // later removeAll then deletes it a second
+                                // time (UICollectionView "invalid number of
+                                // items" crash). The confirm alert is the
+                                // destructive gate; the row goes on success.
+                                Button("Revoke") { revoke(grant) }
+                                    .tint(Color.appDanger)
                             }
                         }
                     }
@@ -152,7 +160,7 @@ struct ChannelKeysSheet: View {
                 await load()
             } catch {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
-                problem = error.localizedDescription
+                problem = error.mcpDisplayText
             }
         }
     }
@@ -161,10 +169,14 @@ struct ChannelKeysSheet: View {
         guard let token = app.token(for: channelId) else { return }
         Task {
             do {
-                try await app.mcp.revokeToken(channelId: channelId, token: token, id: grant.id)
+                // The server asks first; MCPClient shows its sentence and
+                // revokes only on yes.
+                try await app.mcp.revokeToken(channelId: channelId, token: token, id: grant.id,
+                                              label: grant.label)
                 grants.removeAll { $0.id == grant.id }
+            } catch where error.isMCPCancellation {
             } catch {
-                problem = "Couldn't revoke that key: \(error.localizedDescription)"
+                problem = "Couldn't revoke that key: \(error.mcpDisplayText)"
             }
         }
     }

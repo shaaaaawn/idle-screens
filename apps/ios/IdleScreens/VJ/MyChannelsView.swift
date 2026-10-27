@@ -8,6 +8,7 @@ struct MyChannelsView: View {
     @State private var createdToken: String?
     @State private var path: [ChannelCredential] = []
     @State private var keysFor: ChannelCredential?
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,8 +69,20 @@ struct MyChannelsView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .contextMenu {
-                                        Button("Remove", role: .destructive) {
+                                        Button("Remove from this device", role: .destructive) {
                                             app.removeChannel(credential)
+                                        }
+                                        if app.role(for: credential.channelId) == .owner {
+                                            // The server asks first (see SettingsView).
+                                            Button("Delete channel…", role: .destructive) {
+                                                Task {
+                                                    do {
+                                                        try await app.deleteChannel(credential)
+                                                        path.removeAll { $0.channelId == credential.channelId }
+                                                    } catch where error.isMCPCancellation {
+                                                    } catch { deleteError = error.mcpDisplayText }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -107,6 +120,12 @@ struct MyChannelsView: View {
             }
             .sheet(isPresented: $showingAdd) {
                 AddExistingChannelSheet()
+            }
+            .alert("Couldn't delete the channel", isPresented: Binding(
+                get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) { deleteError = nil }
+            } message: {
+                Text(deleteError ?? "")
             }
             .sheet(item: $keysFor) { credential in
                 ChannelKeysSheet(credential: credential)
@@ -344,7 +363,7 @@ private struct NewChannelSheet: View {
                     onCreated("")
                 }
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.mcpDisplayText
             }
         }
     }

@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var keysFor: ChannelCredential?
     @State private var removing: ChannelCredential?
     @State private var confirmingRemoval = false
+    /// Owner keys can end the channel itself, not just forget it here.
+    @State private var deleteError: String?
     /// Collapsed by default: a list of secrets is not the first thing this
     /// page should show, and it grows with every channel.
     @State private var keysExpanded = false
@@ -53,6 +55,12 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { removing = nil }
         } message: {
             Text("The channel keeps running. Without a backup of this key, this device — and every device synced with it — can no longer steer it.")
+        }
+        .alert("Couldn't delete the channel", isPresented: Binding(
+            get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
         }
     }
 
@@ -196,7 +204,21 @@ struct SettingsView: View {
                 }
             }
             Button(role: .destructive) { removing = credential; confirmingRemoval = true } label: {
-                Label("Remove from this device", systemImage: "trash")
+                Label("Remove from this device", systemImage: "key.slash")
+            }
+            if token != nil, role == .owner {
+                // The server asks before it deletes — every time, naming what
+                // goes and whether screens are watching — so there is no
+                // second dialog here; that read as asking twice.
+                Button(role: .destructive) {
+                    Task {
+                        do { try await app.deleteChannel(credential) }
+                        catch where error.isMCPCancellation {}
+                        catch { deleteError = error.mcpDisplayText }
+                    }
+                } label: {
+                    Label("Delete channel…", systemImage: "trash")
+                }
             }
         } label: {
             HStack(spacing: 12) {
@@ -248,6 +270,7 @@ struct SettingsView: View {
 
     // MARK: About
 
+    @ViewBuilder
     private var aboutSection: some View {
         section("about") {
             row(icon: "info.circle", title: "Version", detail: Self.version)
@@ -258,6 +281,30 @@ struct SettingsView: View {
                 }
             }
         }
+        // Help, reporting and the policies: App Store Connect requires the
+        // privacy and support pages, and App Review expects a way to reach us
+        // and report content from inside the app.
+        section("help & legal") {
+            ForEach(Self.legalLinks, id: \.title) { link in
+                if let url = link.url {
+                    Link(destination: url) { row(icon: link.icon, title: link.title, detail: "") }
+                }
+            }
+        }
+    }
+
+    private struct LegalLink { let icon: String; let title: String; let url: URL? }
+
+    private static var legalLinks: [LegalLink] {
+        let base = Config.baseURL.hasSuffix("/") ? String(Config.baseURL.dropLast()) : Config.baseURL
+        let subject = "idle screens \(version)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return [
+            LegalLink(icon: "questionmark.circle", title: "Support", url: URL(string: "\(base)/support")),
+            LegalLink(icon: "envelope", title: "Email support or report content",
+                      url: URL(string: "mailto:support@idlescreens.com?subject=\(subject)")),
+            LegalLink(icon: "hand.raised", title: "Privacy policy", url: URL(string: "\(base)/privacy")),
+            LegalLink(icon: "doc.text", title: "Terms of use", url: URL(string: "\(base)/terms")),
+        ]
     }
 
     /// A titled card: header, rows separated by hairlines, optional footnote.

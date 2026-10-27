@@ -47,9 +47,19 @@
         "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Unit-box units (0.01 = 1% of the drawing's half-size)." },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "join": { "enum": ["round", "miter", "bevel"] },
-        "cap": { "enum": ["round", "butt", "square"] }
+        "cap": { "enum": ["round", "butt", "square"] },
+        "draw": { "$ref": "#/definitions/strokeDraw" }
       },
       "description": "An outline along every subpath as drawn."
+    },
+    "strokeDraw": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "number", "minimum": 0, "maximum": 1, "description": "Where the painted stretch begins, as a fraction of the line's length (default 0)." },
+        "end": { "type": "number", "minimum": 0, "maximum": 1, "description": "Where it ends (default 1). Glide end 0 \u2192 1 to draw the line on; glide start after it to erase from the tail." }
+      },
+      "description": "Draw-on: paint only the stretch of the line from start to end (paint; glides). start >= end paints nothing. Native: ignored (whole line)."
     },
     "pathPart": {
       "type": "object",
@@ -150,6 +160,12 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 1
+        },
+        "rise": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "glyphFade only: each glyph rises into its line from this many em below as it fades in. Native: ignored."
         }
       },
       "description": "Animated reveal controls for a text block."
@@ -705,7 +721,13 @@
               "additionalProperties": false,
               "properties": {
                 "type": { "const": "list" },
-                "gap": { "type": "number", "exclusiveMinimum": 0, "description": "Row pitch in viewport units of min(w,h) (px in px specs). Default 0.06 / 40 px." }
+                "gap": {
+                  "oneOf": [
+                    { "type": "number", "exclusiveMinimum": 0 },
+                    { "type": "object", "additionalProperties": false, "properties": { "x": { "type": "number", "exclusiveMinimum": 0 }, "y": { "type": "number", "exclusiveMinimum": 0 } } }
+                  ],
+                  "description": "Row pitch in viewport units of min(w,h) (px in px specs), a number or {x?, y?} where only y (the row pitch) applies to a one-column list. Default 0.06 / 40 px."
+                }
               },
               "description": "Data layout: entities stacked in one column in reading order; strings[i], glyphs[i] and colors[i] are taken in order. position (any count) anchors the block's top-left; otherwise centred in region."
             },
@@ -780,6 +802,16 @@
             }
           ]
         },
+        "rock": {
+          "type": "object",
+          "required": ["amp", "period"],
+          "additionalProperties": false,
+          "properties": {
+            "amp": { "type": "number", "exclusiveMinimum": 0, "maximum": 45, "description": "Degrees either side of the resting angle." },
+            "period": { "type": "number", "minimum": 1000, "description": "One swing there and back, ms (floor 1000; with a clock, period / rate >= 1000)." }
+          },
+          "description": "A swing back and forth about each entity's resting angle (rotate + spin), on a seeded per-entity phase (a clock's shared phase when clocked). Structural. Native: ignored (no swing)."
+        },
         "clock": {
           "type": "object",
           "additionalProperties": false,
@@ -817,6 +849,12 @@
               "type": "number",
               "minimum": 0,
               "description": "Fade ramp duration in ms. Default 1000."
+            },
+            "stagger": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60000,
+              "description": "ms between successive entities' envelopes: entity i enters (and exits) i x stagger later, in entity order (reading order for list/table/grid). Paint; glides. Native: ignored (all together)."
             }
           },
           "description": "Layer lifecycle for act structure (stars first, dancers at t=3000). Pure function of t \u2014 deterministic and seekable."
@@ -1146,6 +1184,7 @@
             "curve": { "enum": ["smooth", "linear"], "description": "Catmull-Rom spline through the points (default) or a polyline." },
             "taper": { "type": "boolean", "description": "Thin the mark to almost nothing at both ends \u2014 a brush stroke rather than a line." },
             "orient": { "type": "boolean", "description": "Turn the path's +x along the entity's heading (like streak)." },
+            "draw": { "$ref": "#/definitions/strokeDraw" },
             "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
             "colorWeights": { "$ref": "#/definitions/colorWeights" }
           },
@@ -1230,6 +1269,19 @@
             },
             "role": {
               "$ref": "#/definitions/textRole"
+            },
+            "number": {
+              "type": "object",
+              "required": ["value"],
+              "additionalProperties": false,
+              "properties": {
+                "value": { "type": "number", "description": "The number shown. Paint: steer or key sprite.number.value and the digits roll over the glide." },
+                "decimals": { "type": "integer", "minimum": 0, "maximum": 6, "description": "Places after the point (default 0)." },
+                "prefix": { "type": "string", "maxLength": 64 },
+                "suffix": { "type": "string", "maxLength": 64 },
+                "grouping": { "type": "boolean", "description": "Thousands separated by commas (default true). Locale-free." }
+              },
+              "description": "A counter: the block paints prefix + value + suffix instead of text. text is what clients that do not read number show - author it as the rest value. Native: ignored (text)."
             }
           },
           "description": "Multi-line text block with deterministic line-breaking. All dimensions are viewport fractions. Use with count: 1, static motion, and position; add anchor: 'center' to centre the block at position."
@@ -1307,7 +1359,7 @@
             },
             "bob": {
               "type": "number",
-              "description": "Vertical wobble amplitude in px."
+              "description": "Vertical wobble amplitude, a fraction of min(w,h) like speed (px only under units: px). Typical 0.002-0.02; above 0.25 warns motion-amplitude."
             }
           }
         },
@@ -1337,7 +1389,7 @@
             },
             "sway": {
               "type": "number",
-              "description": "Horizontal sway amplitude in px (bubbles)."
+              "description": "Horizontal sway amplitude (bubbles), a fraction of min(w,h) like speed (px only under units: px). Typical 0.002-0.02; above 0.25 warns motion-amplitude."
             }
           }
         },
@@ -1703,7 +1755,7 @@
                   "t": { "type": "number", "minimum": 0, "description": "Scene time in ms (a sequence segment's own clock)." },
                   "path": { "type": "string", "minLength": 1, "description": "A setParam dot-path that already exists on the spec (layers.0.sprite.color, key.opacity, background.stops.1.color, …)." },
                   "value": { "description": "The target value; the spec must still validate with it applied." },
-                  "ease": { "enum": ["step", "linear", "smooth"], "description": "Default smooth." },
+                  "ease": { "enum": ["step", "linear", "smooth", "in", "out", "spring"], "description": "Default smooth. in = accelerate from rest; out = arrive and decelerate; spring = critically damped, fast start, no overshoot. Native: unknown eases read as smooth." },
                   "dur": { "type": "number", "minimum": 0, "maximum": 30000, "description": "Glide length in ms from t (default 1000; 0 = cut)." }
                 }
               }
@@ -1863,6 +1915,18 @@
                   "maximum": 5000,
                   "description": "Cross-fade duration in ms: the outgoing segment keeps animating on its own canvas and is composited over the incoming one at 1 − easeSmooth(localT / dur). No structural requirement. Hosts on the 'basic' or 'minimal' capability tier render it as cut."
                 }
+              },
+              "required": ["type", "dur"],
+              "additionalProperties": false
+            },
+            {
+              "properties": {
+                "type": { "const": "wipe" },
+                "dur": { "type": "number", "minimum": 200, "maximum": 5000, "description": "Wipe duration in ms. Same machinery and tier gate as fade (basic/minimal hosts cut). Native: cross-fades over dur." },
+                "shape": { "enum": ["circle", "line"], "description": "circle (default): an iris opening from origin until it clears the farthest corner. line: a straight edge sweeping along angle." },
+                "origin": { "type": "object", "required": ["x", "y"], "additionalProperties": false, "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } }, "description": "Where an iris opens (circle only). Default the centre." },
+                "angle": { "type": "number", "minimum": -360, "maximum": 360, "description": "Sweep direction for a line wipe, degrees (0 = left to right, 90 = top to bottom)." },
+                "feather": { "type": "number", "minimum": 0, "maximum": 1, "description": "Edge softness as a fraction of the distance the edge travels. Default 0.08." }
               },
               "required": ["type", "dur"],
               "additionalProperties": false

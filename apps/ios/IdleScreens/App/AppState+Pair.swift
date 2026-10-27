@@ -267,14 +267,17 @@ extension AppState {
 
     // MARK: Steering
 
-    /// Push a channel to one screen.
+    /// Push a channel — or one stored scene of it (`sceneId`) — to one screen.
+    /// `quiet`: a sync push, sent as the person swipes. A miss there is a
+    /// screen mid-reconnect more often than a screen that's gone, so it
+    /// neither marks the screen unanswering nor raises the error line.
     @discardableResult
-    func push(channelId: String, to screen: PairedScreen) async -> Bool {
+    func push(channelId: String, sceneId: Int? = nil, to screen: PairedScreen, quiet: Bool = false) async -> Bool {
         guard let token = token(forScreen: screen.deviceId) else { return false }
-        isPairing = true
-        defer { isPairing = false }
+        if !quiet { isPairing = true }
+        defer { if !quiet { isPairing = false } }
         do {
-            try await pairClient.push(pairToken: token, channelId: channelId)
+            try await pairClient.push(pairToken: token, channelId: channelId, sceneId: sceneId)
             if let index = pairedScreens.firstIndex(where: { $0.deviceId == screen.deviceId }) {
                 pairedScreens[index].channelId = channelId
                 // A delivered push is the one real proof the screen is there.
@@ -286,6 +289,7 @@ extension AppState {
         } catch {
             // 409 = the pairing is fine but no socket took the push: the screen
             // is off or asleep. Remember that, so the card stops implying it's up.
+            if quiet { return false }
             if case PairError.httpError(let status, _) = error, status == 409,
                let index = pairedScreens.firstIndex(where: { $0.deviceId == screen.deviceId }) {
                 pairedScreens[index].lastUnansweredAt = Date()
@@ -302,11 +306,60 @@ extension AppState {
     /// Returns how many screens accepted it.
     @discardableResult
     func pushToAllScreens(channelId: String) async -> Int {
+        await push(channelId: channelId, sceneId: nil, to: pairedScreens.map(\.deviceId))
+    }
+
+    /// Push to the chosen screens at once. Returns how many accepted.
+    @discardableResult
+    func push(channelId: String, sceneId: Int?, to deviceIds: [String], quiet: Bool = false) async -> Int {
+        let screens = pairedScreens.filter { deviceIds.contains($0.deviceId) }
         var delivered = 0
-        for screen in pairedScreens where await push(channelId: channelId, to: screen) {
-            delivered += 1
+        await withTaskGroup(of: Bool.self) { group in
+            for screen in screens {
+                group.addTask { await self.push(channelId: channelId, sceneId: sceneId, to: screen, quiet: quiet) }
+            }
+            for await ok in group where ok { delivered += 1 }
         }
         return delivered
+    }
+
+    // MARK: Sync — screens that follow what this device is watching
+
+    /// Screens that can follow: Linux restarts its viewer process on every
+    /// push, so a swipe-by-swipe follow would respawn it each time. It still
+    /// takes one-off sends.
+    func canSync(_ screen: PairedScreen) -> Bool { screen.kind != .linux }
+
+    /// Start (or retarget) sync: the chosen screens follow the feed from now
+    /// on, starting with what is on screen.
+    func startSync(_ deviceIds: [String], channelId: String, sceneId: Int?) {
+        syncTargets = deviceIds.filter { id in pairedScreens.contains { $0.deviceId == id && canSync($0) } }
+        lastSynced = nil
+        syncFollow(channelId: channelId, sceneId: sceneId, immediately: true)
+    }
+
+    func stopSync() {
+        syncTargets = []
+        syncTask?.cancel()
+        syncTask = nil
+        lastSynced = nil
+    }
+
+    var isSyncing: Bool { !syncTargets.isEmpty }
+
+    /// The feed settled on something new. Coalesced: a burst of swipes sends
+    /// only where you stop, and the same thing twice is sent once.
+    func syncFollow(channelId: String, sceneId: Int?, immediately: Bool = false) {
+        guard isSyncing else { return }
+        let target = SyncTarget(channelId: channelId, sceneId: sceneId)
+        guard target != lastSynced else { return }
+        syncTask?.cancel()
+        syncTask = Task { @MainActor [weak self] in
+            if !immediately { try? await Task.sleep(for: .milliseconds(450)) }
+            guard let self, !Task.isCancelled, self.isSyncing else { return }
+            self.lastSynced = target
+            _ = await self.push(channelId: channelId, sceneId: sceneId, to: self.syncTargets, quiet: true)
+        }
     }
 
     /// Refresh every screen's channel + last-seen stamp, concurrently. The
@@ -351,3 +404,10 @@ extension AppState {
     }
 }
 #endif
+
+/// What a syncing screen was last sent: a channel, and a pinned scene or live.
+struct SyncTarget: Equatable {
+    let channelId: String
+    let sceneId: Int?
+}
+

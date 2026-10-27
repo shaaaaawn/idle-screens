@@ -33,6 +33,15 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(TVAppState.timelineStep(from: .past(2), older: true, stops: 3), T.past(2))
     }
 
+    func testFromASceneThePhoneSentLeftStartsTheHistoryAndRightIsLive() {
+        typealias T = TVAppState.Timeline
+        XCTAssertEqual(TVAppState.timelineStep(from: .pinned(sceneId: 42), older: true, stops: 3), T.past(0))
+        XCTAssertEqual(TVAppState.timelineStep(from: .pinned(sceneId: 42), older: false, stops: 3), T.live)
+        XCTAssertEqual(TVAppState.timelineStep(from: .pinned(sceneId: 42), older: true, stops: 0), T.live)
+        // A pinned scene is not live: auto-rotate leaves what the phone sent.
+        XCTAssertFalse(TVAppState.shouldRotate(minutes: 5, selected: "c", timeline: .pinned(sceneId: 42)))
+    }
+
     func testRightComesBackAndStopsAtLive() {
         typealias T = TVAppState.Timeline
         XCTAssertEqual(TVAppState.timelineStep(from: .past(2), older: false, stops: 3), T.past(1))

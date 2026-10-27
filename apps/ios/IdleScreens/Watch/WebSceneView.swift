@@ -20,6 +20,21 @@ import WebKit
 /// show up as two people), a user script taps the page's OWN socket and
 /// forwards each frame here. One connection, and the chrome is guaranteed to
 /// describe the same stream the pixels came from.
+///
+/// A swipe to another public channel does not load a page: it takes the warm
+/// one just left and switches it in place (`Coordinator.retarget`), the way
+/// the site itself switches channel — no reload, no second socket.
+///
+/// **The bridge's trust, stated exactly.** The tap and the message handler
+/// live in the page's own JS world (the tap has to: an isolated
+/// `WKContentWorld` gets its own `WebSocket` and never sees the page's), so
+/// page script can post to the handler directly and the page's word is only
+/// as good as the page — which is why navigation is pinned to `baseURL`'s
+/// `/channel/` paths. What native guarantees on top of that: WHICH channel's
+/// frames count is native state (`Coordinator.channelId`), set only by Swift
+/// (`init`, `retarget`). The page reports which socket a frame came from;
+/// nothing it sends can change which socket is listened to. There is no JS
+/// entry point to retarget, so there is nothing for page script to call.
 struct WebSceneView: UIViewRepresentable {
     let channelId: String
     let baseURL: URL
@@ -44,6 +59,12 @@ struct WebSceneView: UIViewRepresentable {
     /// Reusing an already-loaded page from `WebScenePool`: it has painted
     /// before this view ever appeared, so nothing needs to wait for it.
     var onReused: (() -> Void)? = nil
+    /// Bump each time this view comes back on screen while its web view never
+    /// left (a lazy stack keeps a page mounted one swipe away). A page that has
+    /// already drawn says so again (`onReused`), once it is back on screen and
+    /// composited — otherwise nothing re-reveals it until its socket next
+    /// sends a frame, 9 s+ on a quiet channel (2026-10-25).
+    var returnCount: Int = 0
     /// Keep this page warm in `WebScenePool` when it leaves the screen. Off
     /// for a 3D tank — one of those running at a time is the rule.
     var poolable: Bool = true
@@ -61,10 +82,11 @@ struct WebSceneView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        let coordinator = Coordinator(baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
+        let coordinator = Coordinator(channelId: channelId, baseURL: baseURL, onFrame: onFrame, onFailure: onFailure)
         coordinator.onAssets = onAssets
         coordinator.onPinned = onPinned
         coordinator.onFish = onFish
+        coordinator.returned = returnCount
         return coordinator
     }
 
@@ -72,8 +94,20 @@ struct WebSceneView: UIViewRepresentable {
         WebScenePool.Key(channelId: channelId, sceneId: sceneId, keyed: token != nil)
     }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> SceneHostView {
+        let container = SceneHostView()
         let coordinator = context.coordinator
+        container.coordinator = coordinator
+        container.show(attach(coordinator))
+        // A public live page on screen is what the next channel flipped to
+        // takes over (`WebScenePool.handOver`).
+        if poolable, token == nil, sceneId == nil { WebScenePool.shared.showing(container) }
+        return container
+    }
+
+    /// The web view this view shows: a warm one from the pool, the page of
+    /// the channel just left switched in place, or a new one.
+    private func attach(_ coordinator: Coordinator) -> WKWebView {
         coordinator.loaded = (channelId, reloadCount)
         coordinator.poolKey = poolable ? poolKey : nil
         // A page we already loaded — this one a moment ago, or warmed ahead of
@@ -82,17 +116,11 @@ struct WebSceneView: UIViewRepresentable {
             SwipeTiming.mark("web view reused from pool")
             host.sink = coordinator
             coordinator.host = host
-            // Replay what it already said once it is back on screen and drawn:
-            // a re-attached web view shows black until its layer composites
-            // again (caught at 30 fps, 2026-10-16), and revealing it sooner
-            // flashed a dark frame.
-            // So: ask the page. Two of ITS animation frames after it is back in
-            // a window, it has composited; a guessed 0.12 s was not enough.
+            // Replay what it already said once it is back on screen and drawn.
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(16))   // let it attach
-                _ = try? await webView.callAsyncJavaScript(
-                    "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
-                    contentWorld: .page)
+                await Self.composited(webView)
+                // Parked mid-switch: the switch itself reports, once drawn.
+                if host.switching { return }
                 if let frame = host.lastFrame { coordinator.onFrame(frame) }
                 if let assets = host.lastAssets { coordinator.onAssets?(assets) }
                 if let fish = host.lastFish { coordinator.onFish?(fish, host.lastWant) }
@@ -102,12 +130,40 @@ struct WebSceneView: UIViewRepresentable {
             coordinator.startSnapshots(of: webView, channelId: channelId, sceneId: sceneId)
             return webView
         }
+        // A channel flip: switch the live page just left to this channel
+        // instead of loading one. Public, live pages only — a keyed page has
+        // its own store and token, and a pinned scene is its own document.
+        // SwiftUI builds this view BEFORE it dismantles the page being left
+        // (measured 2026-10-25), so that page is usually still on screen:
+        // take it from there; if it has already been parked, from the pool.
+        if poolable, token == nil, sceneId == nil,
+           let (webView, host) = WebScenePool.shared.handOver(forChannel: channelId)
+                ?? WebScenePool.shared.adopt(forChannel: channelId) {
+            SwipeTiming.mark("web view adopted from \(host.channelId)")
+            host.sink = coordinator
+            coordinator.host = host
+            host.retarget(webView, to: channelId)
+            coordinator.startSnapshots(of: webView, channelId: channelId, sceneId: sceneId)
+            return webView
+        }
         SwipeTiming.mark("web view created")
         coordinator.host = coordinator
         let webView = Self.build(channelId: channelId, token: token, baseURL: baseURL,
                                  sceneId: sceneId, delegate: coordinator)
         if poolable { coordinator.startSnapshots(of: webView, channelId: channelId, sceneId: sceneId) }
         return webView
+    }
+
+    /// Returns once a web view just back on screen has composited again: a
+    /// re-attached web view shows black until its layer draws (caught at 30
+    /// fps, 2026-10-16), and revealing it sooner flashed a dark frame. So: ask
+    /// the page. Two of ITS animation frames after it is back, it has drawn; a
+    /// guessed 0.12 s was not enough.
+    static func composited(_ webView: WKWebView) async {
+        try? await Task.sleep(for: .milliseconds(16))   // let it attach
+        _ = try? await webView.callAsyncJavaScript(
+            "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
+            contentWorld: .page)
     }
 
     /// One configured, loading web view for a channel page. Shared by the
@@ -149,22 +205,28 @@ struct WebSceneView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
+    func updateUIView(_ container: SceneHostView, context: Context) {
         context.coordinator.onFrame = onFrame
         context.coordinator.onAssets = onAssets
         context.coordinator.onPinned = onPinned
         context.coordinator.onFish = onFish
         context.coordinator.onReused = onReused
         context.coordinator.onFailure = onFailure
-        guard context.coordinator.loaded != (channelId, reloadCount) else { return }
+        if let webView = container.webView { context.coordinator.cameBack(returnCount, in: webView) }
+        guard let webView = container.webView,
+              context.coordinator.loaded != (channelId, reloadCount) else { return }
         context.coordinator.loaded = (channelId, reloadCount)
         webView.load(URLRequest(url: Self.sceneURL(baseURL: baseURL, channelId: channelId, sceneId: sceneId)))
     }
 
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+    static func dismantleUIView(_ container: SceneHostView, coordinator: Coordinator) {
         coordinator.snapshotTask?.cancel()
+        WebScenePool.shared.notShowing(container)
+        // Handed over to the next channel's view: not ours to park or stop.
+        guard let webView = container.release() else { return }
         let host = coordinator.host ?? coordinator
         host.sink = nil
+        SwipeTiming.mark("web view dismantled (\(host.channelId))")
         if let key = coordinator.poolKey {
             WebScenePool.shared.park(key, webView: webView, host: host)
         } else {
@@ -175,6 +237,29 @@ struct WebSceneView: UIViewRepresentable {
     // MARK: Page bootstrap
 
     static let handlerName = "idleHost"
+
+    /// Run by native (never by the page) to switch a page in place: push the
+    /// channel's address, let the site's `popstate` handler remount its
+    /// viewer, then resolve once the new channel's canvas has drawn — the
+    /// first canvas under `#screen` that is not the one that was there, two
+    /// animation frames on. False after 2.5 s without one. The path arrives
+    /// as an argument, never spliced into the source.
+    static let switchScript = """
+    const old = document.querySelector('#screen canvas');
+    history.pushState(null, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    return await new Promise((resolve) => {
+      const until = Date.now() + 2500;
+      const frames = (n) => n === 0 ? resolve(true) : requestAnimationFrame(() => frames(n - 1));
+      const check = () => {
+        const c = document.querySelector('#screen canvas');
+        if (c && c !== old) { frames(2); setTimeout(() => resolve(true), 120); return; }
+        if (Date.now() > until) { resolve(false); return; }
+        setTimeout(check, 16);
+      };
+      check();
+    });
+    """
 
     /// Runs before any page script. Three jobs: seed the token, tap the socket,
     /// and switch off the two behaviours that make a web view feel like one.
@@ -202,35 +287,38 @@ struct WebSceneView: UIViewRepresentable {
         return """
         (() => {
           \(seed)
-          const post = (kind, body) => {
-            try { window.webkit.messageHandlers.\(handlerName).postMessage({ kind, body }); } catch (_) {}
+          const post = (kind, body, socket) => {
+            try { window.webkit.messageHandlers.\(handlerName).postMessage(socket ? { kind, body, socket } : { kind, body }); } catch (_) {}
           };
-          // Only the channel's own stream is instrumented. A page that opens
-          // some OTHER socket (telemetry, an embed, or one on a spoofed
-          // origin) must never have its frames posted here — ChannelSession
-          // treats matching JSON as authoritative state, so an unrelated
-          // socket could spoof it. Origin (protocol+host+port) and path must
-          // match exactly; a path suffix alone would let
-          // wss://attacker.example/anything/c/<id>/ws slip through.
+          // Only channel sockets are instrumented, and each frame says which
+          // channel's socket it came from: native decides which one counts
+          // (see the struct's doc). A page that opens some OTHER socket
+          // (telemetry, an embed, or one on a spoofed origin) never has its
+          // frames posted. Origin (protocol+host+port) must match exactly, and
+          // the path must be a whole channel socket path; a suffix alone would
+          // let wss://attacker.example/anything/c/<id>/ws slip through.
+          // Deliberately NOT one channel: a page switched to another channel
+          // in place (retarget) keeps this document, and with it this tap.
           const channelSocketProtocol = \(literal(wsProtocol));
           const channelSocketHost = \(literal(wsHost));
           const channelSocketPort = \(literal(wsPort));
-          const channelSocketPath = \(literal("/c/" + channelId + "/ws"));
-          const isChannelSocket = (url) => {
+          const channelSocketPath = /^\\/c\\/[A-Za-z0-9_-]{1,64}\\/ws$/;
+          const channelSocket = (url) => {
             try {
               const u = new URL(url, location.href);
               return u.protocol === channelSocketProtocol
                 && u.hostname === channelSocketHost
                 && u.port === channelSocketPort
-                && u.pathname === channelSocketPath;
-            } catch (_) { return false; }
+                && channelSocketPath.test(u.pathname) ? u.pathname : null;
+            } catch (_) { return null; }
           };
           const Native = window.WebSocket;
           if (Native && !Native.__idleTapped) {
             const Tapped = function (url, protocols) {
               const ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
-              if (isChannelSocket(url)) {
-                ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data); });
+              const socket = channelSocket(url);
+              if (socket) {
+                ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data, socket); });
               }
               return ws;
             };
@@ -311,7 +399,11 @@ struct WebSceneView: UIViewRepresentable {
           }
           const css = document.createElement('style');
           // The token gate is web UI; the native app states privacy itself.
+          // So is the site's own channel-flip cover: on a switch in place
+          // (retarget) the native still already covers, and the web one would
+          // slide the outgoing channel's frame over the incoming card.
           css.textContent = '.private-gate{display:none!important}' +
+            '.vcover{display:none!important}' +
             '*{-webkit-user-select:none!important;-webkit-touch-callout:none!important}';
           (document.head || document.documentElement).appendChild(css);
         })();
@@ -335,6 +427,11 @@ struct WebSceneView: UIViewRepresentable {
     /// forwards each event to `sink` (the coordinator of the view currently
     /// showing it), or to itself when it is its own view's coordinator.
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        /// The channel whose socket's frames are this page's state. Native
+        /// state, and only native code moves it (`retarget`): a frame from any
+        /// other channel's socket — the old one still closing after a switch,
+        /// or one the page opened itself — is dropped, whatever it says.
+        private(set) var channelId: String
         let baseURL: URL
         var onFrame: (String) -> Void
         var onFailure: () -> Void
@@ -354,7 +451,30 @@ struct WebSceneView: UIViewRepresentable {
         private(set) var lastFish: Int?
         private(set) var lastWant: Int?
         private(set) var painted = false
-        private var out: Coordinator { sink ?? self }
+        /// Switched to `channelId` in place and not yet drawn it: what the page
+        /// shows is still the channel it left (or nothing).
+        private(set) var switching = false
+        private var switchGeneration = 0
+        /// Moved to another channel at least once (`retarget`). Its own
+        /// callbacks then belong to the view it was built for — a different
+        /// channel's page — so with no view showing it (parked, spared) it
+        /// says nothing, rather than telling that page another channel's news.
+        private var retargeted = false
+        private var out: Coordinator? { sink ?? (retargeted ? nil : self) }
+        /// Mid-switch frames are held (see `receive`); never longer than this.
+        static let switchHoldMax: Duration = .seconds(1)
+        private var holdRelease: Task<Void, Never>?
+        /// Every frame held mid-switch, in order: they carry different news (a
+        /// snapshot, then a sleep or overlay), so the chrome gets all of them,
+        /// not just the latest. Bounded; past it the middle is dropped, never
+        /// the first (the snapshot) or the newest.
+        private var heldFrames: [String] = []
+        private static let heldFramesMax = 64
+        private func flushHeldFrames() {
+            let frames = heldFrames
+            heldFrames = []
+            for frame in frames { out?.onFrame(frame) }
+        }
         var snapshotTask: Task<Void, Never>?
 
         /// Keep `WebScenePool`'s picture of this page fresh while it is on
@@ -368,7 +488,7 @@ struct WebSceneView: UIViewRepresentable {
                 while !Task.isCancelled {
                     guard let self, let webView else { return }
                     let host = self.host ?? self
-                    let showing = sceneId == nil ? host.lastFrame != nil : host.painted
+                    let showing = sceneId == nil ? host.lastFrame != nil && !host.switching : host.painted
                     if showing, webView.window != nil, webView.bounds.width > 0 {
                         let config = WKSnapshotConfiguration()
                         config.snapshotWidth = NSNumber(value: Double(webView.bounds.width / 2))
@@ -381,35 +501,161 @@ struct WebSceneView: UIViewRepresentable {
             }
         }
 
-        init(baseURL: URL, onFrame: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
+        init(channelId: String, baseURL: URL, onFrame: @escaping (String) -> Void, onFailure: @escaping () -> Void) {
+            self.channelId = channelId
             self.baseURL = baseURL
             self.onFrame = onFrame
             self.onFailure = onFailure
         }
 
+        static func socketPath(_ channelId: String) -> String { "/c/\(channelId)/ws" }
+
+        /// The view's `returnCount` last seen.
+        var returned = 0
+
+        /// The view came back on screen with this page still in it (a new
+        /// `returnCount`). Nothing was rebuilt, so nothing else would tell it
+        /// the page is drawn: say so again (`onReused`) once the page has
+        /// composited — if it had drawn this channel BEFORE it came back, and
+        /// is not mid-switch (the switch reports itself). A page still
+        /// loading is left to its first frame (`onFrame`), which waits for the
+        /// canvas: two frames of a page that is still booting would reveal
+        /// the bare page. A later return supersedes this one.
+        func cameBack(_ count: Int, in webView: WKWebView) {
+            guard count != returned else { return }
+            returned = count
+            let host = self.host ?? self
+            guard host.lastFrame != nil, !host.switching else { return }
+            Task { @MainActor [weak self, weak webView] in
+                guard let webView else { return }
+                await WebSceneView.composited(webView)
+                guard let self, count == self.returned else { return }
+                let host = self.host ?? self
+                guard host.lastFrame != nil, !host.switching else { return }
+                SwipeTiming.mark("back on screen, drawn")
+                self.onReused?()
+            }
+        }
+
+        /// Move this page to another channel without loading anything: the
+        /// site switches channel on `popstate` (ChannelViewer), dropping the
+        /// old channel's socket and opening the new one's in the same
+        /// document. Native-only by construction — it is Swift calling
+        /// WebKit; the page has no way to invoke it or to change `channelId`.
+        ///
+        /// Everything this page remembered belongs to the channel it left, so
+        /// it is forgotten first: replaying it would show the next view the
+        /// old channel's state. The page announces the new channel's first
+        /// drawn frame by resolving the switch, and that is when the view is
+        /// told it is reused (`onReused`) — never on the old channel's pixels.
+        func retarget(_ webView: WKWebView, to channelId: String) {
+            self.channelId = channelId
+            sawFrame = false
+            lastFrame = nil
+            lastAssets = nil
+            lastFish = nil
+            lastWant = nil
+            painted = false
+            switching = true
+            retargeted = true
+            holdRelease?.cancel()
+            holdRelease = nil
+            heldFrames = []
+            switchGeneration += 1
+            let generation = switchGeneration
+            // A later load of this view (process restart, the native retry, the
+            // site's own stale-bundle reload) must boot for THIS channel.
+            let controller = webView.configuration.userContentController
+            controller.removeAllUserScripts()
+            controller.addUserScript(WKUserScript(
+                source: WebSceneView.bootstrapScript(channelId: channelId, token: nil, baseURL: baseURL),
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            let url = WebSceneView.sceneURL(baseURL: baseURL, channelId: channelId)
+            let path = url.path + "?" + (url.query ?? "")
+            Task { @MainActor [weak self, weak webView] in
+                let drawn = try? await webView?.callAsyncJavaScript(
+                    WebSceneView.switchScript, arguments: ["path": path], in: nil, contentWorld: .page)
+                guard let self, let webView, generation == self.switchGeneration else { return }
+                self.holdRelease?.cancel()
+                self.holdRelease = nil
+                self.switching = false
+                if drawn as? Bool == true || self.sawFrame {
+                    SwipeTiming.mark("switched in place, drawn")
+                    self.flushHeldFrames()
+                    self.out?.onReused?()
+                } else if webView.isLoading {
+                    // The page answered by navigating itself (an old site's
+                    // reload): that load is already the channel, booted by
+                    // the bootstrap above. Loading again would race it.
+                    SwipeTiming.mark("switch in place became a reload")
+                } else {
+                    // The page never switched (a site too old to, or a broken
+                    // page): load the channel the ordinary way.
+                    SwipeTiming.mark("switch in place failed, loading")
+                    webView.load(URLRequest(url: url))
+                }
+            }
+        }
+
+        /// Give up holding: stop switching and say what the page last said.
+        private func releaseHeldFrame(after delay: Duration) {
+            let generation = switchGeneration
+            holdRelease = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled, generation == self.switchGeneration,
+                      self.switching else { return }
+                SwipeTiming.mark("switch hold released")
+                self.switching = false
+                self.flushHeldFrames()
+            }
+        }
+
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard let payload = message.body as? [String: Any],
+            receive(message.body)
+        }
+
+        /// Everything the page says comes through here (split out so tests can
+        /// speak as the page without a web view).
+        func receive(_ message: Any) {
+            guard let payload = message as? [String: Any],
                   let kind = payload["kind"] as? String,
                   let body = payload["body"] as? String else { return }
             switch kind {
             case "frame":
+                // This channel's socket only. A frame from any other socket —
+                // the channel just left, still closing — is not this channel.
+                guard payload["socket"] as? String == Self.socketPath(channelId) else { return }
                 if !sawFrame { sawFrame = true; SwipeTiming.mark("first socket frame") }
                 lastFrame = body
-                out.onFrame(body)
+                // Mid-switch, the frame waits for the new canvas (delivered with
+                // `onReused`): a view reveals a beat after its first frame, and
+                // in a switched page that beat can land before the canvas has
+                // drawn — a fade over the bare page, a dark dip (caught at 30
+                // fps, 2026-10-25).
+                // Bounded, though: a scene that mounts no new canvas (asleep,
+                // a gate) would otherwise keep the chrome deaf for the whole
+                // switch timeout.
+                if switching {
+                    if heldFrames.count >= Self.heldFramesMax { heldFrames.remove(at: 1) }
+                    heldFrames.append(body)
+                    if holdRelease == nil { releaseHeldFrame(after: Self.switchHoldMax) }
+                    return
+                }
+                out?.onFrame(body)
             // A count, clamped: the page is untrusted, and this only ever
             // decides how long a loading animation plays.
             case "assets":
-                if let n = Int(body) { lastAssets = max(0, min(n, 99)); SwipeTiming.mark("assets pending \(n)"); out.onAssets?(lastAssets!) }
+                if let n = Int(body) { lastAssets = max(0, min(n, 99)); SwipeTiming.mark("assets pending \(n)"); out?.onAssets?(lastAssets!) }
             case "fish", "want":
                 guard let n = Int(body) else { break }
                 if kind == "fish" { lastFish = max(0, min(n, 999)) } else { lastWant = max(0, min(n, 999)) }
                 SwipeTiming.mark("fish \(lastFish ?? 0)/\(lastWant.map(String.init) ?? "?")")
-                out.onFish?(lastFish ?? 0, lastWant)
+                out?.onFish?(lastFish ?? 0, lastWant)
             case "pinned":
                 SwipeTiming.mark("pinned scene painted")
                 painted = true
-                out.onPinned?()
+                out?.onPinned?()
             default: break
             }
         }
@@ -437,10 +683,10 @@ struct WebSceneView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
-                     withError error: Error) { out.onFailure() }
+                     withError error: Error) { out?.onFailure() }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!,
-                     withError error: Error) { out.onFailure() }
+                     withError error: Error) { out?.onFailure() }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { SwipeTiming.mark("page committed") }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { SwipeTiming.mark("page loaded") }
@@ -448,8 +694,48 @@ struct WebSceneView: UIViewRepresentable {
         /// WebKit renders out of process. A scene heavy enough to kill its
         /// renderer kills THAT process — the app survives, and asks again.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The reload boots a new document: what the old one drew is gone,
+            // so a view coming back must wait for the new first frame
+            // (`cameBack` reads `lastFrame`) instead of revealing a blank page.
+            sawFrame = false
+            lastFrame = nil
+            painted = false
             webView.reload()
         }
+    }
+}
+
+/// What `WebSceneView` hands SwiftUI: a plain view holding the web view, so
+/// the web view can move to another view while this one is still mounted.
+/// SwiftUI owns this container and removes it whenever it likes; the web view
+/// inside is ours, and goes where the page goes (`WebScenePool.handOver`).
+final class SceneHostView: UIView {
+    private(set) var webView: WKWebView?
+    /// The coordinator of the view this container belongs to.
+    weak var coordinator: WebSceneView.Coordinator?
+
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }
+
+    func show(_ webView: WKWebView) {
+        self.webView = webView
+        webView.frame = bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(webView)
+    }
+
+    /// Give the web view up; the container is empty from here on.
+    func release() -> WKWebView? {
+        let out = webView
+        webView = nil
+        out?.removeFromSuperview()
+        return out
     }
 }
 

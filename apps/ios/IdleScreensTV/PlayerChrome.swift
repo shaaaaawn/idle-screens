@@ -36,6 +36,8 @@ enum PlayerChrome {
         switch timeline {
         case .past(let i):
             return "\(i + 1) of \(max(stops, i + 1)) back · Right for live"
+        case .pinned:
+            return "Sent from your phone · Right for live"
         case .live:
             guard let surf, surf.count > 1 else { return nil }
             return "\(surf.index) of \(surf.count)"
@@ -45,6 +47,7 @@ enum PlayerChrome {
     /// Renderer identity per timeline position, so stepping crossfades.
     static func timelineKey(_ timeline: TVAppState.Timeline) -> String {
         if case .past(let i) = timeline { return "past-\(i)" }
+        if case .pinned(let id) = timeline { return "pinned-\(id)" }
         return "live"
     }
 }

@@ -62,6 +62,21 @@ final class ChannelWSClientTests: XCTestCase {
         XCTAssertEqual(event, .switchChannel(channelId: "lobby"))
     }
 
+    func testSwitchCarriesAPinnedScene() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector)
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"switch","channelId":"studio","sceneId":598}"#)
+        let pinned = try await iterator.next()
+        XCTAssertEqual(pinned, .switchChannel(channelId: "studio", sceneId: 598))
+
+        // A nonsense id is no pin: the screen goes to the channel live.
+        session.send(#"{"type":"switch","channelId":"studio","sceneId":-2}"#)
+        let live = try await iterator.next()
+        XCTAssertEqual(live, .switchChannel(channelId: "studio", sceneId: nil))
+    }
+
     func testSnapshotWithResolvedSpecAsObject() async throws {
         let connector = MockWSConnector()
         let (stream, session) = await makeStream(connector: connector)

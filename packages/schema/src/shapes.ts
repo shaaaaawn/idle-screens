@@ -9,7 +9,7 @@
  * `length` for strokes), so the seeded size range is the glyph's bounding
  * diameter — the same rule `circle.radius` / `streak.length` already follow.
  */
-import type { PathGradient, PathPart, PathStroke, SpriteSpec } from './types';
+import type { PathGradient, PathPart, PathStroke, SpriteSpec, StrokeDraw } from './types';
 
 export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' | 'bar' }>;
 export type BarSprite = Extract<SpriteSpec, { kind: 'bar' }>;
@@ -100,7 +100,9 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, u: number): 
  * The stroke's path, sampled: `n` points (default STROKE_SAMPLES) centred on
  * (0,0) and scaled so the unit box spans `halfSize` px each way. `curve:
  * 'smooth'` (default) is an open Catmull-Rom through the control points with
- * clamped ends; `'linear'` samples the polyline. Two control points give a
+ * clamped ends; `'linear'` samples the polyline, every vertex among the
+ * samples (so a default `'linear'` count can exceed STROKE_SAMPLES by up to
+ * `segments − 1`). Two control points give a
  * straight segment either way.
  */
 export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Array<{ x: number; y: number }> {
@@ -111,7 +113,13 @@ export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Ar
   const segs = m - 1;
   // Enough samples that every spline segment gets interior points — a
   // 24-point stroke must not collapse to its control polyline.
-  n = n ?? Math.max(STROKE_SAMPLES, segs * 6 + 1);
+  // A polyline's corners are its authored vertices: by default it samples a
+  // whole number of steps per segment, so every vertex is a sample. Uniform
+  // steps that skipped a vertex chamfered each corner by up to half a step (X566).
+  if (n === undefined) {
+    n = Math.max(STROKE_SAMPLES, segs * 6 + 1);
+    if (!smooth) n = Math.ceil((n - 1) / segs) * segs + 1;
+  }
   const at = (k: number): { x: number; y: number } => pts[Math.max(0, Math.min(m - 1, k))]!;
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < n; i++) {
@@ -131,6 +139,31 @@ export function strokeSamples(s: StrokeSprite, halfSize: number, n?: number): Ar
   return out;
 }
 
+/** A stroke sprite's sampled path as painted: `strokeSamples`, cut to its `draw` span when it has one. */
+export function strokeDrawnSamples(s: StrokeSprite, halfSize: number): Array<{ x: number; y: number }> {
+  const pts = strokeSamples(s, halfSize);
+  const span = drawSpan(s.draw);
+  return span ? trimPolyline(pts, span[0], span[1]) : pts;
+}
+
+/**
+ * Each drawn sample's position along the WHOLE mark (0..1 by arc length), for
+ * a tapered stroke with a `draw` span: the brush width belongs to the mark,
+ * so revealing more of it must not reshape ink already down. Undefined when
+ * the stroke has no `draw` (its taper runs by sample index, as it always has).
+ */
+export function strokeDrawnAt(s: StrokeSprite, halfSize: number, drawn: Array<{ x: number; y: number }>): number[] | undefined {
+  if (!s.draw) return undefined;
+  const total = pathLength(strokeSamples(s, halfSize));
+  if (!(total > 0)) return undefined;
+  const a = drawSpan(s.draw)?.[0] ?? 0;
+  let run = 0;
+  return drawn.map((p, i) => {
+    if (i > 0) run += Math.hypot(p.x - drawn[i - 1]!.x, p.y - drawn[i - 1]!.y);
+    return a + run / total;
+  });
+}
+
 /** Total length of a sampled path, px. */
 export function pathLength(pts: Array<{ x: number; y: number }>): number {
   let l = 0;
@@ -140,6 +173,94 @@ export function pathLength(pts: Array<{ x: number; y: number }>): number {
     l += Math.sqrt(dx * dx + dy * dy);
   }
   return l;
+}
+
+/**
+ * The [start, end] arc-length fractions a `draw` paints, clamped to 0..1 — or
+ * null when it paints the whole line (absent, or 0..1), so the caller keeps
+ * its untrimmed (cached) geometry.
+ */
+export function drawSpan(d: StrokeDraw | undefined): [number, number] | null {
+  if (!d) return null;
+  const a = Math.max(0, Math.min(1, d.start ?? 0));
+  const b = Math.max(0, Math.min(1, d.end ?? 1));
+  return a <= 0 && b >= 1 ? null : [a, b];
+}
+
+/** The stretch of a polyline between arc-length fractions `a` and `b` (a ≥ b ⇒ empty). Endpoints are interpolated. */
+export function trimPolyline(pts: Array<{ x: number; y: number }>, a: number, b: number): Array<{ x: number; y: number }> {
+  if (pts.length < 2 || b <= a) return [];
+  const total = pathLength(pts);
+  if (!(total > 0)) return [];
+  const from = a * total;
+  const to = b * total;
+  const out: Array<{ x: number; y: number }> = [];
+  let run = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1]!;
+    const q = pts[i]!;
+    const seg = Math.hypot(q.x - p.x, q.y - p.y);
+    const s0 = run;
+    const s1 = run + seg;
+    run = s1;
+    if (s1 < from || seg <= 0) continue;
+    if (s0 > to) break;
+    const at = (s: number): { x: number; y: number } => {
+      const k = Math.max(0, Math.min(1, (s - s0) / seg));
+      return { x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k };
+    };
+    if (out.length === 0) out.push(s0 >= from ? { x: p.x, y: p.y } : at(from));
+    out.push(s1 <= to ? { x: q.x, y: q.y } : at(to));
+    if (s1 >= to) break;
+  }
+  return out.length >= 2 ? out : [];
+}
+
+/**
+ * A part's subpaths cut to a `draw` span: the lines are one pen run in draw
+ * order (a closed ring counts its closing edge), so `end` sweeps through the
+ * first subpath, then the next. A trimmed ring comes back open; untouched
+ * lines are returned as they were. Memoised per (lines, span).
+ */
+export function trimLines(lines: Array<{ points: Array<[number, number]>; closed: boolean }>, a: number, b: number): Array<{ points: Array<[number, number]>; closed: boolean }> {
+  const key = `${a}|${b}`;
+  let byLines = trimCache.get(lines);
+  const hit = byLines?.get(key);
+  if (hit) return hit;
+  const lens = lines.map((l) => {
+    const pts = l.points.map(([x, y]) => ({ x, y }));
+    if (l.closed && pts.length > 1) pts.push(pts[0]!);
+    return pathLength(pts);
+  });
+  const total = lens.reduce((m, v) => m + v, 0);
+  const out: Array<{ points: Array<[number, number]>; closed: boolean }> = [];
+  if (total > 0 && b > a) {
+    const from = a * total;
+    const to = b * total;
+    let run = 0;
+    lines.forEach((l, i) => {
+      const len = lens[i]!;
+      const s0 = run;
+      run += len;
+      if (len <= 0 || run < from || s0 > to) return;
+      if (s0 >= from && run <= to) { out.push(l); return; }
+      const pts = l.points.map(([x, y]) => ({ x, y }));
+      if (l.closed && pts.length > 1) pts.push(pts[0]!);
+      const cut = trimPolyline(pts, (Math.max(from, s0) - s0) / len, (Math.min(to, run) - s0) / len);
+      if (cut.length >= 2) out.push({ points: cut.map((q) => [q.x, q.y] as [number, number]), closed: false });
+    });
+  }
+  if (!byLines) { byLines = new Map(); trimCache.set(lines, byLines); }
+  if (byLines.size > 64) byLines.clear();
+  byLines.set(key, out);
+  return out;
+}
+const trimCache = new WeakMap<object, Map<string, Array<{ points: Array<[number, number]>; closed: boolean }>>>();
+
+/** A part's stroke lines as drawn: its subpaths, cut to its stroke's `draw` span when it has one. */
+export function strokeLines(part: { flat: { lines: Array<{ points: Array<[number, number]>; closed: boolean }> }; stroke?: PathStroke }): Array<{ points: Array<[number, number]>; closed: boolean }> {
+  const span = drawSpan(part.stroke?.draw);
+  return span ? trimLines(part.flat.lines, span[0], span[1]) : part.flat.lines;
 }
 
 /**
@@ -215,10 +336,11 @@ export function ribbonSides(pts: Array<{ x: number; y: number }>, half: readonly
  * floored at 0.5 px. Joints are mitred (the offset scaled by 1/cos of the
  * half-turn, capped at 2×) so a polyline corner keeps its width.
  */
-export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, taper = true): Array<{ x: number; y: number }> {
+export function strokeOutline(pts: Array<{ x: number; y: number }>, lw: number, taper = true, at?: readonly number[]): Array<{ x: number; y: number }> {
   const n = pts.length;
   if (n < 2) return [];
-  const half = (i: number): number => Math.max(0.5, taper ? lw * strokeTaper(i / (n - 1)) : lw) / 2;
+  // `at`: each sample's position along the whole mark, when `pts` is only a stretch of it.
+  const half = (i: number): number => Math.max(0.5, taper ? lw * strokeTaper(at?.[i] ?? i / (n - 1)) : lw) / 2;
   const dir = (a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -395,7 +517,7 @@ export function partInkArea(part: ResolvedPart, sx: number, sy: number, r: numbe
   const fill = part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x: x * sx, y: y * sy }))) * part.opacity : 0;
   let stroke = 0;
   if (part.stroke && part.stroke.width > 0) {
-    for (const l of part.flat.lines) {
+    for (const l of strokeLines(part)) {
       const pts = l.points.map(([x, y]) => ({ x: x * sx, y: y * sy }));
       if (l.closed && pts.length > 1) pts.push(pts[0]!);
       stroke += pathLength(pts) * part.stroke.width * r;
@@ -718,11 +840,45 @@ function inside(pt: Pt, r: Pt[]): boolean {
   return c;
 }
 
-/** Every vertex of `sub` inside `r` (bbox first): `sub` is nested in `r`, not merely overlapping it. */
+/** How close to an edge counts as on it: twice the flattening tolerance, so a flattened curve still meets the vertex it was drawn through. */
+const ON_EDGE = 2 * PATH_TOLERANCE;
+
+/** `pt` within ON_EDGE of one of `r`'s edges. */
+function onEdge(pt: Pt, r: Pt[]): boolean {
+  for (let k = 0, j = r.length - 1; k < r.length; j = k++) {
+    const a = r[j]!, b = r[k]!;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / len2)) : 0;
+    const ex = a[0] + dx * t - pt[0], ey = a[1] + dy * t - pt[1];
+    if (ex * ex + ey * ey <= ON_EDGE * ON_EDGE) return true;
+  }
+  return false;
+}
+
+/**
+ * Every vertex of `sub` inside `r` or on its edge, and `sub` not lying wholly
+ * on the edge (bbox first): `sub` is nested in `r`, not merely overlapping
+ * it. A vertex ON the edge counts as inside (X585): a hole cut into a wall
+ * from its rim, a notch, a mouth touching the face's outline, is still a
+ * hole. A ray cast decides a point exactly on an edge by which side of the
+ * ray it falls, so a hole touching the top edge used to cut while the same
+ * hole touching the bottom was filled.
+ */
 function containsRing(r: Pt[], rb: Box, sub: Pt[], sb: Box): boolean {
-  if (sb.x0 < rb.x0 || sb.x1 > rb.x1 || sb.y0 < rb.y0 || sb.y1 > rb.y1) return false;
-  for (const p of sub) if (!inside(p, r)) return false;
-  return true;
+  if (sb.x0 < rb.x0 - ON_EDGE || sb.x1 > rb.x1 + ON_EDGE || sb.y0 < rb.y0 - ON_EDGE || sb.y1 > rb.y1 + ON_EDGE) return false;
+  let strictly = false;
+  for (const p of sub) {
+    if (inside(p, r)) strictly = true;
+    else if (!onEdge(p, r)) return false;
+  }
+  if (strictly) return true;
+  // Every vertex on the edge (a triangle notch with its corners on the
+  // rim): nested when its centre is inside.
+  let cx = 0, cy = 0;
+  for (const p of sub) { cx += p[0]; cy += p[1]; }
+  const c: Pt = [cx / sub.length, cy / sub.length];
+  return !onEdge(c, r) && inside(c, r);
 }
 
 interface Box { x0: number; x1: number; y0: number; y1: number }
@@ -888,7 +1044,7 @@ export function partStrokeQuads(part: ResolvedPart, radius: number): Array<Array
   if (!part.stroke) return [];
   const hw = (part.stroke.width * radius) / 2;
   const out: Array<Array<{ x: number; y: number }>> = [];
-  for (const l of part.flat.lines) {
+  for (const l of strokeLines(part)) {
     const pts = l.points;
     const n = l.closed ? pts.length : pts.length - 1;
     for (let i = 0; i < n; i++) {

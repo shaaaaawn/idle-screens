@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// Root state for the tvOS viewer: gallery, channel selection, WS lifecycle,
 /// capability tier, and the latest scene data.
@@ -168,7 +169,7 @@ final class TVAppState {
         let transport = URLSessionTransport()
         self.init(
             gallery: GalleryClient(baseURL: baseURL, transport: transport),
-            mcp: MCPClient(baseURL: baseURL, transport: transport),
+            mcp: MCPClient(baseURL: baseURL, transport: transport, confirmer: MCPConfirmPrompt.confirmer),
             ws: ChannelWSClient(),
             pair: PairClient(baseURL: baseURL, transport: transport),
             baseURL: baseURL
@@ -227,6 +228,17 @@ final class TVAppState {
     // MARK: WS lifecycle
 
     func selectChannel(_ channelId: String, from surface: ChannelSurface = .grid) {
+        // Surfing dissolves channel into channel (0.45 s, the selectedChannelId
+        // animation): keep the one you're leaving drawing under the next.
+        if selectedChannelId != nil, selectedChannelId != channelId {
+            beginCrossfade(seconds: renderClass == .legacy ? 0.3 : 0.45)
+        } else {
+            // Opened from the grid: nothing to dissolve from, and a copy left
+            // over from the last visit must not draw over this channel.
+            endCrossfade()
+        }
+        rendererMountedAt = Date()
+        bedMountedAt = rendererMountedAt
         presentingSurface = surface
         selectedChannelId = channelId
         sleeping = false
@@ -304,6 +316,9 @@ final class TVAppState {
         case live
         /// Index into `historyStops`, 0 = the scene before the live one.
         case past(Int)
+        /// A stored scene a paired phone sent, not (yet) placed among the
+        /// loaded `historyStops`.
+        case pinned(sceneId: Int)
     }
 
     private(set) var timeline: Timeline = .live
@@ -325,6 +340,26 @@ final class TVAppState {
         case (.live, false): return .live
         case (.past(let i), true): return .past(Swift.min(i + 1, Swift.max(0, stops - 1)))
         case (.past(let i), false): return i <= 0 ? .live : .past(i - 1)
+        // From a scene the phone sent: Left starts the history, Right is live.
+        case (.pinned, true): return stops > 0 ? .past(0) : .live
+        case (.pinned, false): return .live
+        }
+    }
+
+    /// Show one stored scene of the current channel, as a paired phone asked.
+    /// Placed on the remote's timeline when the loaded history already holds
+    /// it, so Left/Right step on from there.
+    func pinScene(_ sceneId: Int) {
+        guard let channelId = selectedChannelId else { return }
+        historyTask?.cancel()
+        historyTask = Task { [weak self] in
+            guard let self,
+                  let scene = try? await self.gallery.fetchScene(channelId: channelId, sceneId: sceneId),
+                  !Task.isCancelled, self.selectedChannelId == channelId else { return }
+            self.timeline = self.historyStops.firstIndex { $0.sceneId == sceneId }
+                .map { .past($0) } ?? .pinned(sceneId: sceneId)
+            self.pastScene = scene
+            self.show(scene)
         }
     }
 
@@ -362,6 +397,8 @@ final class TVAppState {
                 self.timeline = target
                 self.pastScene = scene
                 self.show(scene)
+            case .pinned:
+                break   // only a phone's push pins; stepping never lands here
             }
         }
     }
@@ -475,6 +512,7 @@ final class TVAppState {
     }
 
     func exitChannel() {
+        endCrossfade()
         selectedChannelId = nil
         overlayText = nil
         stopKeyframes()
@@ -508,8 +546,8 @@ final class TVAppState {
                     guard !Task.isCancelled else { break }
                     if watching {
                         self.handle(event)
-                    } else if case .switchChannel(let target) = event {
-                        self.handle(.switchChannel(channelId: target))
+                    } else if case .switchChannel(let target, let scene) = event {
+                        self.handle(.switchChannel(channelId: target, sceneId: scene))
                     }
                 }
             } catch {
@@ -542,8 +580,16 @@ final class TVAppState {
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed):
+        case .scene(let spec, let seed, let transition):
             if let spec {
+                // A new scene on the channel: the renderer identity changes, so
+                // the player dissolves old into new instead of swapping layers
+                // in place at the old clock (a hard cut).
+                if timeline == .live {
+                    sceneCrossfade = Self.crossfadeSeconds(transition, renderClass: renderClass)
+                    beginCrossfade(seconds: sceneCrossfade)
+                    sceneRevision &+= 1
+                }
                 applySpec(spec, fallbackSeed: seed)
             }
         case .sleep:
@@ -560,13 +606,22 @@ final class TVAppState {
             }
         case .delta:
             break
-        case .switchChannel(let channelId):
+        case .switchChannel(let channelId, let sceneId):
             // Any switch push proves a paired phone is steering this TV —
             // the pairing screen uses it as its "✓ Paired" cue (the phone
             // sends a same-channel ack right after claiming).
             phonePushAt = Date()
-            if let channelId, !channelId.isEmpty, channelId != selectedChannelId {
+            guard let channelId, !channelId.isEmpty else { break }
+            if channelId != selectedChannelId {
                 selectChannel(channelId, from: .grid)
+                // After the switch: selecting resets the timeline.
+                if let sceneId { pinScene(sceneId) }
+            } else if let sceneId {
+                pinScene(sceneId)
+            } else {
+                // Same channel, no scene: the phone wants it live (sync mode
+                // following the phone back to live, or "send live").
+                returnToLive()
             }
         }
     }
@@ -667,6 +722,91 @@ final class TVAppState {
     private(set) var activeSequence: SequenceSubset?
     private var sequenceEpoch: Date?
     private var sequenceTask: Task<Void, Never>?
+    /// Bumps on every live scene message (publish, recall, scheduled entry):
+    /// part of the renderer identity, so a new scene dissolves in.
+    private(set) var sceneRevision = 0
+    /// How long that dissolve takes (0 = a cut).
+    private(set) var sceneCrossfade: TimeInterval = SceneTransition.defaultSeconds
+
+    /// The scene being replaced, still drawing (and animating) UNDER the
+    /// incoming one until the dissolve ends. A renderer SwiftUI is removing
+    /// stops drawing at once, so a plain `.transition(.opacity)` dissolved
+    /// through black (measured on the simulator: the old scene went to black
+    /// in one frame, the new one rose from it). Native tiers only.
+    struct OutgoingScene {
+        let id: Int
+        let layers: [CompiledLayer]
+        let background: SpecSubset.Background?
+        let ghosting: Double
+        /// Seconds it had been running, so the copy carries on from there.
+        let elapsed: TimeInterval
+        /// Drawn over a bed, so see-through, as the live renderer paints it.
+        let transparent: Bool
+        /// The bed itself, kept only when the whole sequence is being replaced
+        /// (within one sequence the live bed carries on underneath).
+        let bed: Bed?
+
+        struct Bed {
+            let layers: [CompiledLayer]
+            let background: SpecSubset.Background?
+            let ghosting: Double
+            let elapsed: TimeInterval
+        }
+    }
+    private(set) var outgoing: OutgoingScene?
+    private(set) var outgoingOpacity: Double = 1
+    private var outgoingTask: Task<Void, Never>?
+    private var outgoingSerial = 0
+    /// When the on-screen scene renderer, and the bed under it, last mounted:
+    /// their clocks start there.
+    private var rendererMountedAt = Date()
+    private var bedMountedAt = Date()
+
+    private func endCrossfade() {
+        outgoingTask?.cancel()
+        outgoingTask = nil
+        outgoing = nil
+    }
+
+    /// Keep what is on screen drawing under whatever replaces it, for `seconds`.
+    private func beginCrossfade(seconds: TimeInterval, withBed: Bool = true) {
+        endCrossfade()
+        let now = Date()
+        // Whatever replaces this scene mounts a fresh renderer: its clock starts now.
+        defer { rendererMountedAt = now }
+        guard seconds > 0, !compiledScene.isEmpty, !isClassicSpec,
+              effectiveTier == .t3 || effectiveTier == .t2 else { return }
+        outgoingSerial &+= 1
+        let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
+                                            elapsed: now.timeIntervalSince(bedMountedAt)) : nil
+        outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
+                                 ghosting: specGhosting, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 transparent: hasBed, bed: bed)
+        outgoingOpacity = 1
+        let serial = outgoingSerial
+        outgoingTask = Task { @MainActor [weak self] in
+            // Opaque and replaced by an opaque scene, the copy holds at full
+            // opacity under it: a true crossfade. When the incoming scene is
+            // see-through (over a bed) it must fade out too, or it would pop
+            // off at the end. The incoming state is settled by now.
+            if self?.hasBed == true {
+                try? await Task.sleep(for: .milliseconds(30))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: seconds)) { self?.outgoingOpacity = 0 }
+            }
+            try? await Task.sleep(for: .seconds(seconds + 0.15))
+            guard !Task.isCancelled, self?.outgoingSerial == serial else { return }
+            self?.outgoing = nil
+        }
+    }
+
+    /// Two renderers are alive while one dissolves into the other: keep it
+    /// short on the oldest hardware we support.
+    nonisolated static func crossfadeSeconds(_ transition: SceneTransition?, renderClass: RenderClass) -> TimeInterval {
+        let want = SceneTransition.seconds(for: transition)
+        return renderClass == .legacy ? min(want, 0.4) : want
+    }
+
     /// Key of the on-screen segment — the player crossfades on change.
     private(set) var sequenceSegmentKey: String?
     /// Crossfade duration entering the current segment (0 = hard cut).
@@ -690,11 +830,12 @@ final class TVAppState {
             bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
             bedBackground = bed.background
             bedGhosting = bed.ghosting ?? 0
+            if !hasBed { bedMountedAt = Date() }
             hasBed = true
         } else {
             clearBed()
         }
-        applySegment(seq, at: 0, fallbackSeed: fallbackSeed)
+        applySegment(seq, at: 0, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
     }
 
@@ -715,12 +856,22 @@ final class TVAppState {
         hasBed = false
     }
 
-    private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?) {
+    /// `advancing` is a step to the next segment of the sequence already on
+    /// screen; the first segment of a new sequence is dissolved in by the scene
+    /// message (or the channel change) that started it.
+    private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?,
+                              advancing: Bool = true) {
         stopKeyframes()
         let resolved = seq.resolve(at: T)
         let segment = seq.segments[resolved.index]
-        sequenceCrossfade = seq.transitionDuration(entering: resolved.index)
-        sequenceSegmentKey = segment.key ?? "segment-\(resolved.index)"
+        // Two renderers overlap during a dissolve: same cap as a scene message.
+        let authored = seq.transitionDuration(entering: resolved.index)
+        sequenceCrossfade = renderClass == .legacy ? min(authored, 0.4) : authored
+        let nextKey = segment.key ?? "segment-\(resolved.index)"
+        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey {
+            beginCrossfade(seconds: sequenceCrossfade, withBed: false)
+        }
+        sequenceSegmentKey = nextKey
         let scene = segment.scene
         let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)

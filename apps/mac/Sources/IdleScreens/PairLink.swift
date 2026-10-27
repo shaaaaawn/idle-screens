@@ -13,7 +13,9 @@ final class PairLink: NSObject {
   static let shared = PairLink()
 
   /// Fired on main when a paired phone pushes a channel.
-  var onSwitch: ((String) -> Void)?
+  /// A paired phone retargeted this Mac: a channel, and optionally one stored
+  /// scene of it to pin (nil = live).
+  var onSwitch: ((String, Int?) -> Void)?
   /// Fired on main whenever connection state changes (for the menu).
   var onStateChange: (() -> Void)?
 
@@ -88,16 +90,20 @@ final class PairLink: NSObject {
       let type = object["type"] as? String
     else { return }
     if type == "switch", let channel = object["channelId"] as? String, !channel.isEmpty {
+      let scene = (object["sceneId"] as? NSNumber)?.intValue
+      let moved = channel != channelId
       lastPushedChannel = channel
       lastPushAt = Date()
       // Follow the push: this socket moves to the new channel too, so the
-      // next push still finds us.
+      // next push still finds us. Only when it really moved: a same-channel
+      // push (a pinned scene, a sync step, the pairing ack) used to tear the
+      // socket down and back up every time.
       channelId = channel
       DispatchQueue.main.async {
-        self.onSwitch?(channel)
+        self.onSwitch?(channel, scene.flatMap { $0 > 0 ? $0 : nil })
         self.onStateChange?()
       }
-      connect()
+      if moved { connect() }
     }
   }
 

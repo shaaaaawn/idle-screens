@@ -351,7 +351,9 @@ export function lerpPathD(a: string, b: string, k: number): string | null {
  */
 export function textStringsOf(sprite: SpriteSpec): string[] | null {
   if (sprite.kind === 'text') return sprite.strings;
-  if (sprite.kind === 'textBlock') return [sprite.text];
+  // A counter's label is its prefix and suffix: the digits glide on their
+  // own, so only a changed label is a change of words.
+  if (sprite.kind === 'textBlock') return [sprite.number ? `${sprite.number.prefix ?? ''}\u0000${sprite.number.suffix ?? ''}` : sprite.text];
   return null;
 }
 
@@ -512,6 +514,32 @@ export function easeSmooth(k: number): number {
   return c * c * (3 - 2 * c);
 }
 
+/** ω of the `spring` ease: settles to within 0.3 % of its target by the glide's end. */
+const SPRING_OMEGA = 8;
+const SPRING_END = 1 - (1 + SPRING_OMEGA) * Math.exp(-SPRING_OMEGA);
+
+/**
+ * A glide's progress curve, by name (`GlideEase`), for progress `k` (0..1).
+ * Every curve is monotone and runs 0 → 1, so an eased value never leaves the
+ * range its two endpoints bound. `spring` is the critically damped step
+ * response 1 − (1 + ωk)e^(−ωk), normalised to land exactly on 1 at k = 1.
+ * Anything unknown is `smooth` (today's default).
+ */
+export function easeGlide(ease: string | undefined, k: number): number {
+  const c = Math.max(0, Math.min(1, k));
+  switch (ease) {
+    case 'step': return c >= 1 ? 1 : 0;
+    case 'linear': return c;
+    case 'in': return c * c * c;
+    case 'out': { const u = 1 - c; return 1 - u * u * u; }
+    case 'spring': return c >= 1 ? 1 : (1 - (1 + SPRING_OMEGA * c) * Math.exp(-SPRING_OMEGA * c)) / SPRING_END;
+    default: return c * c * (3 - 2 * c);
+  }
+}
+
+/** The named eases a live steer honours (the ones that did not exist before steers carried an ease). */
+export const STEER_EASES: ReadonlySet<string> = new Set(['in', 'out', 'spring']);
+
 /**
  * Fields that require re-seeding entities when they change (placement/motion
  * are baked at build time). Colour/alpha/pulse-only changes redraw in place.
@@ -561,6 +589,8 @@ export function structuralSignature(spec: SaverSpec): string {
         // Static rotation is baked into entities (a range draws a seeded
         // angle). Appended only when set — same rule as `anchor` above.
         ...(l.rotate !== undefined ? [l.rotate] : []),
+        // `rock` is baked per entity like `pulse` (and draws a seeded phase).
+        ...(l.rock !== undefined ? [{ rock: l.rock }] : []),
       ];
     }),
   ]);

@@ -1,5 +1,5 @@
 import type { Rng } from '@idle-screens/core';
-import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor } from './types';
+import type { CycleSpec, LayerSpec, SaverSpec, SpriteSpec, TextBlockAnchor, TextNumber } from './types';
 import { LIMITS } from './types';
 import { isShapedSprite } from './shapes';
 
@@ -97,6 +97,8 @@ export interface Entity {
   ease?: { type: 'settle' | 'buoyant'; tau: number };
   /** Static rotation (radians), added to any spin. Only set when `layer.rotate` is declared. */
   rotate?: number;
+  /** `rock`: amplitude (radians), period (ms) and phase (radians; a clock's shared phase when clocked). */
+  rock?: { amp: number; period: number; phase: number };
   /** Spline params (pts in px, shared per layer). Only set for path motion. */
   path?: {
     pts: Array<{ x: number; y: number }>;
@@ -506,12 +508,41 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       out[out.length - 1]!.pulsePhase = clockPhase - ((x0 * Math.cos(ang) + y0 * Math.sin(ang)) / wl) * Math.PI * 2;
     }
   }
+  if (layer.rock) {
+    // One seeded phase per entity, drawn in a pass AFTER the loop and only
+    // when declared: every existing spec keeps its stream, and declaring
+    // `rock` re-seats nothing else in this layer. A clock's shared phase
+    // replaces the seeded one (the draw still happens, for stream parity).
+    const amp = (layer.rock.amp * Math.PI) / 180;
+    for (const ent of out) {
+      const ph = rng.range(0, Math.PI * 2);
+      ent.rock = { amp, period: layer.rock.period, phase: layer.clock ? clockPhase : ph };
+    }
+  }
   if (layer.emit) {
     // Assigned after the loop and without any rng draw (see emitParams), so
     // toggling `emit` rearranges nothing — not this layer, not the ones after.
     for (let i = 0; i < out.length; i++) out[i]!.emit = emitParams(layer.emit, i, out.length);
   }
   return out;
+}
+
+/**
+ * The string a `textBlock` paints: its `text`, or with `number` the
+ * counter's `prefix + value + suffix` — rounded to `decimals`, thousands
+ * grouped with commas unless `grouping: false`. Locale-free, so every
+ * device draws the same digits.
+ */
+export function textBlockText(s: { text: string; number?: TextNumber }): string {
+  const n = s.number;
+  if (!n) return s.text;
+  const d = Math.max(0, Math.min(LIMITS.maxTextNumberDecimals, Math.round(n.decimals ?? 0)));
+  const v = Number.isFinite(n.value) ? n.value : 0;
+  const fixed = Math.abs(v).toFixed(d);
+  const [whole, frac] = fixed.split('.');
+  const grouped = n.grouping === false ? whole! : whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const neg = v < 0 && Number(fixed) !== 0;
+  return `${n.prefix ?? ''}${neg ? '-' : ''}${grouped}${frac !== undefined ? `.${frac}` : ''}${n.suffix ?? ''}`;
 }
 
 /** Depth of a warp entity at time t: wraps from far (1) to near (WARP_NEAR). Pure. */
@@ -603,14 +634,21 @@ export function sizeAt(e: Entity, t: number): number {
  * `rotate` is for).
  */
 export function rotationAt(e: Entity, t: number): number {
-  const base = e.rotate ?? 0;
+  let base = e.rotate ?? 0;
+  if (e.rock) base += e.rock.amp * Math.sin((clockTime(e, t) * 2 * Math.PI) / e.rock.period + e.rock.phase);
   if (!e.spinSpeed) return base;
   return base + e.spinPhase + e.spinSpeed * (t / 1000);
 }
 
-/** Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is unset. */
-export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number } | undefined, t: number): number {
+/**
+ * Layer lifecycle alpha multiplier at time `t` (ms). Pure. 1 when `life` is
+ * unset. With `stagger` this is the layer's GATE only — 0 before the first
+ * entity enters, else 1 — and each entity's own envelope is
+ * `lifeStaggerAt(life, t, i)`.
+ */
+export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number; stagger?: number } | undefined, t: number): number {
   if (!life) return 1;
+  if (life.stagger) return life.enter !== undefined && t < life.enter ? 0 : 1;
   const fade = life.fade ?? 1000;
   let a = 1;
   if (life.enter !== undefined) {
@@ -621,6 +659,16 @@ export function lifeAlphaAt(life: { enter?: number; exit?: number; fade?: number
     a *= fade > 0 ? Math.max(0, 1 - (t - life.exit) / fade) : 0;
   }
   return a;
+}
+
+/**
+ * Entity i's share of a staggered `life`: its whole envelope shifted by
+ * i × stagger. 1 without a stagger (the layer's `lifeAlphaAt` already
+ * carries the envelope), so callers multiply it in unconditionally.
+ */
+export function lifeStaggerAt(life: { enter?: number; exit?: number; fade?: number; stagger?: number } | undefined, t: number, i: number): number {
+  if (!life?.stagger) return 1;
+  return lifeAlphaAt({ enter: life.enter, exit: life.exit, fade: life.fade }, t - i * life.stagger);
 }
 
 function wrap(v: number, min: number, max: number): number {
@@ -933,6 +981,41 @@ export function textMetricsClassFor(font?: string): TextMetricsClass {
 
 const MONO_ADVANCE_EM = 0.6;
 
+/** Advance of a full-width (East Asian Wide/Fullwidth) glyph: one em, in any face. */
+const FULL_WIDTH_EM = 1;
+
+/** Combining (semi-)voiced sound marks: they ride on the preceding kana and advance nothing. */
+export function isCombiningKana(cp: number): boolean {
+  return cp === 0x3099 || cp === 0x309a;
+}
+
+/**
+ * Whether a code point is set full-width — a CJK ideograph, kana, Hangul
+ * syllable, CJK punctuation or a fullwidth form — so it advances ~1 em, not
+ * the 0.55 of a Latin letter (X614: a centred katakana line measured at half
+ * its real width and spilled off the frame). Halfwidth kana and Hangul
+ * (U+FF61–FFDC) stay narrow. A fixed table, for the same determinism reason
+ * as the buckets below.
+ */
+export function isFullWidth(cp: number): boolean {
+  if (isCombiningKana(cp)) return false;
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo leading consonants
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK symbols & punctuation
+    (cp >= 0x3041 && cp <= 0x33ff) || // kana, Bopomofo, Hangul compat Jamo, enclosed CJK, CJK compat
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Ext A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+    (cp >= 0xa960 && cp <= 0xa97f) || // Hangul Jamo Ext A
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+    (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK compatibility forms
+    (cp >= 0xff01 && cp <= 0xff60) || // fullwidth ASCII variants
+    (cp >= 0xffe0 && cp <= 0xffe6) || // fullwidth signs
+    (cp >= 0x20000 && cp <= 0x3fffd) // CJK Ext B–H (supplementary)
+  );
+}
+
 /**
  * Approximate glyph width as a fraction of em. Uses character-class buckets
  * so line breaks are identical across platforms (no measureText). The average
@@ -952,12 +1035,29 @@ function charWidthEm(ch: string, metrics: TextMetricsClass = 'proportional'): nu
  * Em-width of a string under the same character-class table `breakTextBlock`
  * uses. `mono` counts grapheme clusters, not UTF-16 code units — an emoji or
  * combining/ZWJ sequence is one advance-width cell, matching what's painted,
- * not one cell per surrogate half or combining mark.
+ * not one cell per surrogate half or combining mark. Under either table a
+ * full-width (CJK) glyph advances a full em.
  */
 export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportional'): number {
-  if (metrics === 'mono') return graphemeClusters(str).length * MONO_ADVANCE_EM;
+  if (metrics === 'mono') {
+    let w = 0;
+    for (const c of graphemeClusters(str)) {
+      const cp = c.codePointAt(0)!;
+      if (!isCombiningKana(cp)) w += isFullWidth(cp) ? FULL_WIDTH_EM : MONO_ADVANCE_EM;
+    }
+    return w;
+  }
   let w = 0;
-  for (let i = 0; i < str.length; i++) w += charWidthEm(str[i]!, metrics);
+  for (let i = 0; i < str.length; i++) {
+    const cp = str.codePointAt(i)!;
+    if (isCombiningKana(cp)) continue;
+    if (isFullWidth(cp)) {
+      w += FULL_WIDTH_EM;
+      if (cp > 0xffff) i++; // a supplementary ideograph is one glyph, two code units
+      continue;
+    }
+    w += charWidthEm(str[i]!, metrics);
+  }
   return w;
 }
 
