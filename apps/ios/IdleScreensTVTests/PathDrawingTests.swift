@@ -159,9 +159,15 @@ final class PathDrawingTests: XCTestCase {
         XCTAssertEqual(d.parts[0].flat.lines.count, 1)
         XCTAssertTrue(d.parts[0].flat.lines[0].closed)
         XCTAssertEqual(d.parts[0].flat.lines[0].points.count, 6, "every joint of the out-and-back tour survives")
+        XCTAssertNotNil(d.parts[0].stroke)
         let r = try render(decoded)
-        XCTAssertGreaterThan(red(r, 160, 90 - 25), 200, "the spine")
-        XCTAssertGreaterThan(red(r, 160 + 12, 90 + 24), 200, "a leg")
+        // Read either way up (the spine and the legs sit on opposite sides of
+        // the hip): what matters is that the limbs are inked, not filled.
+        XCTAssertGreaterThan(max(red(r, 160, 90 - 25), red(r, 160, 90 + 25)), 200, "the spine")
+        XCTAssertGreaterThan(max(red(r, 160 + 12, 90 + 24), red(r, 160 + 12, 90 - 24)), 200, "a leg")
+        // It draws exactly what the same outline as a `path` draws.
+        let viaPath = try render(try layers(##"{"kind":"polygon","radius":[0.45,0.45],"color":"#000000","path":"M 0 0 L 0.3 0.6 L 0 0 L -0.3 0.6 L 0 0 L 0 -0.6 Z","fill":false,"stroke":{"color":"#ffffff","width":0.06}}"##))
+        XCTAssertEqual(r.px, viaPath.px)
         XCTAssertLessThan(red(r, 160 - 30, 90 - 30), 20, "nothing filled")
 
         // A plain points polygon keeps its own fill path: no drawing.
