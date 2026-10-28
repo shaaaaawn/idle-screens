@@ -285,17 +285,26 @@ describe('timelineFlashReport', () => {
       expect(cellsOf(kept, 'layers.0.opacity')).toEqual(cellsOf(scene('#000000', [dot('d', 0.2, 0.2)], keys), 'layers.0.opacity'));
     });
 
+    it('sizes a static scaleY stretch by its largest axis (X698)', () => {
+      const keys = [{ t: 0, path: 'd.opacity', value: 0.5, dur: 300 }, { t: 0, path: 'd.transform.rotate', value: 90, dur: 500 }];
+      const mk = (tf: Record<string, unknown>): SaverSpec => scene('#000000', [dot('d', 0.5, 0.5, { transform: { origin: 'anchor', rotate: 0, ...tf } })], keys);
+      const flat = cellsOf(mk({}), 'layers.0.opacity')!;
+      const tall = cellsOf(mk({ scaleY: 3 }), 'layers.0.opacity')!;
+      expect(tall.length).toBeGreaterThan(flat.length);
+      expect(tall).toEqual(expect.arrayContaining(flat));
+    });
+
     it('bounds every point a transform reaches while its fields range (never short)', () => {
       let seed = 7;
       const rnd = (lo: number, hi: number): number => { seed = (seed * 16807) % 2147483647; return lo + ((seed - 1) / 2147483646) * (hi - lo); };
       const pair = (lo: number, hi: number): [number, number] => { const a = rnd(lo, hi); const b = rnd(lo, hi); return [Math.min(a, b), Math.max(a, b)]; };
       for (let trial = 0; trial < 200; trial++) {
-        const r: TransformRange = { x: pair(-0.5, 0.5), y: pair(-0.5, 0.5), scale: pair(-2, 3), scaleX: pair(-2, 3), rotate: pair(-400, 400) };
+        const r: TransformRange = { x: pair(-0.5, 0.5), y: pair(-0.5, 0.5), scale: pair(-2, 3), scaleX: pair(-2, 3), scaleY: pair(-2, 3), rotate: pair(-400, 400) };
         const p = { x: rnd(-200, 2100), y: rnd(-200, 1300) };
         const o = { x: rnd(0, 1920), y: rnd(0, 1080) };
         const box = sweptBox(r, p, o, 1080);
         for (let i = 0; i < 50; i++) {
-          const q = transformPoint({ x: rnd(...r.x), y: rnd(...r.y), scale: rnd(...r.scale), scaleX: rnd(...r.scaleX), rotate: rnd(...r.rotate) }, p, 1920, 1080, 1080, o);
+          const q = transformPoint({ x: rnd(...r.x), y: rnd(...r.y), scale: rnd(...r.scale), scaleX: rnd(...r.scaleX), scaleY: rnd(...r.scaleY), rotate: rnd(...r.rotate) }, p, 1920, 1080, 1080, o);
           expect(q.x).toBeGreaterThanOrEqual(box.x0 - 1e-6);
           expect(q.x).toBeLessThanOrEqual(box.x1 + 1e-6);
           expect(q.y).toBeGreaterThanOrEqual(box.y0 - 1e-6);

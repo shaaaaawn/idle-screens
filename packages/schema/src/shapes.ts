@@ -219,11 +219,14 @@ export function trimPolyline(pts: Array<{ x: number; y: number }>, a: number, b:
 /**
  * A part's subpaths cut to a `draw` span: the lines are one pen run in draw
  * order (a closed ring counts its closing edge), so `end` sweeps through the
- * first subpath, then the next. A trimmed ring comes back open; untouched
- * lines are returned as they were. Memoised per (lines, span).
+ * first subpath, then the next. With `mode: 'each'` every line is cut to the
+ * same fractions of its own length instead, so all of them draw at once. A
+ * trimmed ring comes back open; untouched lines are returned as they were.
+ * Memoised per (lines, span, mode).
  */
-export function trimLines(lines: Array<{ points: Array<[number, number]>; closed: boolean }>, a: number, b: number): Array<{ points: Array<[number, number]>; closed: boolean }> {
-  const key = `${a}|${b}`;
+export function trimLines(lines: Array<{ points: Array<[number, number]>; closed: boolean }>, a: number, b: number, mode: StrokeDraw['mode'] = 'run'): Array<{ points: Array<[number, number]>; closed: boolean }> {
+  const each = mode === 'each';
+  const key = `${a}|${b}|${each ? 'each' : 'run'}`;
   let byLines = trimCache.get(lines);
   const hit = byLines?.get(key);
   if (hit) return hit;
@@ -234,7 +237,16 @@ export function trimLines(lines: Array<{ points: Array<[number, number]>; closed
   });
   const total = lens.reduce((m, v) => m + v, 0);
   const out: Array<{ points: Array<[number, number]>; closed: boolean }> = [];
-  if (total > 0 && b > a) {
+  if (each && b > a) {
+    lines.forEach((l, i) => {
+      if (!(lens[i]! > 0)) return;
+      if (a <= 0 && b >= 1) { out.push(l); return; }
+      const pts = l.points.map(([x, y]) => ({ x, y }));
+      if (l.closed && pts.length > 1) pts.push(pts[0]!);
+      const cut = trimPolyline(pts, a, b);
+      if (cut.length >= 2) out.push({ points: cut.map((q) => [q.x, q.y] as [number, number]), closed: false });
+    });
+  } else if (total > 0 && b > a) {
     const from = a * total;
     const to = b * total;
     let run = 0;
@@ -260,7 +272,7 @@ const trimCache = new WeakMap<object, Map<string, Array<{ points: Array<[number,
 /** A part's stroke lines as drawn: its subpaths, cut to its stroke's `draw` span when it has one. */
 export function strokeLines(part: { flat: { lines: Array<{ points: Array<[number, number]>; closed: boolean }> }; stroke?: PathStroke }): Array<{ points: Array<[number, number]>; closed: boolean }> {
   const span = drawSpan(part.stroke?.draw);
-  return span ? trimLines(part.flat.lines, span[0], span[1]) : part.flat.lines;
+  return span ? trimLines(part.flat.lines, span[0], span[1], part.stroke?.draw?.mode) : part.flat.lines;
 }
 
 /**
@@ -441,7 +453,7 @@ const spriteFlat = new WeakMap<object, { d: string; rule: PathFillRule; flat: Fl
 export function flattenSprite(s: PolygonSprite): FlattenedPath {
   // A multi-part drawing's outline is its filled parts together (bbox, area,
   // small-entity perception); parts draw and perceive individually elsewhere.
-  const d = s.parts ? s.parts.filter((p) => p.fill !== false).map((p) => p.path).join(' ') : s.path ?? '';
+  const d = s.parts ? s.parts.filter((p) => p.fill !== false).map((p) => p.path).join(' ') : spritePathD(s) ?? '';
   const rule = s.parts ? 'auto' : s.fillRule ?? 'auto';
   const hit = spriteFlat.get(s);
   if (hit && hit.d === d && hit.rule === rule) return hit.flat;
@@ -455,9 +467,41 @@ export function polygonFillRule(s: PolygonSprite): 'nonzero' | 'evenodd' {
   return typeof s.path === 'string' && s.fillRule === 'evenodd' ? 'evenodd' : 'nonzero';
 }
 
-/** A polygon drawn from SVG paths: one `path`, or a multi-colour drawing of `parts`. */
+/**
+ * A polygon drawn from SVG paths: one `path`, a multi-colour drawing of
+ * `parts`, or a `points` polygon that carries path paint (see
+ * `isPointsPath`).
+ */
 export function isPathPolygon(s: SpriteSpec): boolean {
-  return s.kind === 'polygon' && (typeof s.path === 'string' || Array.isArray(s.parts));
+  return s.kind === 'polygon' && (typeof s.path === 'string' || Array.isArray(s.parts) || isPointsPath(s));
+}
+
+/**
+ * A `points` polygon with path paint — a `stroke`, `fill: false` or a
+ * `gradient` (X711): it draws as the closed path through its points, so a
+ * keyed `points` array is line art (a stick figure, a wire rig) whose joints
+ * lerp. Gated on that paint, so every plain `points` polygon keeps its own
+ * fill path untouched.
+ */
+export function isPointsPath(s: SpriteSpec): boolean {
+  return s.kind === 'polygon' && typeof s.path !== 'string' && !Array.isArray(s.parts) && Array.isArray(s.points) && s.points.length >= 2
+    && (s.stroke !== undefined || s.fill === false || s.gradient !== undefined);
+}
+
+const pointsDs = new WeakMap<object, string>();
+/** The closed SVG path through unit-box `points`: `M x0 y0 L x1 y1 … Z`. Memoised per points array. */
+export function pointsPathD(points: ReadonlyArray<readonly [number, number] | readonly number[]>): string {
+  const hit = pointsDs.get(points);
+  if (hit !== undefined) return hit;
+  const d = `${points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')} Z`;
+  pointsDs.set(points, d);
+  return d;
+}
+
+/** The path a polygon draws: its `path`, or the closed path through a points-path's `points`; undefined otherwise. */
+export function spritePathD(s: PolygonSprite): string | undefined {
+  if (typeof s.path === 'string') return s.path;
+  return isPointsPath(s) ? pointsPathD(s.points!) : undefined;
 }
 
 /** One drawable piece of a path polygon, resolved: its outline, paint and part-space box. */
@@ -482,11 +526,14 @@ const spriteParts = new WeakMap<object, { key: unknown; parts: ResolvedPart[] }>
  * perception and the budget treat both forms one way. Memoised per sprite.
  */
 export function pathParts(s: PolygonSprite): ResolvedPart[] {
-  const key = s.parts ?? s.path;
+  // `points` too: a points-path whose array is replaced (a keyed glide) re-resolves.
+  const key = s.parts ?? s.path ?? s.points;
   const hit = spriteParts.get(s);
   if (hit && hit.key === key) return hit.parts;
-  const src: Array<PathPart & { color?: string }> = s.parts ?? (typeof s.path === 'string'
-    ? [{ path: s.path, fillRule: s.fillRule, fill: s.fill, gradient: s.gradient, stroke: s.stroke }]
+  const d = s.parts ? undefined : spritePathD(s);
+  // A points-path takes no fillRule (it is one ring; the validator says so).
+  const src: Array<PathPart & { color?: string }> = s.parts ?? (d !== undefined
+    ? [{ path: d, fillRule: typeof s.path === 'string' ? s.fillRule : undefined, fill: s.fill, gradient: s.gradient, stroke: s.stroke }]
     : []);
   const parts = src.map((p): ResolvedPart => {
     const flat = flattenPath(p.path, p.fillRule ?? 'auto');

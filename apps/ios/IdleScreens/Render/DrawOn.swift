@@ -9,6 +9,11 @@ import Foundation
 struct StrokeDraw: Codable, Equatable, Sendable {
     var start: Double?
     var end: Double?
+    /// `"each"`: every subpath of a drawing draws over the whole span at
+    /// once; anything else (`"run"`, the default) is one pen run.
+    var mode: String?
+
+    var each: Bool { mode == "each" }
 
     /// The clamped [start, end] span, or nil when it paints the whole line.
     var span: (Double, Double)? {
@@ -51,14 +56,25 @@ enum DrawOn {
     }
 
     /// A drawing's subpaths cut to a span as one pen run in draw order (a
-    /// closed ring counts its closing edge; a cut ring comes back open).
-    static func trim(_ lines: [PathGeometry.Line], _ a: Double, _ b: Double) -> [PathGeometry.Line] {
+    /// closed ring counts its closing edge; a cut ring comes back open) — or,
+    /// with `each`, every subpath cut to the same fractions of its own length.
+    static func trim(_ lines: [PathGeometry.Line], _ a: Double, _ b: Double, each: Bool = false) -> [PathGeometry.Line] {
         func pts(_ l: PathGeometry.Line) -> [CGPoint] {
             var p = l.points.map { CGPoint(x: $0.0, y: $0.1) }
             if l.closed, p.count > 1 { p.append(p[0]) }
             return p
         }
         let lens = lines.map { length(pts($0)) }
+        if each {
+            guard b > a else { return [] }
+            var out: [PathGeometry.Line] = []
+            for (i, l) in lines.enumerated() where lens[i] > 0 {
+                if a <= 0, b >= 1 { out.append(l); continue }
+                let cut = trim(pts(l), a, b)
+                if cut.count >= 2 { out.append(PathGeometry.Line(points: cut.map { (Double($0.x), Double($0.y)) }, closed: false)) }
+            }
+            return out
+        }
         let total = lens.reduce(0, +)
         guard total > 0, b > a else { return [] }
         let from = a * total, to = b * total

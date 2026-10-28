@@ -152,8 +152,8 @@ export interface BackgroundDrift {
 /**
  * A paint-level transform applied to a whole layer at draw time, about the
  * viewport centre: translate by (`x`, `y`) in `min(w, h)` units, rotate by
- * `rotate` degrees, scale by `scale` (× `scaleX` horizontally — `scaleX`
- * toward 0 reads as a turn about the vertical axis). Kept out of the
+ * `rotate` degrees, scale by `scale` (× `scaleX` horizontally, × `scaleY`
+ * vertically — `scaleX` toward 0 reads as a turn about the vertical axis). Kept out of the
  * structural signature, so it glides under steering, a `timeline` key or a
  * `morph` — a camera for timed pieces, a slow drift for ambient ones. Every
  * field optional; an empty transform is the identity. **Native:** ignored ⇒
@@ -164,9 +164,15 @@ export interface LayerTransform {
   y?: number;
   scale?: number;
   scaleX?: number;
+  /**
+   * Extra vertical scale, × `scale` (default 1; ±8, negative flips upside
+   * down). With `scaleX` it squashes and stretches: wide-and-short on a
+   * landing, narrow-and-tall on take-off.
+   */
+  scaleY?: number;
   rotate?: number;
   /**
-   * What `scale` / `scaleX` / `rotate` turn about. `'viewport'` (default) is
+   * What `scale` / `scaleX` / `scaleY` / `rotate` turn about. `'viewport'` (default) is
    * the viewport centre — a camera move. `'anchor'` is the layer's own
    * `position` point (with `dx`/`dy`; for a `list`/`table` layout, the block's
    * anchor; without `position`, the centre of its `region`) — a slam word
@@ -506,7 +512,9 @@ export type SpriteSpec =
    * n-gon of the seeded `radius` (circumradius), point up; `points` (3..24
    * unit coordinates in −1..1, scaled by the radius) draws any facet — a
    * Picasso shard, a Kandinsky triangle, a Mondrian plane. `soft` feathers
-   * the fill from the centre like a soft circle. Rotates with `spin`.
+   * the fill from the centre like a soft circle. Rotates with `spin`. A
+   * `points` polygon with `stroke`, `fill: false` or `gradient` draws as the
+   * closed path through its points (X711) — keyed points become line art.
    */
   | { kind: 'polygon'; radius: [number, number]; color: string; sides?: number; points?: Array<[number, number]>; path?: string; fillRule?: 'auto' | 'nonzero' | 'evenodd'; fill?: boolean; gradient?: PathGradient; stroke?: PathStroke; parts?: PathPart[]; span?: 'box' | 'width' | 'height' | 'screen'; origin?: [number, number]; soft?: boolean; colors?: string[]; colorWeights?: number[] }
   /**
@@ -596,6 +604,14 @@ export interface TextNumber {
   prefix?: string;
   suffix?: string;
   grouping?: boolean;
+  /**
+   * Zero-pad the integer part to at least this many digits (1..12, default
+   * 1): `minDigits: 4` paints 42 as `0042` — a fixed-width frame counter.
+   * Padding happens before grouping, as `Intl`'s `minimumIntegerDigits`
+   * does, so pair it with `grouping: false` unless you want `0,042`. The
+   * sign stays outside the padding (`-0042`). Paint, like the rest.
+   */
+  minDigits?: number;
 }
 
 /**
@@ -836,6 +852,7 @@ export const LIMITS = {
   maxPolygonSides: 12,
   maxShapePoints: 24, // polygon.points / stroke.points
   maxTextNumberDecimals: 6,
+  maxTextNumberMinDigits: 12, // a counter's zero-padded integer digits
   maxTextAffix: 64, // characters of a counter's prefix / suffix
   maxRevealRise: 1, // em
   maxRockAmp: 45, // degrees either side of rest — a swing, not a spin
@@ -966,7 +983,8 @@ export interface PathGradientStop { at: number; color: string; opacity?: number 
  * An outline drawn along every subpath of a path polygon (open ones too).
  * `width` is in unit-box units. `draw` paints only a stretch of it — see
  * `StrokeDraw`: every subpath of the part counts as one pen line, in the
- * order the path draws them.
+ * order the path draws them (or, with `draw.mode: 'each'`, each subpath
+ * draws over the whole span at once).
  */
 export interface PathStroke { color: string; width: number; opacity?: number; join?: 'round' | 'miter' | 'bevel'; cap?: 'round' | 'butt' | 'square'; draw?: StrokeDraw }
 
@@ -978,7 +996,19 @@ export interface PathStroke { color: string; width: number; opacity?: number; jo
  * `timeline` key or a `morph` without a rebuild. `start ≥ end` paints
  * nothing. **Native:** ignored ⇒ the whole line.
  */
-export interface StrokeDraw { start?: number; end?: number }
+export interface StrokeDraw {
+  start?: number;
+  end?: number;
+  /**
+   * How a path stroke's subpaths share the span. `'run'` (default): one pen
+   * run through every subpath in draw order — a signature, a contour.
+   * `'each'`: every subpath is cut to the same `start`..`end` of its **own**
+   * length, so they all draw at once — a burst, a tick dial, hatching. An
+   * enum: a steer or key on it steps. No effect on a `stroke` sprite (one
+   * line either way).
+   */
+  mode?: 'run' | 'each';
+}
 
 /**
  * One piece of a multi-colour path drawing (`polygon.parts`), drawn back to

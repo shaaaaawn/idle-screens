@@ -24,6 +24,8 @@ final class MotionVocabTests: XCTestCase {
         let eases: [Ease]
         let trims: [Trim]
         let lineTrims: [LineTrim]
+        /// `draw.mode: 'each'` (X676): every subpath cut to the same span.
+        let lineTrimsEach: [LineTrim]?
         let drawSpans: [Span]
         let numbers: [Number]
         let stagger: [Stagger]
@@ -70,6 +72,22 @@ final class MotionVocabTests: XCTestCase {
                 }
             }
         }
+        let each = try XCTUnwrap(g.lineTrimsEach)
+        XCTAssertFalse(each.isEmpty)
+        for t in each {
+            let got = DrawOn.trim(lines, t.a, t.b, each: true)
+            XCTAssertEqual(got.count, t.lines.count, "each \(t.a)…\(t.b)")
+            for (l, m) in zip(got, t.lines) {
+                XCTAssertEqual(l.closed, m.closed)
+                XCTAssertEqual(l.points.count, m.points.count)
+                for (p, q) in zip(l.points, m.points) {
+                    XCTAssertEqual(p.0, q[0], accuracy: 1e-9); XCTAssertEqual(p.1, q[1], accuracy: 1e-9)
+                }
+            }
+        }
+        let modeEach = try JSONDecoder().decode(StrokeDraw.self, from: Data(#"{"end":0.5,"mode":"each"}"#.utf8))
+        XCTAssertTrue(modeEach.each)
+        XCTAssertFalse(StrokeDraw(end: 0.5).each)
         for s in g.drawSpans {
             let span = (s.d ?? StrokeDraw()).span
             XCTAssertEqual(span.map { [$0.0, $0.1] }, s.span)
@@ -82,6 +100,11 @@ final class MotionVocabTests: XCTestCase {
             ##"{"kind":"textBlock","text":"0","number":{"value":1234.5,"decimals":1,"suffix":" km"}}"##.utf8))
         guard case .textBlock(let text, _, _, _, _, _, _) = block else { return XCTFail() }
         XCTAssertEqual(text, "1,234.5 km")
+        // `minDigits` (X677): a fixed-width frame counter.
+        let frame = try JSONDecoder().decode(SpecSubset.Sprite.self, from: Data(
+            ##"{"kind":"textBlock","text":"FRAME 0","number":{"value":42,"prefix":"FRAME ","grouping":false,"minDigits":4}}"##.utf8))
+        guard case .textBlock(let ftext, _, _, _, _, _, _) = frame else { return XCTFail() }
+        XCTAssertEqual(ftext, "FRAME 0042")
     }
 
     func testStaggeredLifeMatchesTheWeb() throws {

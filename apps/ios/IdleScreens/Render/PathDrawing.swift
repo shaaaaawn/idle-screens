@@ -86,6 +86,12 @@ final class PathDrawing: Equatable, @unchecked Sendable {
 
     static func == (a: PathDrawing, b: PathDrawing) -> Bool { a.key == b.key }
 
+    /// The closed SVG path through unit-box `points` (`M x0 y0 L … Z`):
+    /// shapes.ts `pointsPathD`, for a points polygon with path paint.
+    static func closedPath(through points: [[Double]]) -> String {
+        points.enumerated().map { i, p in "\(i == 0 ? "M" : "L") \(p[0]) \(p[1])" }.joined(separator: " ") + " Z"
+    }
+
     /// pathFrame: per-axis scale (px) and the unit-box point anchored at the position.
     func frame(r: Double, width: Double, height: Double) -> (sx: Double, sy: Double, ox: Double, oy: Double) {
         let sx = span == "width" || span == "screen" ? width / 2 : r
@@ -234,7 +240,7 @@ enum PathRaster {
                 }
                 cg.restoreGState()
             }
-            let lines = p.stroke?.draw?.span.map { DrawOn.trim(p.flat.lines, $0.0, $0.1) } ?? p.flat.lines
+            let lines = p.stroke?.draw.flatMap { d in d.span.map { DrawOn.trim(p.flat.lines, $0.0, $0.1, each: d.each) } } ?? p.flat.lines
             if let st = p.stroke, !lines.isEmpty {
                 // Strokes in px: width from the uniform radius, never stretched by a span.
                 let path = CGMutablePath()

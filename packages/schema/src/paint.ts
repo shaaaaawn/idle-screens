@@ -37,8 +37,9 @@ export function transformOrigin(tf: LayerTransform, layer: LayerSpec | null, w: 
 export function transformPoint(tf: LayerTransform, p: Pt, w: number, h: number, unit: number, origin: Pt = { x: w / 2, y: h / 2 }): Pt {
   const s = tf.scale ?? 1;
   const sx = s * (tf.scaleX ?? 1);
+  const sy = s * (tf.scaleY ?? 1);
   let x = (p.x - origin.x) * sx;
-  let y = (p.y - origin.y) * s;
+  let y = (p.y - origin.y) * sy;
   if (tf.rotate) {
     const r = (tf.rotate * Math.PI) / 180;
     const c = Math.cos(r);
@@ -52,11 +53,11 @@ export function transformPoint(tf: LayerTransform, p: Pt, w: number, h: number, 
 export function transformSize(tf: LayerTransform | undefined): number {
   if (!tf) return 1;
   const s = tf.scale ?? 1;
-  return s * Math.sqrt(Math.abs(tf.scaleX ?? 1));
+  return s * Math.sqrt(Math.abs((tf.scaleX ?? 1) * (tf.scaleY ?? 1)));
 }
 
 /** The numeric fields of a `LayerTransform`, at their identity values. */
-export const TRANSFORM_FIELDS = { x: 0, y: 0, scale: 1, scaleX: 1, rotate: 0 } as const;
+export const TRANSFORM_FIELDS = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotate: 0 } as const;
 export type TransformField = keyof typeof TRANSFORM_FIELDS;
 
 /**
@@ -75,10 +76,10 @@ export function transformRangeOf(tf: LayerTransform | undefined): TransformRange
   return r;
 }
 
-/** The largest factor any axis is stretched by over `r` — never the geometric mean, which undercounts a `scaleX` stretch. */
+/** The largest factor any axis is stretched by over `r` — never the geometric mean, which undercounts a `scaleX` / `scaleY` stretch. */
 export function maxAxisScale(r: TransformRange): number {
   const s = Math.max(Math.abs(r.scale[0]), Math.abs(r.scale[1]));
-  return s * Math.max(1, Math.abs(r.scaleX[0]), Math.abs(r.scaleX[1]));
+  return s * Math.max(1, Math.abs(r.scaleX[0]), Math.abs(r.scaleX[1]), Math.abs(r.scaleY[0]), Math.abs(r.scaleY[1]));
 }
 
 export interface Box { x0: number; y0: number; x1: number; y1: number }
@@ -86,8 +87,8 @@ export interface Box { x0: number; y0: number; x1: number; y1: number }
 /**
  * The box holding everywhere `transformPoint` can put `p` while the transform
  * ranges over `r` (about `origin`). Exact as a bounding box, so never short:
- * at a fixed angle a coordinate of the image is bilinear in (scale, scaleX),
- * so its extremes sit at the four corners of their ranges, and each corner's
+ * at a fixed angle a coordinate of the image is multilinear in (scale, scaleX,
+ * scaleY), so its extremes sit at the corners of their ranges, and each corner's
  * vector then sweeps an arc whose box is its two ends plus every axis it
  * crosses; the offset adds its own range. A rotate range of a full turn or
  * more sweeps the whole circle.
@@ -105,9 +106,9 @@ export function sweptBox(r: TransformRange, p: Pt, origin: Pt, unit: number): Bo
   const full = r.rotate[1] - r.rotate[0] >= 360;
   const QUARTER = Math.PI / 2;
   for (const s of r.scale) {
-    for (const sx of r.scaleX) {
+    for (const sx of r.scaleX) for (const sy of r.scaleY) {
       const vx = ux * s * sx;
-      const vy = uy * s;
+      const vy = uy * s * sy;
       const len = Math.hypot(vx, vy);
       if (len === 0) { take(0, 0); continue; }
       if (full) { take(-len, -len); take(len, len); continue; }

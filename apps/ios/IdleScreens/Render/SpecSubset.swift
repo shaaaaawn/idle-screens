@@ -276,7 +276,7 @@ struct SpecSubset: Decodable, Equatable {
         }
     }
 
-    /// `{x?, y?, scale?, scaleX?, rotate?, origin?}` — translate in spec
+    /// `{x?, y?, scale?, scaleX?, scaleY?, rotate?, origin?}` — translate in spec
     /// units (min(w,h), or px), rotate in degrees, about the viewport centre
     /// or (`origin: "anchor"`) the layer's own anchor. Lenient per field: a
     /// bad value is identity for that field, never a dropped scene.
@@ -285,22 +285,24 @@ struct SpecSubset: Decodable, Equatable {
         var y: Double?
         var scale: Double?
         var scaleX: Double?
+        var scaleY: Double?
         var rotate: Double?
         var origin: String?
 
         init(x: Double? = nil, y: Double? = nil, scale: Double? = nil, scaleX: Double? = nil,
-             rotate: Double? = nil, origin: String? = nil) {
-            self.x = x; self.y = y; self.scale = scale; self.scaleX = scaleX
+             scaleY: Double? = nil, rotate: Double? = nil, origin: String? = nil) {
+            self.x = x; self.y = y; self.scale = scale; self.scaleX = scaleX; self.scaleY = scaleY
             self.rotate = rotate; self.origin = origin
         }
 
-        private enum CodingKeys: String, CodingKey { case x, y, scale, scaleX, rotate, origin }
+        private enum CodingKeys: String, CodingKey { case x, y, scale, scaleX, scaleY, rotate, origin }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             x = try? c.decodeIfPresent(Double.self, forKey: .x)
             y = try? c.decodeIfPresent(Double.self, forKey: .y)
             scale = try? c.decodeIfPresent(Double.self, forKey: .scale)
             scaleX = try? c.decodeIfPresent(Double.self, forKey: .scaleX)
+            scaleY = try? c.decodeIfPresent(Double.self, forKey: .scaleY)
             rotate = try? c.decodeIfPresent(Double.self, forKey: .rotate)
             origin = try? c.decodeIfPresent(String.self, forKey: .origin)
         }
@@ -756,6 +758,21 @@ extension SpecSubset.Sprite: Decodable {
                     stroke: (try? c.decodeIfPresent(PathDrawing.Stroke.self, forKey: .stroke)) ?? nil,
                     opacity: nil)
                 drawing = PathDrawing(specs: [one], ownColor: false, span: span ?? nil, origin: origin ?? nil, soft: soft)
+            } else if let pts = try? c.decodeIfPresent([[Double]].self, forKey: .points), pts.count >= 2,
+                      pts.allSatisfy({ $0.count == 2 }) {
+                // A `points` polygon with path paint (stroke, fill: false,
+                // gradient) draws as the closed path through its points —
+                // shapes.ts `isPointsPath` (X711). Plain points keep their fill.
+                let fill = (try? c.decodeIfPresent(Bool.self, forKey: .fill)) ?? nil
+                let gradient = (try? c.decodeIfPresent(PathDrawing.Gradient.self, forKey: .gradient)) ?? nil
+                let stroke = (try? c.decodeIfPresent(PathDrawing.Stroke.self, forKey: .stroke)) ?? nil
+                let painted = c.contains(.stroke) || fill == false || c.contains(.gradient)
+                if painted {
+                    let one = PathDrawing.PartSpec(
+                        path: PathDrawing.closedPath(through: pts), color: nil, fillRule: nil,
+                        fill: fill, gradient: gradient, stroke: stroke, opacity: nil)
+                    drawing = PathDrawing(specs: [one], ownColor: false, span: nil, origin: nil, soft: soft)
+                }
             }
             self = .polygon(
                 radius: Self.range(try c.decodeIfPresent([Double].self, forKey: .radius), default: (0.01, 0.02)),
@@ -1043,18 +1060,18 @@ struct PaintTransform: Equatable, Sendable {
     var scaleXY: (x: Double, y: Double) {
         func s(_ tf: SpecSubset.LayerTransform?) -> (Double, Double) {
             let k = tf?.scale ?? 1
-            return (k * (tf?.scaleX ?? 1), k)
+            return (k * (tf?.scaleX ?? 1), k * (tf?.scaleY ?? 1))
         }
         let a = s(layer), b = s(group)
         return (a.0 * b.0, a.1 * b.1)
     }
 
-    /// translate(-o) → scale(s·sx, s) → rotate → translate(o + offset), the
+    /// translate(-o) → scale(s·sx, s·sy) → rotate → translate(o + offset), the
     /// web's canvas call sequence read as one point map.
     private static func step(_ tf: SpecSubset.LayerTransform, about o: CGPoint, unit: CGFloat) -> CGAffineTransform {
         let s = tf.scale ?? 1
         return CGAffineTransform(translationX: -o.x, y: -o.y)
-            .concatenating(CGAffineTransform(scaleX: s * (tf.scaleX ?? 1), y: s))
+            .concatenating(CGAffineTransform(scaleX: s * (tf.scaleX ?? 1), y: s * (tf.scaleY ?? 1)))
             .concatenating(CGAffineTransform(rotationAngle: (tf.rotate ?? 0) * .pi / 180))
             .concatenating(CGAffineTransform(translationX: o.x + (tf.x ?? 0) * unit,
                                              y: o.y + (tf.y ?? 0) * unit))

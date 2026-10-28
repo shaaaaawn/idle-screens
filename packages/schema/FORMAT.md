@@ -52,7 +52,9 @@ scene's own clock), paint-level layer `opacity` and `transform`,
 and path strokes, the `in` / `out` / `spring` glide eases (timeline keys and
 live steers), `rock`, `life.stagger`, `reveal.rise`, `textBlock.number`, the
 `wipe` transition, `scenePeriod` and the `loop-seam` advisory
-(2026-10-25 — motion vocabulary).
+(2026-10-25 — motion vocabulary); path paint on `points` polygons,
+`textBlock.number.minDigits`, `stroke.draw.mode` and `transform.scaleY`
+(2026-10-27 — small format adds).
 
 ## Safety invariants
 
@@ -307,7 +309,7 @@ on the sprite tier (the `basic` tier rule).
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
 | `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** rendered |
 | `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** rendered |
-| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). **Order:** `scale`/`scaleX` (along the layer's own horizontal) and `rotate` apply about the origin first, then `x`/`y` translate in **screen space** — an offset is never turned or stretched by the layer's own `rotate`/`scale`, so `{ "rotate": 90, "x": 0.2 }` moves the layer right, not down. A group's transform wraps the result (*group(layer(p))*), so a group's `scale` and `rotate` do act on its members' offsets. Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** rendered (the sprite tier applies the summed rotation and per-axis scale, exact unless a rotated layer is scaled unevenly) |
+| `transform` | `{x?, y?, scale?, scaleX?, scaleY?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8), `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors) and `scaleY` (±8, × `scale` vertically — key it against `scaleX` for squash-and-stretch: wide-and-short on a landing, narrow-and-tall on take-off; negative flips). **Order:** `scale`/`scaleX`/`scaleY` (along the layer's own axes) and `rotate` apply about the origin first, then `x`/`y` translate in **screen space** — an offset is never turned or stretched by the layer's own `rotate`/`scale`, so `{ "rotate": 90, "x": 0.2 }` moves the layer right, not down. A group's transform wraps the result (*group(layer(p))*), so a group's `scale` and `rotate` do act on its members' offsets. Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** rendered (the sprite tier applies the summed rotation and per-axis scale, exact unless a rotated layer is scaled unevenly) |
 | `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** rendered |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
@@ -365,6 +367,14 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   scaled by each entity's seeded radius (not by the keyed shape's own extent):
   keep every keyed point inside −1..1 (the validator rejects one outside), and
   shrink a target shape by scaling its points, not by exceeding the box.
+  A `points` polygon also takes the path paint below — **`stroke`**,
+  **`fill: false`** and **`gradient`** — and then draws as the closed path
+  through its points (`M p0 L p1 … Z`, the closing edge included), so a
+  keyed `points` array is cheap line art: a stick figure or a wire rig whose
+  joints lerp, with `fill: false` and a `stroke`. An open figure traced as
+  an out-and-back tour (`[[0,0], [0.3,0.6], [0,0], [-0.3,0.6], [0,0], [0,-0.6]]`)
+  strokes each limb twice, which reads as one line. `stroke.draw` works
+  too. `fillRule`, `span` and `origin` stay path-only.
   For anything more detailed than a 24-point facet, give the polygon a
   **path** instead (next entry)
 - **Path drawings** — `{ "kind": "polygon", "radius": [0.3, 0.3], "color": "#2f6a3e", "path": "M 0 -0.9 C 0.5 -0.9 0.7 -0.3 0.5 0.1 … Z" }`:
@@ -400,8 +410,13 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
     part's subpaths counted as one pen run in the order the path draws them
     (a closed ring includes its closing edge, and comes back open when cut) —
     `fill: false` line art plus a glide of `stroke.draw.end` is a drawing
-    that draws itself. Paint; `…stroke.draw.end` is a key target like the
-    stroke's width. **Native:** rendered.
+    that draws itself. `draw.mode: "each"` draws every subpath at once
+    instead: each is cut to the same `start`..`end` of its **own** length,
+    so 12 spokes of a burst, the ticks of a dial or a field of hatching all
+    grow together from one key (`"run"`, the default, is the one pen run).
+    `mode` is an enum, so a steer or key on it steps. Paint;
+    `…stroke.draw.end` is a key target like the stroke's width.
+    **Native:** rendered.
   - **`fill: false`** draws the stroke only — line art. Then open paths
     (no `Z`) are fine: veins, hatching, antennae, rigging.
   - **`parts`** — a multi-colour drawing in one layer:
@@ -552,7 +567,17 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   popping it whole (the caption look); `fade` (0–1 exclusive of 0, default
   0.15, `glyphFade` only) is each glyph's fade window as a fraction of
   progress — small reads as a soft typewriter, large as a wave of
-  overlapping fades. Still a pure function of `progress`, so it glides and
+  overlapping fades. The mapping is exact, so a key can land a beat: with
+  `N` glyphs and fade `f`, glyph `g` (0-based) starts fading in at progress
+  `(g/N)·(1−f)` and is **fully shown at `f + (g/N)·(1−f)`**. `N` counts the
+  graphemes of the **broken** lines — line breaks (authored `\n` or wrap)
+  are not glyphs, and spaces are. So the last glyph of line 1 (index
+  `n₁ − 1`, where `n₁` is line 1's grapheme count) is fully shown at
+  `f + ((n₁ − 1)/N)·(1−f)`, not at `n₁/N`. In `mode: "line"` whole lines
+  pop: `round(progress · L)` of the `L` broken lines show, so line `k`
+  (1-based) appears at progress `(k − ½)/L` — key `k/L` to show exactly `k`
+  lines, and remember a wrapped line counts as its own line.
+  Still a pure function of `progress`, so it glides and
   deletes exactly like the other modes (tvOS renders it glyph by glyph; its
   sprite tier re-bakes the block per 1/16 of a glyph's alpha). With `glyphFade`, `rise`
   (0..1 em, default 0) lifts each glyph into its line as it fades in, from
@@ -576,7 +601,14 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   The block paints `prefix + value + suffix` instead of `text`, `value`
   rounded to `decimals` (0..6, default 0) with its thousands grouped by
   commas unless `grouping: false` — formatted by the engine, never by the
-  viewer's locale, so every screen shows the same digits. `value` is
+  viewer's locale, so every screen shows the same digits. `minDigits`
+  (1..12, default 1) zero-pads the integer part for a fixed-width counter:
+  `{ "value": 42, "minDigits": 4, "grouping": false, "prefix": "FRAME " }`
+  paints `FRAME 0042`. Padding comes before grouping (as `Intl`'s
+  `minimumIntegerDigits` does), so with the default grouping 42 reads
+  `0,042` — set `grouping: false` for a counter. The sign stays outside the
+  padding (`-0042`). With a monospace `font` the counter keeps its width as
+  it rolls. `value` is
   **paint**: `setParam("stats.sprite.number.value", 48210, { dur: 4000 })`
   rolls the digits up over the glide, and a timeline key does the same.
   Line-breaking runs on the formatted string, so a counter that gains a

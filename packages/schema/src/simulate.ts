@@ -529,9 +529,9 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
 
 /**
  * The string a `textBlock` paints: its `text`, or with `number` the
- * counter's `prefix + value + suffix` — rounded to `decimals`, thousands
- * grouped with commas unless `grouping: false`. Locale-free, so every
- * device draws the same digits.
+ * counter's `prefix + value + suffix` — rounded to `decimals`, the integer
+ * part zero-padded to `minDigits`, thousands grouped with commas unless
+ * `grouping: false`. Locale-free, so every device draws the same digits.
  */
 export function textBlockText(s: { text: string; number?: TextNumber }): string {
   const n = s.number;
@@ -539,8 +539,12 @@ export function textBlockText(s: { text: string; number?: TextNumber }): string 
   const d = Math.max(0, Math.min(LIMITS.maxTextNumberDecimals, Math.round(n.decimals ?? 0)));
   const v = Number.isFinite(n.value) ? n.value : 0;
   const fixed = Math.abs(v).toFixed(d);
-  const [whole, frac] = fixed.split('.');
-  const grouped = n.grouping === false ? whole! : whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const [digits, frac] = fixed.split('.');
+  // Zero-pad the integer part before grouping (Intl's minimumIntegerDigits
+  // does the same: 42 with minDigits 4 → "0,042", or "0042" ungrouped).
+  const pad = Math.max(1, Math.min(LIMITS.maxTextNumberMinDigits, Math.round(n.minDigits ?? 1)));
+  const whole = digits!.padStart(pad, '0');
+  const grouped = n.grouping === false ? whole : whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const neg = v < 0 && Number(fixed) !== 0;
   return `${n.prefix ?? ''}${neg ? '-' : ''}${grouped}${frac !== undefined ? `.${frac}` : ''}${n.suffix ?? ''}`;
 }
@@ -1239,7 +1243,9 @@ export function revealState(lines: TextBlockLine[], reveal: TextRevealInput, tMs
 
   // glyphFade: glyph g starts fading at (g/total)·(1−fade) and ramps to
   // opaque over a `fade`-wide window of progress, so every glyph is 0 at
-  // progress 0 and 1 at progress 1. The frontier below (shared with
+  // progress 0 and 1 at progress 1 — glyph g is fully shown at
+  // fade + (g/total)·(1−fade), `total` counting the graphemes of the broken
+  // lines (no newlines). FORMAT.md documents this mapping; keep them agreed. The frontier below (shared with
   // typewriter) still anchors the caret. Pure paint, like everything here.
   let glyphAlphas: number[][] | undefined;
   if (mode === 'glyphFade') {

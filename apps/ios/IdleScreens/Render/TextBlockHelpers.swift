@@ -318,8 +318,9 @@ enum TextBlockFont {
 // MARK: - textBlock.number
 
 /// A counter (simulate.ts `textBlockText`): `prefix + value + suffix`, the
-/// value rounded to `decimals` (0…6) places as JS `toFixed` does, thousands
-/// grouped with commas unless `grouping: false`. Locale-free, so every device
+/// value rounded to `decimals` (0…6) places as JS `toFixed` does, the
+/// integer part zero-padded to `minDigits`, thousands grouped with commas
+/// unless `grouping: false`. Locale-free, so every device
 /// paints the same digits.
 struct TextNumber: Decodable, Equatable, Sendable {
     var value: Double
@@ -327,6 +328,8 @@ struct TextNumber: Decodable, Equatable, Sendable {
     var prefix: String?
     var suffix: String?
     var grouping: Bool?
+    /// Zero-pad the integer part to this many digits (1…12), before grouping.
+    var minDigits: Double?
 
     var formatted: String {
         let d = max(0, min(6, Int((decimals ?? 0).rounded())))
@@ -334,6 +337,8 @@ struct TextNumber: Decodable, Equatable, Sendable {
         let fixed = Self.toFixed(abs(v), d)
         let parts = fixed.split(separator: ".", omittingEmptySubsequences: false)
         var whole = String(parts[0])
+        let pad = max(1, min(12, Int((minDigits ?? 1).rounded())))
+        if whole.count < pad { whole = String(repeating: "0", count: pad - whole.count) + whole }
         if grouping != false {
             var out = ""
             for (i, ch) in whole.reversed().enumerated() {
