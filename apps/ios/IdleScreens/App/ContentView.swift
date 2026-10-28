@@ -16,7 +16,7 @@ struct ContentView: View {
     }()
 
     @Environment(\.dynamicTypeSize) private var typeSize
-    @AppStorage(Appearance.storageKey) private var appearance: Appearance = .system
+    @AppStorage(Appearance.storageKey) private var appearance: Appearance = Appearance.defaultValue
 
     var body: some View {
         // Measured once, here: every screen sizes its chrome from it.
