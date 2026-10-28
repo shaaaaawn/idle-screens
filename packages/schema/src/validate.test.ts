@@ -98,6 +98,15 @@ describe('validateSpec', () => {
     expect(validateSpec({ ...base(), layers: [{ ...layer, pulse: { amp: 0.3, period: 2000 } }] }).valid).toBe(true);
   });
 
+  it('accepts pulse.amp 0 as no pulse, and names the real range when refusing (X706)', () => {
+    const layer = base().layers[0];
+    expect(validateSpec({ ...base(), layers: [{ ...layer, pulse: { amp: 0, period: 4000 } }] }).valid).toBe(true);
+    for (const amp of [-0.1, 0.6, Number.NaN]) {
+      const errs = validateSpec({ ...base(), layers: [{ ...layer, pulse: { amp, period: 4000 } }] }).errors.filter((e) => e.path === 'layers[0].pulse.amp');
+      expect(errs.map((e) => e.message)).toEqual(['must be a number from 0 (no pulse) to 0.5']);
+    }
+  });
+
   it('validates units enum', () => {
     expect(validateSpec({ ...base(), units: 'px' }).valid).toBe(true);
     expect(paths({ ...base(), units: 'rem' })).toContain('units');
