@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { lumaKeyTimes, pathCells, timelineFlashReport } from './flash-timeline';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { flashSamplingForecast, lumaKeyTimes, MAX_TOTAL_SAMPLES, pathCells, timelineFlashReport, type FlashSamplingForecast } from './flash-timeline';
 import { sweptBox, transformPoint, type TransformRange } from './paint';
+import { luminanceGrid } from './perceive';
 import type { SaverSpec } from './types';
 import { validateSpec } from './validate';
 
@@ -12,6 +13,102 @@ const fullFrame = (key: string, color: string, opacity = 1): Record<string, unkn
 const step = (t: number, path: string, value: unknown): Record<string, unknown> => ({ t, path, value, dur: 0, ease: 'step' });
 const scene = (bg: string, layers: unknown[], keys: unknown[], duration = 4000): SaverSpec =>
   ({ schemaVersion: 1, id: 'f', label: 'F', background: { type: 'solid', color: bg }, layers, timeline: { loop: true, duration, keys } }) as unknown as SaverSpec;
+
+// 28 small static dots, each opacity keyed 9 times between 1 and 0.2 in a
+// staggered wave: dense across the frame (56 boundaries a second, past the
+// sample budget), sparse in every grid cell.
+const wave = (radius: number, motion: Record<string, unknown> = { type: 'static' }, low = 0.2): SaverSpec => {
+  const layers = Array.from({ length: 28 }, (_, i) => ({
+    key: `dot${i}`, count: 1, motion, position: { x: (i + 0.5) / 28, y: 0.5 + 0.25 * Math.sin(i / 2) },
+    sprite: { kind: 'circle', radius: [radius, radius], color: '#ffffff' },
+  }));
+  const keys = [];
+  for (let i = 0; i < 28; i++) for (let k = 0; k < 9; k++) keys.push({ t: k * 1000 + i * 37, path: `dot${i}.opacity`, value: k % 2 ? 1 : low, dur: 400 });
+  return scene('#000000', layers.map((l) => ({ ...l, opacity: 1 })), keys, 10000);
+};
+
+// X681 as reported: a Truchet grid of 28 tiles, each flushing red as it
+// turns about its own anchor, in a diagonal wave staggered 130 ms a step.
+const truchet = (rotate: boolean): SaverSpec => {
+  const layers = [];
+  const keys = [];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 7; c++) {
+    const key = `t${r}_${c}`;
+    layers.push({
+      key, count: 1, position: { x: 0.1 + c * 0.13, y: 0.2 + r * 0.2 }, motion: { type: 'static' }, alpha: [1, 1],
+      transform: { origin: 'anchor', rotate: 0 },
+      sprite: { kind: 'polygon', radius: [0.06, 0.06], color: '#000', parts: [{ path: 'M -1 0 A 1 1 0 0 1 0 -1 M 0 1 A 1 1 0 0 1 1 0', fill: false, stroke: { color: '#ece8df', width: 0.1 } }] },
+    });
+    const t = 1400 + (r + c) * 130;
+    if (rotate) keys.push({ t, path: `${key}.transform.rotate`, value: 90, ease: 'spring', dur: 1100 });
+    keys.push({ t, path: `${key}.sprite.parts.0.stroke.color`, value: '#ed3f21', dur: 350 });
+    keys.push({ t: t + 700, path: `${key}.sprite.parts.0.stroke.color`, value: '#ece8df', dur: 1500 });
+  }
+  return { schemaVersion: 1, id: 'x681', label: 'X681', background: { type: 'solid', color: '#141414' }, layers, timeline: { duration: 12000, keys } } as unknown as SaverSpec;
+};
+
+// A step to dark and a glide back up keyed at the same `t`: two changes per
+// key time, so the 200 ms floor allows a 5-a-second sawtooth (found triaging X712).
+const sawtooth = (period: number, laps: number, dur = period): SaverSpec => {
+  const keys = [];
+  for (let t = 0; t < laps * period; t += period) {
+    keys.push(step(t, 'top.opacity', 0));
+    keys.push({ t, path: 'top.opacity', value: 1, dur, ease: 'linear' });
+  }
+  const spec = scene('#000000', [fullFrame('top', '#ffffff')], keys, laps * period + 1000);
+  (spec.timeline as { loop?: boolean }).loop = false;
+  return spec;
+};
+
+// Count the luminance grids the flash check resolves (the gate's whole cost).
+vi.mock('./perceive', async (importOriginal) => {
+  const m = await importOriginal<typeof import('./perceive')>();
+  return { ...m, luminanceGrid: vi.fn(m.luminanceGrid) };
+});
+const grids = vi.mocked(luminanceGrid);
+
+/** How the forecast and the report met over every fixture this file runs. */
+const met = { exhausted: 0, incomplete: 0, flashFirst: 0, resolved: 0 };
+
+/**
+ * `timelineFlashReport`, checked against `flashSamplingForecast` on the same
+ * spec. Not a plain ⇔: the report stops at the first flash it finds, so a
+ * forecast past the budget may meet a real strobe instead of `incomplete`.
+ */
+function checked(spec: SaverSpec): ReturnType<typeof timelineFlashReport> {
+  grids.mockClear();
+  const f = flashSamplingForecast(spec);
+  expect(grids).not.toHaveBeenCalled(); // the forecast draws nothing
+  const r = timelineFlashReport(spec);
+  const drawn = grids.mock.calls.length;
+  expect(f.budget).toBe(MAX_TOTAL_SAMPLES);
+  expect(f.needed > f.budget).toBe(f.exhausted);
+  expect(f.samples).toBeLessThanOrEqual(f.budget);
+  if (r.incomplete) {
+    met.incomplete++;
+    expect(f).toMatchObject({ exhausted: true, at: r.at, boundariesPerSecond: r.boundariesPerSecond, samples: drawn });
+    expect(f.report).toMatchObject({ fails: true, incomplete: true, at: r.at, boundariesPerSecond: r.boundariesPerSecond });
+  } else if (f.exhausted) {
+    met.flashFirst++;
+    expect(r.fails).toBe(true); // found a flash before the budget ran out
+    expect(drawn).toBeLessThanOrEqual(f.samples);
+  } else {
+    expect(f.at).toBeNull();
+    expect(f.report.fails).toBe(false);
+    expect(f.report.incomplete).toBeUndefined();
+    if (r.fails) expect(drawn).toBeLessThanOrEqual(f.samples);
+    else expect(drawn).toBe(f.samples); // a pass resolves exactly the forecast's frames
+  }
+  if (f.exhausted) met.exhausted++;
+  if (drawn > 0) met.resolved++;
+  return r;
+}
+
+afterAll(() => {
+  // The parity above ran on both sides of the budget, and the mock really counted.
+  expect(met.incomplete).toBeGreaterThanOrEqual(3);
+  expect(met.resolved).toBeGreaterThanOrEqual(5);
+});
 
 describe('timelineFlashReport', () => {
   it('treats draw-span keys as luminance-bearing, so a draw-only timeline is sampled', () => {
@@ -40,7 +137,7 @@ describe('timelineFlashReport', () => {
     }
     const spec = scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys);
     expect(validateSpec(structuredClone(spec)).valid).toBe(true); // every path obeys the per-path floor
-    const r = timelineFlashReport(spec);
+    const r = checked(spec);
     expect(r.fails).toBe(true);
     expect(r.flashesPerSecond).toBeGreaterThan(3);
     expect(r.flashingArea).toBeGreaterThanOrEqual(0.25);
@@ -53,7 +150,7 @@ describe('timelineFlashReport', () => {
       keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#d0d0d0'));
       keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#d0d0d0' : '#ffffff'));
     }
-    expect(timelineFlashReport(scene('#d0d0d0', [fullFrame('bottom', '#d0d0d0'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
+    expect(checked(scene('#d0d0d0', [fullFrame('bottom', '#d0d0d0'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
   });
 
   it('counts whole-object `sprite` keys as paint', () => {
@@ -64,7 +161,7 @@ describe('timelineFlashReport', () => {
       keys.push(step(i * 200 + 67, 'top.sprite', sprite(i % 2 ? '#ffffff' : '#000000')));
       keys.push(step(i * 200 + 133, 'bottom.sprite', sprite(i % 2 ? '#000000' : '#ffffff')));
     }
-    expect(timelineFlashReport(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
+    expect(checked(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
   });
 
   it('does not let a harmless dense section hide a later strobe', () => {
@@ -77,7 +174,7 @@ describe('timelineFlashReport', () => {
       keys.push(step(3000 + i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
     }
     const decoys = Array.from({ length: 8 }, (_, p) => fullFrame(`d${p}`, '#000000', 0));
-    expect(timelineFlashReport(scene('#000000', [...decoys, fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys, 8000)).fails).toBe(true);
+    expect(checked(scene('#000000', [...decoys, fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys, 8000)).fails).toBe(true);
   });
 
   it('passes X589 as submitted: two white layers 100 ms apart peak at 3 flashes a second', () => {
@@ -86,7 +183,7 @@ describe('timelineFlashReport', () => {
       keys.push(step(i * 200, 'a.opacity', i % 2 ? 0 : 1));
       keys.push(step(i * 200 + 100, 'b.opacity', i % 2 ? 0 : 1));
     }
-    const r = timelineFlashReport(scene('#000000', [fullFrame('a', '#ffffff', 0), fullFrame('b', '#ffffff', 0)], keys));
+    const r = checked(scene('#000000', [fullFrame('a', '#ffffff', 0), fullFrame('b', '#ffffff', 0)], keys));
     expect(r.fails).toBe(false);
     expect(r.flashesPerSecond).toBe(3);
   });
@@ -98,11 +195,11 @@ describe('timelineFlashReport', () => {
       { t: 15000, path: 'dark.opacity', value: 0, dur: 280 },
       { t: 21000, path: 'dark.opacity', value: 0.86, dur: 280 },
     ], 24000);
-    expect(timelineFlashReport(closet)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
+    expect(checked(closet)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
     // Fast keys on a non-paint path are not a flash candidate at all.
     const moves = [];
     for (let i = 0; i < 15; i++) moves.push(step(i * 200, 'a.position.x', i % 2 ? 0.4 : 0.6), step(i * 200 + 100, 'b.position.x', i % 2 ? 0.4 : 0.6));
-    expect(timelineFlashReport(scene('#000000', [fullFrame('a', '#ffffff'), fullFrame('b', '#ffffff')], moves)).at).toBeNull();
+    expect(checked(scene('#000000', [fullFrame('a', '#ffffff'), fullFrame('b', '#ffffff')], moves)).at).toBeNull();
   });
 
   it('catches a burst that straddles a chunk edge after many harmless boundaries', () => {
@@ -112,28 +209,15 @@ describe('timelineFlashReport', () => {
     for (let i = 0; i < 17; i++) keys.push(step(i * 100, 'bottom.sprite.color', i % 2 ? '#000000' : '#000001'));
     for (let i = 0; i < 8; i++) keys.push(step(1700 + i * 100, 'top.opacity', i % 2 ? 0 : 1));
     const spec = scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys, 3000);
-    const r = timelineFlashReport(spec);
+    const r = checked(spec);
     expect(r.fails).toBe(true);
   });
 
   describe('per-cell shortcut (F125 regression)', () => {
-    // 28 small static dots, each opacity keyed 9 times between 1 and 0.2 in a
-    // staggered wave: dense across the frame (56 boundaries a second, past the
-    // sample budget), sparse in every grid cell.
-    const wave = (radius: number, motion: Record<string, unknown> = { type: 'static' }, low = 0.2): SaverSpec => {
-      const layers = Array.from({ length: 28 }, (_, i) => ({
-        key: `dot${i}`, count: 1, motion, position: { x: (i + 0.5) / 28, y: 0.5 + 0.25 * Math.sin(i / 2) },
-        sprite: { kind: 'circle', radius: [radius, radius], color: '#ffffff' },
-      }));
-      const keys = [];
-      for (let i = 0; i < 28; i++) for (let k = 0; k < 9; k++) keys.push({ t: k * 1000 + i * 37, path: `dot${i}.opacity`, value: k % 2 ? 1 : low, dur: 400 });
-      return scene('#000000', layers.map((l) => ({ ...l, opacity: 1 })), keys, 10000);
-    };
-
     it('passes a staggered wave of small dots without resolving a frame', () => {
       const spec = wave(0.02);
       expect(validateSpec(structuredClone(spec)).valid).toBe(true);
-      expect(timelineFlashReport(spec)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
+      expect(checked(spec)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
     });
 
     it('still reports the three-path full-frame strobe at 5 flashes a second', () => {
@@ -143,7 +227,7 @@ describe('timelineFlashReport', () => {
         keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#ffffff' : '#000000'));
         keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
       }
-      const r = timelineFlashReport(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys));
+      const r = checked(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys));
       expect(r).toMatchObject({ fails: true, flashesPerSecond: 5 });
       expect(r.incomplete).toBeUndefined();
     });
@@ -162,7 +246,7 @@ describe('timelineFlashReport', () => {
         keys.push(step(i * 200 + 67, 'top.sprite.color', i % 2 ? '#000000' : '#ffffff'));
         keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#ffffff' : '#000000'));
       }
-      const r = timelineFlashReport(scene('#ffffff', [grid('bottom', '#ffffff'), grid('top', '#000000')], keys));
+      const r = checked(scene('#ffffff', [grid('bottom', '#ffffff'), grid('top', '#000000')], keys));
       expect(r.fails).toBe(true);
       expect(r.incomplete).toBeUndefined();
     });
@@ -175,13 +259,13 @@ describe('timelineFlashReport', () => {
         keys.push(step(i * 200 + 133, 'bottom.sprite.color', i % 2 ? '#000000' : '#ffffff'));
       }
       const spec = { ...scene('#000000', [fullFrame('bottom', '#000000'), { ...fullFrame('top', '#ffffff'), group: 'g' }], keys), groups: { g: { opacity: 1 } } } as SaverSpec;
-      expect(timelineFlashReport(spec)).toMatchObject({ fails: true, flashesPerSecond: 5 });
+      expect(checked(spec)).toMatchObject({ fails: true, flashesPerSecond: 5 });
     });
 
     it('treats a moving layer as reaching every cell', () => {
       // The same wave on drifting dots cannot be pinned to cells, so it is
       // sampled, runs past the budget and fails closed.
-      const r = timelineFlashReport(wave(0.02, { type: 'drift', speed: [0.02, 0.02] }));
+      const r = checked(wave(0.02, { type: 'drift', speed: [0.02, 0.02] }));
       expect(r).toMatchObject({ fails: true, incomplete: true });
     });
 
@@ -189,14 +273,14 @@ describe('timelineFlashReport', () => {
       const keys = [];
       for (let i = 0; i < 40; i++) keys.push(step(i * 100, 'dot.sprite.color', i % 2 ? '#000000' : '#ffffff'));
       const dot = { key: 'dot', count: 1, motion: { type: 'static' }, position: { x: 0.5, y: 0.5 }, opacity: 1, transform: { scale: 0.1 }, trail: { length: 500, fade: 0 }, sprite: { kind: 'circle', radius: [0.6, 0.6], color: '#ffffff' } };
-      const r = timelineFlashReport(scene('#000000', [dot], keys));
+      const r = checked(scene('#000000', [dot], keys));
       expect(r.fails).toBe(true);
     });
 
     it('fails closed, saying how dense, when a large-area dense window is past the budget', () => {
       // Discs that cover most of the frame, each barely changing: nothing
       // flashes, but there is too much to resolve.
-      const r = timelineFlashReport(wave(0.6, { type: 'static' }, 0.97));
+      const r = checked(wave(0.6, { type: 'static' }, 0.97));
       expect(r).toMatchObject({ fails: true, incomplete: true });
       expect(r.boundariesPerSecond).toBeGreaterThanOrEqual(50);
     });
@@ -210,30 +294,10 @@ describe('timelineFlashReport', () => {
     });
     const cellsOf = (spec: SaverSpec, path: string): number[] | null | undefined => pathCells(spec)?.get(path);
 
-    // X681 as reported: a Truchet grid of 28 tiles, each flushing red as it
-    // turns about its own anchor, in a diagonal wave staggered 130 ms a step.
-    const truchet = (rotate: boolean): SaverSpec => {
-      const layers = [];
-      const keys = [];
-      for (let r = 0; r < 4; r++) for (let c = 0; c < 7; c++) {
-        const key = `t${r}_${c}`;
-        layers.push({
-          key, count: 1, position: { x: 0.1 + c * 0.13, y: 0.2 + r * 0.2 }, motion: { type: 'static' }, alpha: [1, 1],
-          transform: { origin: 'anchor', rotate: 0 },
-          sprite: { kind: 'polygon', radius: [0.06, 0.06], color: '#000', parts: [{ path: 'M -1 0 A 1 1 0 0 1 0 -1 M 0 1 A 1 1 0 0 1 1 0', fill: false, stroke: { color: '#ece8df', width: 0.1 } }] },
-        });
-        const t = 1400 + (r + c) * 130;
-        if (rotate) keys.push({ t, path: `${key}.transform.rotate`, value: 90, ease: 'spring', dur: 1100 });
-        keys.push({ t, path: `${key}.sprite.parts.0.stroke.color`, value: '#ed3f21', dur: 350 });
-        keys.push({ t: t + 700, path: `${key}.sprite.parts.0.stroke.color`, value: '#ece8df', dur: 1500 });
-      }
-      return { schemaVersion: 1, id: 'x681', label: 'X681', background: { type: 'solid', color: '#141414' }, layers, timeline: { duration: 12000, keys } } as unknown as SaverSpec;
-    };
-
     it('passes a colour wave over tiles that turn about their own anchors', () => {
       const spec = truchet(true);
       expect(validateSpec(structuredClone(spec)).valid).toBe(true);
-      expect(timelineFlashReport(spec)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
+      expect(checked(spec)).toEqual({ fails: false, flashesPerSecond: 0, flashingArea: 0, at: null });
     });
 
     it('keeps a tile turning about its anchor in the cells it already paints', () => {
@@ -322,7 +386,7 @@ describe('timelineFlashReport', () => {
       }
       keys.push({ t: 0, path: 'top.transform.rotate', value: 90, dur: 3000 }, { t: 0, path: 'bottom.transform.rotate', value: -90, dur: 3000 });
       const turning = (key: string, color: string): Record<string, unknown> => ({ ...fullFrame(key, color), transform: { origin: 'anchor', rotate: 0 } });
-      const r = timelineFlashReport(scene('#000000', [turning('bottom', '#000000'), turning('top', '#ffffff')], keys));
+      const r = checked(scene('#000000', [turning('bottom', '#000000'), turning('top', '#ffffff')], keys));
       expect(r).toMatchObject({ fails: true, flashesPerSecond: 5 });
       expect(r.incomplete).toBeUndefined();
     });
@@ -330,46 +394,95 @@ describe('timelineFlashReport', () => {
 });
 
 describe('timelineFlashReport: a jump that lands on another key of the same path', () => {
-  // A step to dark and a glide back up keyed at the same `t`: two changes per
-  // key time, so the 200 ms floor allows a 5-a-second sawtooth (found triaging X712).
-  const sawtooth = (period: number, laps: number, dur = period): SaverSpec => {
-    const keys = [];
-    for (let t = 0; t < laps * period; t += period) {
-      keys.push(step(t, 'top.opacity', 0));
-      keys.push({ t, path: 'top.opacity', value: 1, dur, ease: 'linear' });
-    }
-    const spec = scene('#000000', [fullFrame('top', '#ffffff')], keys, laps * period + 1000);
-    (spec.timeline as { loop?: boolean }).loop = false;
-    return spec;
-  };
-
   it('refuses a full-frame sawtooth at the 200 ms floor (5 a second)', () => {
     const spec = sawtooth(200, 20);
     expect(validateSpec(structuredClone(spec)).valid).toBe(true); // legal per path
-    const r = timelineFlashReport(spec);
+    const r = checked(spec);
     expect(r.fails).toBe(true);
     expect(r.flashesPerSecond).toBeGreaterThan(3);
     expect(r.flashingArea).toBeGreaterThanOrEqual(0.25);
   });
 
   it('refuses the same sawtooth whether or not the glide ends on the next jump', () => {
-    expect(timelineFlashReport(sawtooth(200, 20, 199)).fails).toBe(true);
-    expect(timelineFlashReport(sawtooth(250, 16)).fails).toBe(true); // 4 a second
+    expect(checked(sawtooth(200, 20, 199)).fails).toBe(true);
+    expect(checked(sawtooth(250, 16)).fails).toBe(true); // 4 a second
   });
 
   it('passes a sawtooth at 2.5 a second', () => {
-    expect(timelineFlashReport(sawtooth(400, 10)).fails).toBe(false);
+    expect(checked(sawtooth(400, 10)).fails).toBe(false);
   });
 
   it('passes one jump-then-glide per lap (a loop seam reset)', () => {
     const keys = [step(0, 'top.opacity', 0), { t: 0, path: 'top.opacity', value: 1, dur: 35000, ease: 'linear' }];
-    expect(timelineFlashReport(scene('#000000', [fullFrame('top', '#ffffff')], keys, 36000)).fails).toBe(false);
+    expect(checked(scene('#000000', [fullFrame('top', '#ffffff')], keys, 36000)).fails).toBe(false);
   });
 
   it('does not double-count a chain of glides that meet end to start', () => {
     const keys = [];
     for (let i = 0; i < 20; i++) keys.push({ t: i * 200, path: 'top.opacity', value: i % 2 ? 0.95 : 1, dur: 200, ease: 'linear' });
     expect(lumaKeyTimes(scene('#000000', [fullFrame('top', '#ffffff')], keys)).times.length).toBe(21 + 20);
-    expect(timelineFlashReport(scene('#000000', [fullFrame('top', '#ffffff')], keys)).fails).toBe(false);
+    expect(checked(scene('#000000', [fullFrame('top', '#ffffff')], keys)).fails).toBe(false);
+  });
+});
+
+describe('flashSamplingForecast', () => {
+  // A full-frame jump to 0.97 and a 100 ms glide back to 1, every 340 ms (the
+  // 256-key cap's worth, 43 s): 6 distinct key boundaries a second, one short
+  // of dense, but each jump carries two changes, so the weighted count (9)
+  // makes every second dense. Nothing visibly flashes, so the check walks
+  // until the budget runs out.
+  const faintSawtooth = (): SaverSpec => {
+    const keys = [];
+    for (let i = 0; i < 128; i++) {
+      keys.push(step(i * 340, 'top.opacity', 0.97));
+      keys.push({ t: i * 340, path: 'top.opacity', value: 1, dur: 100, ease: 'linear' });
+    }
+    const spec = scene('#000000', [fullFrame('top', '#ffffff')], keys, 44000);
+    (spec.timeline as { loop?: boolean }).loop = false;
+    return spec;
+  };
+
+  it('weighs coincident jumps as the check does: a faint sawtooth runs past the budget', () => {
+    const spec = faintSawtooth();
+    expect(validateSpec(structuredClone(spec)).valid).toBe(true);
+    const { times } = lumaKeyTimes(spec);
+    const busiest = Math.max(...times.map((t) => times.filter((u) => u >= t && u < t + 1000).length));
+    expect(busiest).toBe(6); // not dense by distinct times alone
+    const f = flashSamplingForecast(spec);
+    expect(f).toMatchObject({ exhausted: true, at: 0, boundariesPerSecond: 9 });
+    expect(f.needed).toBeGreaterThan(f.budget);
+    expect(checked(spec)).toMatchObject({ fails: true, incomplete: true, at: 0, boundariesPerSecond: 9 });
+  });
+
+  it('bounds a tile turning about its anchor: the X681 wave needs no frame', () => {
+    const f: FlashSamplingForecast = flashSamplingForecast(truchet(true));
+    expect(f).toEqual({ exhausted: false, at: null, samples: 0, needed: 0, budget: MAX_TOTAL_SAMPLES, report: { fails: false, flashesPerSecond: 0, flashingArea: 0, at: null } });
+    expect(checked(truchet(true)).fails).toBe(false);
+  });
+
+  it('fails closed where a turn cannot be bounded (a key that moves the pivot)', () => {
+    const spec = truchet(true);
+    const keys = spec.timeline!.keys as Array<{ path: string; value: unknown }>;
+    for (const k of keys) if (k.path.endsWith('.transform.rotate')) { k.path = k.path.replace(/\.rotate$/, ''); k.value = { rotate: 90 }; }
+    const f = flashSamplingForecast(spec);
+    expect(f.exhausted).toBe(true);
+    expect(checked(spec)).toMatchObject({ fails: true, incomplete: true, at: f.at });
+  });
+
+  it('costs nothing on a timeline with no dense second, or none at all', () => {
+    const none = flashSamplingForecast({ ...truchet(false), timeline: undefined } as SaverSpec);
+    expect(none).toMatchObject({ exhausted: false, samples: 0, needed: 0 });
+    expect(flashSamplingForecast(sawtooth(400, 10))).toMatchObject({ exhausted: false });
+  });
+
+  it('resolves no luminance grid, where the report resolves its whole budget', () => {
+    const spec = wave(0.6, { type: 'static' }, 0.97);
+    grids.mockClear();
+    const f = flashSamplingForecast(spec);
+    expect(grids).not.toHaveBeenCalled();
+    expect(f.exhausted).toBe(true);
+    timelineFlashReport(spec);
+    expect(grids.mock.calls.length).toBe(f.samples); // positive control: the mock does count
+    expect(f.samples).toBeGreaterThan(0);
   });
 });

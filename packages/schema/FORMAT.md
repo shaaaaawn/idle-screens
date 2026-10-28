@@ -944,7 +944,8 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   values (a tile turning about its anchor stays in its own cells; an `x`
   glide covers the cells it sweeps). Past 512 frames to resolve, publishing refuses and
   says the timeline is too dense to verify: put fewer paint keys in that
-  second, or align them to shared times.
+  second, or align them to shared times. That case is known without
+  resolving a frame (`flashSamplingForecast`).
 - **Path drawings: what a key can address.** Every field of a path
   polygon is paint, so all of these glide (`N` is a part's index):
   `sprite.path` and `sprite.parts.N.path` (a morph number by number when the
