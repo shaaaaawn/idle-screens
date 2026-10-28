@@ -906,7 +906,11 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   paint that cell: a staggered wave of small static dots is busy across the
   frame but sparse in every cell, so it passes without a frame resolved. A
   layer that moves, emits, links or has its geometry keyed counts as
-  reaching every cell. Past 512 frames to resolve, publishing refuses and
+  reaching every cell, except for keys on its own `transform` or its
+  group's: those reach everywhere the transform can carry the drawing while
+  `x`, `y`, `scale`, `scaleX` and `rotate` range over their base and keyed
+  values (a tile turning about its anchor stays in its own cells; an `x`
+  glide covers the cells it sweeps). Past 512 frames to resolve, publishing refuses and
   says the timeline is too dense to verify: put fewer paint keys in that
   second, or align them to shared times.
 - **Path drawings: what a key can address.** Every field of a path

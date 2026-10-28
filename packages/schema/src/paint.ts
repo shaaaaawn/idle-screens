@@ -55,6 +55,76 @@ export function transformSize(tf: LayerTransform | undefined): number {
   return s * Math.sqrt(Math.abs(tf.scaleX ?? 1));
 }
 
+/** The numeric fields of a `LayerTransform`, at their identity values. */
+export const TRANSFORM_FIELDS = { x: 0, y: 0, scale: 1, scaleX: 1, rotate: 0 } as const;
+export type TransformField = keyof typeof TRANSFORM_FIELDS;
+
+/**
+ * Every value each numeric transform field takes over some stretch of time,
+ * as `[min, max]` — what a timeline that glides a transform sweeps through.
+ */
+export type TransformRange = Record<TransformField, [number, number]>;
+
+/** The degenerate range of one transform (identity where unset, or no transform at all). */
+export function transformRangeOf(tf: LayerTransform | undefined): TransformRange {
+  const r = {} as TransformRange;
+  for (const f of Object.keys(TRANSFORM_FIELDS) as TransformField[]) {
+    const v = tf?.[f] ?? TRANSFORM_FIELDS[f];
+    r[f] = [v, v];
+  }
+  return r;
+}
+
+/** The largest factor any axis is stretched by over `r` — never the geometric mean, which undercounts a `scaleX` stretch. */
+export function maxAxisScale(r: TransformRange): number {
+  const s = Math.max(Math.abs(r.scale[0]), Math.abs(r.scale[1]));
+  return s * Math.max(1, Math.abs(r.scaleX[0]), Math.abs(r.scaleX[1]));
+}
+
+export interface Box { x0: number; y0: number; x1: number; y1: number }
+
+/**
+ * The box holding everywhere `transformPoint` can put `p` while the transform
+ * ranges over `r` (about `origin`). Exact as a bounding box, so never short:
+ * at a fixed angle a coordinate of the image is bilinear in (scale, scaleX),
+ * so its extremes sit at the four corners of their ranges, and each corner's
+ * vector then sweeps an arc whose box is its two ends plus every axis it
+ * crosses; the offset adds its own range. A rotate range of a full turn or
+ * more sweeps the whole circle.
+ */
+export function sweptBox(r: TransformRange, p: Pt, origin: Pt, unit: number): Box {
+  const ux = p.x - origin.x;
+  const uy = p.y - origin.y;
+  const b: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  const take = (x: number, y: number): void => {
+    b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x);
+    b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y);
+  };
+  const r0 = (r.rotate[0] * Math.PI) / 180;
+  const r1 = (r.rotate[1] * Math.PI) / 180;
+  const full = r.rotate[1] - r.rotate[0] >= 360;
+  const QUARTER = Math.PI / 2;
+  for (const s of r.scale) {
+    for (const sx of r.scaleX) {
+      const vx = ux * s * sx;
+      const vy = uy * s;
+      const len = Math.hypot(vx, vy);
+      if (len === 0) { take(0, 0); continue; }
+      if (full) { take(-len, -len); take(len, len); continue; }
+      const a = Math.atan2(vy, vx);
+      take(len * Math.cos(a + r0), len * Math.sin(a + r0));
+      take(len * Math.cos(a + r1), len * Math.sin(a + r1));
+      for (let phi = Math.ceil((a + r0) / QUARTER) * QUARTER; phi <= a + r1; phi += QUARTER) take(len * Math.cos(phi), len * Math.sin(phi));
+    }
+  }
+  return {
+    x0: b.x0 + origin.x + r.x[0] * unit,
+    x1: b.x1 + origin.x + r.x[1] * unit,
+    y0: b.y0 + origin.y + r.y[0] * unit,
+    y1: b.y1 + origin.y + r.y[1] * unit,
+  };
+}
+
 /** The group a layer paints through, if it names one that exists. */
 export function groupOf(spec: SaverSpec, layer: LayerSpec): LayerGroup | undefined {
   return layer.group === undefined ? undefined : spec.groups?.[layer.group];
