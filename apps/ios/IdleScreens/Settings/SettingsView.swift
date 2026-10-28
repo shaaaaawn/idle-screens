@@ -8,7 +8,7 @@ import SwiftUI
 /// what happens if you remove something.
 struct SettingsView: View {
     @Environment(AppState.self) private var app
-    @AppStorage(Appearance.storageKey) private var appearance: Appearance = .system
+    @AppStorage(Appearance.storageKey) private var appearance: Appearance = Appearance.defaultValue
 
     var body: some View {
         NavigationStack {

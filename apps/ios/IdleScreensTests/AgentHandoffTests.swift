@@ -89,5 +89,7 @@ final class AgentHandoffTests: XCTestCase {
         XCTAssertEqual(Appearance.light.colorScheme, .light)
         XCTAssertEqual(Appearance.dark.colorScheme, .dark)
         XCTAssertEqual(Appearance(rawValue: "dark"), .dark)
+        // Nothing stored yet means dark, not the phone's setting.
+        XCTAssertEqual(Appearance.defaultValue, .dark)
     }
 }

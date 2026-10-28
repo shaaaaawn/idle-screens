@@ -429,9 +429,9 @@
           "properties": {
             "amp": {
               "type": "number",
-              "exclusiveMinimum": 0,
+              "minimum": 0,
               "maximum": 0.5,
-              "description": "Opacity breathing amplitude, capped at 0.5."
+              "description": "Opacity breathing amplitude, 0 (no pulse) to 0.5."
             },
             "period": {
               "type": "number",

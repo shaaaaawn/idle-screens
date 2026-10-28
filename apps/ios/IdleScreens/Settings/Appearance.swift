@@ -7,6 +7,9 @@ enum Appearance: String, CaseIterable, Identifiable {
     case system, light, dark
 
     static let storageKey = "appearance"
+    /// Dark until someone picks otherwise: the app is a frame around
+    /// artwork, and a light frame fights it.
+    static let defaultValue: Appearance = .dark
 
     var id: String { rawValue }
 

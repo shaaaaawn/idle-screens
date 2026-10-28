@@ -262,7 +262,7 @@ export interface LayerSpec {
    */
   region?: { x?: [number, number]; y?: [number, number] };
   /**
-   * Sinusoidal opacity breathing. SAFETY: amp is capped (LIMITS.maxPulseAmp),
+   * Sinusoidal opacity breathing (`amp: 0` is none). SAFETY: amp is capped (LIMITS.maxPulseAmp),
    * period has a floor (LIMITS.minPulsePeriod — max 2 Hz), and every entity gets
    * its own seeded phase, so a layer can never strobe in unison. Effective alpha
    * is clamped to 0..1.

@@ -295,7 +295,7 @@ on the sprite tier (the `basic` tier rule).
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
-| `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing: `amp` is **added** to the entity's `alpha` (alpha ± amp, clamped to 0..1), not a fraction of it — a dim layer (`alpha` 0.2, `amp` 0.3) swings through 0 and sits fully dark for part of every period; keep `amp` ≤ the alpha floor for a breath that never blacks out. `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
+| `pulse` | `{amp 0..0.5, period ≥ 500, wave?}` | none | opacity breathing (`amp: 0` is no pulse — one layer shape can serve a lit and an unlit variant): `amp` is **added** to the entity's `alpha` (alpha ± amp, clamped to 0..1), not a fraction of it — a dim layer (`alpha` 0.2, `amp` 0.3) swings through 0 and sits fully dark for part of every period; keep `amp` ≤ the alpha floor for a breath that never blacks out. `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
 | `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** rendered |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
@@ -938,7 +938,11 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   paint that cell: a staggered wave of small static dots is busy across the
   frame but sparse in every cell, so it passes without a frame resolved. A
   layer that moves, emits, links or has its geometry keyed counts as
-  reaching every cell. Past 512 frames to resolve, publishing refuses and
+  reaching every cell, except for keys on its own `transform` or its
+  group's: those reach everywhere the transform can carry the drawing while
+  `x`, `y`, `scale`, `scaleX` and `rotate` range over their base and keyed
+  values (a tile turning about its anchor stays in its own cells; an `x`
+  glide covers the cells it sweeps). Past 512 frames to resolve, publishing refuses and
   says the timeline is too dense to verify: put fewer paint keys in that
   second, or align them to shared times.
 - **Path drawings: what a key can address.** Every field of a path
@@ -1148,8 +1152,14 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   timeline, a self-typing reveal, animated grain) — and likewise when a part
   repeats between whole milliseconds (`spin: 7` laps every 51428.57 ms, which
   no whole-ms period reproduces) or a timeline key moves a period, rate or
-  speed (the cycle itself then varies). An exporter reads it to cut an exact
-  loop.
+  speed (the cycle itself then varies). A spin counts at its drawing's
+  rotational symmetry: a circle or ring never shows its spin, a regular
+  `sides` n-gon repeats every 360°/n, and a `points` or path drawing whose
+  every paint (fill colour, stroke, opacity) maps onto itself under a turn
+  of 360°/n (n up to 64) does too — 18 identical spokes at `spin: 16`
+  repeat every 1250 ms, not 22.5 s. A gradient, a part-drawn stroke
+  (`stroke.draw`), a stretched `span` or a soft fill off its `origin` is
+  taken as asymmetric. An exporter reads it to cut an exact loop.
   The two density advisories read the spec's declared `density` first:
   `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
   under `"dense"`, and `density-mismatch` fires instead when the measured
