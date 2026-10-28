@@ -944,8 +944,10 @@ export function layerCellFootprints(
     const sw = sweep?.get(li);
     const own = sw ? sw.layer ?? transformRangeOf(layer.transform) : null;
     const grp = sw ? sw.group ?? transformRangeOf(groupOf(spec, layer)?.transform) : null;
-    // Under a sweep: the largest stretch either transform reaches on any axis.
-    const k = own && grp ? maxAxisScale(own) * maxAxisScale(grp) : layer.transform !== undefined || layer.group !== undefined ? paintSize(spec, layer) : 1;
+    // The largest stretch either transform reaches on any axis (swept, or the static one).
+    const k = own && grp ? maxAxisScale(own) * maxAxisScale(grp)
+      : layer.transform !== undefined || layer.group !== undefined ? maxAxisScale(transformRangeOf(layer.transform)) * maxAxisScale(transformRangeOf(groupOf(spec, layer)?.transform))
+      : 1;
     const pivot = own ? transformOrigin(layer.transform ?? {}, layer, w, h, scale) : null;
     const centre = { x: w / 2, y: h / 2 };
     const cells = new Set<number>();
