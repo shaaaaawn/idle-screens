@@ -28,8 +28,9 @@
  */
 import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { layerCellFootprints, luminanceGrid } from './perceive';
+import { TRANSFORM_FIELDS, transformRangeOf, type TransformField, type TransformRange } from './paint';
 import { DEFAULT_KEY_DUR, timelineTracks, withoutTimeline } from './timeline';
-import type { SaverSpec } from './types';
+import type { LayerTransform, SaverSpec, TimelineKey } from './types';
 
 export interface TimelineFlashReport {
   /** More than 3 flashes in some one-second window over at least a quarter of the frame (WCAG 2.3.1). */
@@ -123,6 +124,39 @@ export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } 
  */
 const PAINT_LEAF = /(^|\.)(opacity|alpha|color|fill)(\.\d+)?$|(^|\.)gradient(\.|$)|(^|\.)draw\.(start|end)$/;
 
+/** Eases whose glide stays between its two ends (no overshoot): a keyed transform sweeps no further than its values. */
+const MONOTONE_EASES: ReadonlySet<string | undefined> = new Set([undefined, 'step', 'linear', 'smooth', 'in', 'out', 'spring']);
+
+/**
+ * Widen `r` to hold every value the keys on `field` (`null`: whole-object
+ * keys on the transform itself) glide through, from `base`. False when some
+ * key cannot be bounded: an ease that may overshoot, a value that is not a
+ * finite number, a field that is not a numeric transform field, or an
+ * `origin` change (it moves the pivot).
+ */
+function widenTransform(r: TransformRange, base: LayerTransform | undefined, field: string | null, keys: TimelineKey[]): boolean {
+  const take = (f: TransformField, v: unknown): boolean => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return false;
+    r[f] = [Math.min(r[f][0], v), Math.max(r[f][1], v)];
+    return true;
+  };
+  for (const k of keys) {
+    if (!MONOTONE_EASES.has(k.ease)) return false;
+    if (field !== null) {
+      if (!(field in TRANSFORM_FIELDS) || !take(field as TransformField, k.value)) return false;
+      continue;
+    }
+    const v = k.value;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+    const o = v as Record<string, unknown>;
+    for (const name of Object.keys(o)) if (name !== 'origin' && !(name in TRANSFORM_FIELDS)) return false;
+    if (o.origin !== base?.origin) return false;
+    // A glide between two transforms fills a field either side omits with its identity (steer's alignTransform).
+    for (const f of Object.keys(TRANSFORM_FIELDS) as TransformField[]) if (!take(f, o[f] ?? TRANSFORM_FIELDS[f])) return false;
+  }
+  return true;
+}
+
 /**
  * Which grid cells each luminance-bearing path can change, or null when some
  * key cannot be pinned to cells. A layer path reaches its layer's footprint; a
@@ -130,13 +164,35 @@ const PAINT_LEAF = /(^|\.)(opacity|alpha|color|fill)(\.\d+)?$|(^|\.)gradient(\.|
  * resizes a layer makes that layer's footprint the whole grid, and (unless it
  * is a paint `transform`, which takes no draws) every later layer's too: the
  * seeded stream is shared, so a count or a range there re-deals them.
+ *
+ * Keys on a layer's own `transform`, or its group's, are bounded instead
+ * (X681): the footprint becomes everywhere the drawing can be carried while
+ * each keyed field ranges over its base and keyed values — a tile turning
+ * about its anchor stays in its own cells, an x glide reaches the cells it
+ * sweeps. A key it cannot bound keeps the whole grid.
+ *
+ * Exported for tests only (not from the package index).
  */
-function pathCells(spec: SaverSpec): Map<string, number[] | null> | null {
+export function pathCells(spec: SaverSpec): Map<string, number[] | null> | null {
   const layers = spec.layers ?? [];
   const volatile = new Set<number>();
   const members = (g: string): number[] => layers.flatMap((l, i) => (l.group === g ? [i] : []));
   const reach = new Map<string, number[] | 'all'>();
-  for (const path of timelineTracks(spec).keys()) {
+  // Per keyed transform: the range its fields sweep, or null once some key on it cannot be bounded.
+  const layerRanges = new Map<number, TransformRange | null>();
+  const groupRanges = new Map<string, TransformRange | null>();
+  /** Widen the range for a keyed transform (seeded with its base values); false, and null from then on, when a key cannot be bounded. */
+  const bound = <K>(ranges: Map<K, TransformRange | null>, id: K, base: LayerTransform | undefined, rest: string[], keys: TimelineKey[]): boolean => {
+    if (rest.length > 2) return false;
+    if (!ranges.has(id)) ranges.set(id, transformRangeOf(base));
+    const r = ranges.get(id);
+    if (!r || !widenTransform(r, base, rest[1] ?? null, keys)) {
+      ranges.set(id, null);
+      return false;
+    }
+    return true;
+  };
+  for (const [path, keys] of timelineTracks(spec)) {
     const [root, id, ...rest] = path.split('.');
     const leaf = rest.join('.');
     let to: number[] | 'all';
@@ -144,18 +200,28 @@ function pathCells(spec: SaverSpec): Map<string, number[] | null> | null {
       const n = Number(id);
       to = [n];
       if (!PAINT_LEAF.test(leaf)) {
-        if (rest[0] === 'transform') volatile.add(n);
-        else for (let i = n; i < layers.length; i++) volatile.add(i);
+        if (rest[0] === 'transform') {
+          if (!bound(layerRanges, n, layers[n]?.transform, rest, keys)) volatile.add(n);
+        } else for (let i = n; i < layers.length; i++) volatile.add(i);
       }
     } else if (root === 'groups' && id !== undefined) {
       to = members(id);
-      if (leaf !== 'opacity') for (const i of to) volatile.add(i);
+      if (leaf !== 'opacity' && !(rest[0] === 'transform' && bound(groupRanges, id, spec.groups?.[id]?.transform, rest, keys))) for (const i of to) volatile.add(i);
     } else if (root === 'background') to = 'all';
     else return null; // a scene-wide field: no cell is safe from it
     if (LUMA_PATH.test(path)) reach.set(path, to);
   }
   if (reach.size === 0) return new Map();
-  const footprints = layerCellFootprints(withoutTimeline(spec), { cols: COLS, rows: ROWS });
+  // A range that went unbounded after an earlier key bounded it: its layers reach every cell.
+  for (const [n, r] of layerRanges) if (!r) volatile.add(n);
+  for (const [g, r] of groupRanges) if (!r) for (const i of members(g)) volatile.add(i);
+  const sweep = new Map<number, { layer?: TransformRange; group?: TransformRange }>();
+  layers.forEach((l, i) => {
+    const own = layerRanges.get(i) ?? undefined;
+    const grp = l.group !== undefined && spec.groups?.[l.group] ? groupRanges.get(l.group) ?? undefined : undefined;
+    if (own || grp) sweep.set(i, { layer: own, group: grp });
+  });
+  const footprints = layerCellFootprints(withoutTimeline(spec), { cols: COLS, rows: ROWS }, sweep);
   const out = new Map<string, number[] | null>();
   for (const [path, to] of reach) {
     if (to === 'all' || to.some((i) => volatile.has(i) || !footprints[i])) out.set(path, null);
