@@ -147,6 +147,29 @@ final class PathDrawingTests: XCTestCase {
         XCTAssertLessThan(red(r, 160, 90 + 30), 20, "nothing filled")
     }
 
+    /// X711: a `points` polygon with `fill: false` + `stroke` is line art —
+    /// the closed path through its points (shapes.ts `isPointsPath`).
+    func testPointsWithAStrokeDrawAsLineArt() throws {
+        let stick = ##"{"kind":"polygon","radius":[0.45,0.45],"color":"#000000","points":[[0,0],[0.3,0.6],[0,0],[-0.3,0.6],[0,0],[0,-0.6]],"fill":false,"stroke":{"color":"#ffffff","width":0.06}}"##
+        let decoded = try layers(stick)
+        guard case .polygon(_, _, _, _, let pts, _, let d) = decoded[0].sprite, let d else { return XCTFail("no drawing") }
+        XCTAssertEqual(pts?.count, 6)
+        XCTAssertEqual(d.parts.count, 1)
+        XCTAssertFalse(d.parts[0].fill)
+        XCTAssertEqual(d.parts[0].flat.lines.count, 1)
+        XCTAssertTrue(d.parts[0].flat.lines[0].closed)
+        XCTAssertEqual(d.parts[0].flat.lines[0].points.count, 6, "every joint of the out-and-back tour survives")
+        let r = try render(decoded)
+        XCTAssertGreaterThan(red(r, 160, 90 - 25), 200, "the spine")
+        XCTAssertGreaterThan(red(r, 160 + 12, 90 + 24), 200, "a leg")
+        XCTAssertLessThan(red(r, 160 - 30, 90 - 30), 20, "nothing filled")
+
+        // A plain points polygon keeps its own fill path: no drawing.
+        let plain = try layers(##"{"kind":"polygon","radius":[0.3,0.3],"color":"#ffffff","points":[[-1,0.9],[0.2,-1],[1,0.4]]}"##)
+        guard case .polygon(_, _, _, _, _, _, let d2) = plain[0].sprite else { return XCTFail() }
+        XCTAssertNil(d2)
+    }
+
     func testSpriteTierRasterAnchorsAtTheOrigin() throws {
         let decoded = try layers(##"{"kind":"polygon","radius":[0.3,0.3],"color":"#ffffff","origin":[0,1],"path":"M -1 -1 L 1 -1 L 1 1 L -1 1 Z"}"##)
         guard case .polygon(_, _, _, _, _, _, let d) = decoded[0].sprite, let d else { return XCTFail() }

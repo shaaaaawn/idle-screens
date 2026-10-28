@@ -40,6 +40,18 @@ final class PaintTests: XCTestCase {
         }
     }
 
+    /// `transform.scaleY` (X698): the vertical axis scales on its own —
+    /// paint.ts `transformPoint` puts (600, 600) at (800, 600) here.
+    func testScaleYSquashesVertically() throws {
+        let s = try spec(##"{"layers":[{"count":1,"position":{"x":0.5,"y":0.5},"transform":{"scale":2,"scaleX":1.5,"scaleY":0.5,"origin":"anchor"},"sprite":{"kind":"circle","radius":[0.01,0.01],"color":"#fff"},"motion":{"type":"static"}}]}"##)
+        let paint = try XCTUnwrap(s.compile(seed: 1)[0].paint)
+        let q = CGPoint(x: 600, y: 600).applying(paint.affine(in: CGSize(width: 1000, height: 1000), unit: 1000))
+        XCTAssertEqual(q.x, 800, accuracy: 1e-9)
+        XCTAssertEqual(q.y, 600, accuracy: 1e-9)
+        XCTAssertEqual(paint.scaleXY.x, 3, accuracy: 1e-12)
+        XCTAssertEqual(paint.scaleXY.y, 1, accuracy: 1e-12)
+    }
+
     func testOffsetMovesThePointInMinDimensionUnits() throws {
         let s = try spec(##"{"layers":[{"count":1,"position":{"x":0.5,"y":0.5,"dx":0.1,"dy":-0.25},"sprite":{"kind":"circle","radius":[0.01,0.01],"color":"#fff"},"motion":{"type":"static"}}]}"##)
         let e = s.compile(seed: 1)[0].entities[0]

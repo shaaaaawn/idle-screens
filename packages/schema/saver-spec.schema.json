@@ -57,7 +57,8 @@
       "additionalProperties": false,
       "properties": {
         "start": { "type": "number", "minimum": 0, "maximum": 1, "description": "Where the painted stretch begins, as a fraction of the line's length (default 0)." },
-        "end": { "type": "number", "minimum": 0, "maximum": 1, "description": "Where it ends (default 1). Glide end 0 \u2192 1 to draw the line on; glide start after it to erase from the tail." }
+        "end": { "type": "number", "minimum": 0, "maximum": 1, "description": "Where it ends (default 1). Glide end 0 \u2192 1 to draw the line on; glide start after it to erase from the tail." },
+        "mode": { "enum": ["run", "each"], "description": "Path strokes: 'run' (default) draws every subpath as one pen run in draw order; 'each' cuts every subpath to the same start..end of its own length, so they all draw at once (a burst, a tick dial, hatching). An enum: it steps. No effect on a stroke sprite." }
       },
       "description": "Draw-on: paint only the stretch of the line from start to end (paint; glides). start >= end paints nothing. Native: ignored (whole line)."
     },
@@ -559,8 +560,9 @@
             "y": { "type": "number", "minimum": -17280, "maximum": 17280, "description": "Translate in min(w,h) units, within ±2 (px under units: 'px')." },
             "scale": { "type": "number", "minimum": 0, "maximum": 8, "description": "Uniform scale about the viewport centre (default 1)." },
             "scaleX": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra horizontal scale; toward 0 reads as a turn about the vertical axis, negative mirrors (default 1)." },
+            "scaleY": { "type": "number", "minimum": -8, "maximum": 8, "description": "Extra vertical scale (× scale); with scaleX it squashes and stretches, negative flips upside down (default 1)." },
             "rotate": { "type": "number", "minimum": -3600, "maximum": 3600, "description": "Degrees, clockwise, about the transform's origin." },
-            "origin": { "enum": ["viewport", "anchor"], "description": "What scale/scaleX/rotate turn about: 'viewport' (default) the viewport centre — a camera; 'anchor' the layer's own position point (with dx/dy; a list/table block's anchor; else the centre of its region) — a word punches in place on every aspect." }
+            "origin": { "enum": ["viewport", "anchor"], "description": "What scale/scaleX/scaleY/rotate turn about: 'viewport' (default) the viewport centre — a camera; 'anchor' the layer's own position point (with dx/dy; a list/table block's anchor; else the centre of its region) — a word punches in place on every aspect." }
           },
           "description": "Paint-level transform of the whole layer at draw time, about the viewport centre. Outside the structural signature, so it glides under setParam, a timeline key or a morph — a camera for timed pieces, a slow drift for ambient ones. Native clients ignore it (identity)."
         },
@@ -1143,14 +1145,14 @@
               "minItems": 3,
               "maxItems": 24,
               "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": -1, "maximum": 1 } },
-              "description": "Custom vertices in unit coordinates (-1..1), scaled by the radius. Not with sides."
+              "description": "Custom vertices in unit coordinates (-1..1), scaled by the radius. Not with sides. With stroke, fill: false or gradient they draw as the closed path through them (keyed points = line art)."
             },
             "soft": { "type": "boolean", "description": "Feather the fill from the centre, like a soft circle." },
             "colors": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/hexColor" }, "description": "Per-entity color palette (seeded pick)." },
             "colorWeights": { "$ref": "#/definitions/colorWeights" },
             "path": { "$ref": "#/definitions/pathD" },
             "fillRule": { "$ref": "#/definitions/pathFillRule" },
-            "fill": { "type": "boolean", "description": "false draws the stroke only (line art; open paths allowed). Path drawings only." },
+            "fill": { "type": "boolean", "description": "false draws the stroke only (line art; open paths allowed). Path drawings, or points (drawn as the closed path through them)." },
             "gradient": { "$ref": "#/definitions/pathGradient" },
             "stroke": { "$ref": "#/definitions/pathStroke" },
             "parts": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/definitions/pathPart" }, "description": "A multi-colour drawing: parts drawn back to front, each with its own path and paint. Not with path/points/sides/gradient/stroke/fill/fillRule on the sprite." },
@@ -1279,7 +1281,8 @@
                 "decimals": { "type": "integer", "minimum": 0, "maximum": 6, "description": "Places after the point (default 0)." },
                 "prefix": { "type": "string", "maxLength": 64 },
                 "suffix": { "type": "string", "maxLength": 64 },
-                "grouping": { "type": "boolean", "description": "Thousands separated by commas (default true). Locale-free." }
+                "grouping": { "type": "boolean", "description": "Thousands separated by commas (default true). Locale-free." },
+                "minDigits": { "type": "integer", "minimum": 1, "maximum": 12, "description": "Zero-pad the integer part to at least this many digits (default 1): 4 paints 42 as 0042. Padded before grouping (0,042), so pair with grouping: false for a fixed-width counter. The sign stays outside." }
               },
               "description": "A counter: the block paints prefix + value + suffix instead of text. text is what clients that do not read number show - author it as the rest value. Native: ignored (text)."
             }
@@ -1727,6 +1730,7 @@
                   "y": { "type": "number", "minimum": -17280, "maximum": 17280 },
                   "scale": { "type": "number", "minimum": 0, "maximum": 8 },
                   "scaleX": { "type": "number", "minimum": -8, "maximum": 8 },
+                  "scaleY": { "type": "number", "minimum": -8, "maximum": 8 },
                   "rotate": { "type": "number", "minimum": -3600, "maximum": 3600 },
                   "origin": { "const": "viewport" }
                 },

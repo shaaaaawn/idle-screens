@@ -1992,7 +1992,7 @@ class SpecInstance implements SaverInstance {
     ctx.translate(cx + (tf.x ?? 0) * unit, cy + (tf.y ?? 0) * unit);
     if (tf.rotate) ctx.rotate((tf.rotate * Math.PI) / 180);
     const s = tf.scale ?? 1;
-    ctx.scale(s * (tf.scaleX ?? 1), s);
+    ctx.scale(s * (tf.scaleX ?? 1), s * (tf.scaleY ?? 1));
     ctx.translate(-cx, -cy);
   }
 

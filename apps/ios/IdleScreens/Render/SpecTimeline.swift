@@ -320,7 +320,7 @@ enum SpecTimeline {
 
     // MARK: - lerpValue (steer.ts)
 
-    private static let transformIdentity: [String: Double] = ["x": 0, "y": 0, "scale": 1, "scaleX": 1, "rotate": 0]
+    private static let transformIdentity: [String: Double] = ["x": 0, "y": 0, "scale": 1, "scaleX": 1, "scaleY": 1, "rotate": 0]
 
     /// Two `transform` objects with each one's missing identity fields filled,
     /// so a glide between them never steps.

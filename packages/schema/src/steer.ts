@@ -76,7 +76,7 @@ export function readSpecPath(spec: unknown, path: string): unknown {
   return loc ? (loc.parent as Record<string | number, unknown>)[loc.key] : undefined;
 }
 
-const TRANSFORM_IDENTITY: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, rotate: 0 };
+const TRANSFORM_IDENTITY: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotate: 0 };
 
 /** Two layer `transform` objects with each one's missing fields filled with the identity, so a glide between them never steps (inputs returned as-is otherwise). */
 function alignTransform(a: unknown, b: unknown): [unknown, unknown] {
@@ -96,7 +96,7 @@ function alignTransform(a: unknown, b: unknown): [unknown, unknown] {
 /**
  * When only one end of a spec lerp declares a layer's paint `opacity` or
  * `transform`, give the other end the identity value (opacity 1, x/y/rotate 0,
- * scale/scaleX 1) so the lerp glides from how the layer actually looks
+ * scale/scaleX/scaleY 1) so the lerp glides from how the layer actually looks
  * instead of stepping. Returns the inputs themselves when no layer differs —
  * every spec without these fields lerps exactly as it always has.
  */
