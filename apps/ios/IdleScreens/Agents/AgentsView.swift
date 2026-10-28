@@ -3,15 +3,18 @@ import UIKit
 
 /// The MCP tab. Scenes here are made by agents, over MCP — so the tab leads
 /// with the one address every agent needs, then gets a scene started from the
-/// phone: connect Claude or ChatGPT, brief it, keep the keys to what it makes.
-/// Setting up a coding agent happens at a computer, so it is one row away
-/// rather than half the page.
+/// phone: brief an agent, keep the keys to what it makes.
+///
+/// Each agent appears once. Connecting is a one-time chore that lives in the
+/// hero's Connect menu (Claude, ChatGPT, or a coding agent at a computer);
+/// the brief's buttons are the thing you come back for.
 struct AgentsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openURL) private var openURL
     @State private var brief = ""
     @State private var target: AgentHandoff.Target = .newChannel
     @State private var showingChannels = false
+    @State private var showingSetup = false
     @State private var toast: String?
 
     private var mcp: String { AgentHandoff.mcpURL() }
@@ -23,7 +26,8 @@ struct AgentsView: View {
                 ListColumnTitle(title: "agents")
 
                 Section {
-                    MCPHero(mcp: mcp, onCopy: { copy(mcp, "address copied") }) { agent in
+                    MCPHero(mcp: mcp, onCopy: { copy(mcp, "address copied") },
+                            onCodingAgent: { showingSetup = true }) { agent in
                         // Their connector screens take the address by paste,
                         // so it is on the clipboard before you land there.
                         copy(mcp, "address copied — add it as a custom connector")
@@ -46,20 +50,16 @@ struct AgentsView: View {
                                 .foregroundStyle(Color.textTertiary)
                         }
                     }
-                    NavigationLink { ComputerSetupView() } label: {
-                        SettingsLabel(title: "Set up a coding agent", icon: "laptopcomputer", tint: .gray)
-                    }
                     NavigationLink { MCPExplorerView() } label: {
                         SettingsLabel(title: "Inside the MCP", icon: "server.rack", tint: .teal)
                     }
-                } footer: {
-                    Text("Claude Code, Cursor, Codex and more — set up once on the computer they run on.")
                 }
                 .houseRow()
             }
             .houseList()
             .scrollDismissesKeyboard(.interactively)
             .modifier(ColumnTitle(title: "agents"))
+            .navigationDestination(isPresented: $showingSetup) { ComputerSetupView() }
             .overlay(alignment: .bottom) {
                 if let toast {
                     Text(toast)
@@ -81,7 +81,7 @@ struct AgentsView: View {
 
     private var briefSection: some View {
         Section {
-            TextField("A slow aurora over a frozen lake…", text: $brief, axis: .vertical)
+            TextField("Describe a scene…", text: $brief, axis: .vertical)
                 .lineLimit(2...5)
                 .foregroundStyle(Color.textPrimary)
 
@@ -156,7 +156,7 @@ struct AgentsView: View {
             }
             .listRowSeparator(.hidden, edges: .top)
         } header: {
-            Text("Brief an agent")
+            Text("Ask for a scene")
         } footer: {
             Text("Opens as a ready-to-run prompt. It never carries a key — the agent asks when it needs one.")
         }
@@ -179,6 +179,7 @@ struct AgentsView: View {
 private struct MCPHero: View {
     let mcp: String
     let onCopy: () -> Void
+    let onCodingAgent: () -> Void
     let onConnect: (AgentHandoff.PromptApp) -> Void
     @Environment(\.deviceScale) private var scale
 
@@ -223,29 +224,39 @@ private struct MCPHero: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Copy \(mcp)")
 
-            HStack(spacing: 10) {
-                ForEach(AgentHandoff.promptApps) { agent in
-                    Button { onConnect(agent) } label: {
-                        Label {
-                            Text("Add to \(agent.name)")
-                        } icon: {
-                            Image(agent.markAsset)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 15, height: 15)
-                                .accessibilityHidden(true)
+            // Connecting is done once per agent, so it is one menu rather
+            // than a second pair of brand buttons above the brief's.
+            Menu {
+                Section("Add as a connector") {
+                    ForEach(AgentHandoff.promptApps) { agent in
+                        Button { onConnect(agent) } label: {
+                            Label { Text(agent.name) } icon: { Image(agent.markAsset) }
                         }
-                        .font(.footnote.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .foregroundStyle(Color(hex: "0A0A0F"))
-                        .background(.white, in: Capsule())
                     }
-                    .buttonStyle(.plain)
                 }
+                Button(action: onCodingAgent) {
+                    Label("A coding agent on a computer…", systemImage: "laptopcomputer")
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                    Text("Connect an agent")
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .opacity(0.6)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                }
+                .contentShape(Rectangle())
             }
+            .accessibilityHint("Claude, ChatGPT, or a coding agent")
         }
         .padding(20 * scale)
         .background {
