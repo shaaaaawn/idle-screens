@@ -201,3 +201,48 @@ describe('timelineFlashReport', () => {
     });
   });
 });
+
+describe('timelineFlashReport: a jump that lands on another key of the same path', () => {
+  // A step to dark and a glide back up keyed at the same `t`: two changes per
+  // key time, so the 200 ms floor allows a 5-a-second sawtooth (found triaging X712).
+  const sawtooth = (period: number, laps: number, dur = period): SaverSpec => {
+    const keys = [];
+    for (let t = 0; t < laps * period; t += period) {
+      keys.push(step(t, 'top.opacity', 0));
+      keys.push({ t, path: 'top.opacity', value: 1, dur, ease: 'linear' });
+    }
+    const spec = scene('#000000', [fullFrame('top', '#ffffff')], keys, laps * period + 1000);
+    (spec.timeline as { loop?: boolean }).loop = false;
+    return spec;
+  };
+
+  it('refuses a full-frame sawtooth at the 200 ms floor (5 a second)', () => {
+    const spec = sawtooth(200, 20);
+    expect(validateSpec(structuredClone(spec)).valid).toBe(true); // legal per path
+    const r = timelineFlashReport(spec);
+    expect(r.fails).toBe(true);
+    expect(r.flashesPerSecond).toBeGreaterThan(3);
+    expect(r.flashingArea).toBeGreaterThanOrEqual(0.25);
+  });
+
+  it('refuses the same sawtooth whether or not the glide ends on the next jump', () => {
+    expect(timelineFlashReport(sawtooth(200, 20, 199)).fails).toBe(true);
+    expect(timelineFlashReport(sawtooth(250, 16)).fails).toBe(true); // 4 a second
+  });
+
+  it('passes a sawtooth at 2.5 a second', () => {
+    expect(timelineFlashReport(sawtooth(400, 10)).fails).toBe(false);
+  });
+
+  it('passes one jump-then-glide per lap (a loop seam reset)', () => {
+    const keys = [step(0, 'top.opacity', 0), { t: 0, path: 'top.opacity', value: 1, dur: 35000, ease: 'linear' }];
+    expect(timelineFlashReport(scene('#000000', [fullFrame('top', '#ffffff')], keys, 36000)).fails).toBe(false);
+  });
+
+  it('does not double-count a chain of glides that meet end to start', () => {
+    const keys = [];
+    for (let i = 0; i < 20; i++) keys.push({ t: i * 200, path: 'top.opacity', value: i % 2 ? 0.95 : 1, dur: 200, ease: 'linear' });
+    expect(lumaKeyTimes(scene('#000000', [fullFrame('top', '#ffffff')], keys)).times.length).toBe(21 + 20);
+    expect(timelineFlashReport(scene('#000000', [fullFrame('top', '#ffffff')], keys)).fails).toBe(false);
+  });
+});

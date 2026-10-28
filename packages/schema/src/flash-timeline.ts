@@ -2,9 +2,13 @@
  * Flash safety for a timeline's COMBINED effect on the frame.
  *
  * The validator's timeline rule is per path: distinct key times on one path
- * sit at least `minTimelineKeyInterval` (200 ms) apart, so no single field can
- * strobe faster than 2.5 flashes a second. Several paths keyed out of step can
- * still combine into a faster flicker. Example: a top layer's opacity choosing
+ * sit at least `minTimelineKeyInterval` (200 ms) apart. That holds one field
+ * to 2.5 flashes a second only while each key time is one change. A jump that
+ * lands on another key of the same path is two: a step (`dur: 0`) keyed with a
+ * glide at the same `t`, every 200 ms, is a full-frame sawtooth at 5 a second
+ * that the floor allows — so the counts below weigh those times twice (see
+ * `lumaTracks`). Several paths keyed out of step can also combine into a
+ * faster flicker. Example: a top layer's opacity choosing
  * between its own colour and the colour of the layer beneath, each of the three
  * keyed at the floor, 67 ms apart, flickers the whole frame 5 times a second.
  * Each path is legal on its own (X589).
@@ -66,29 +70,50 @@ const AREA_THRESHOLD = 0.25;
  * Each luminance-bearing path's key boundaries: a step changes at `t`, a
  * glide runs from `t` to `t + dur`. Under `loop`, a second lap so a window
  * can straddle the wrap. `lap` is 0 without `loop`.
+ *
+ * `jumps` are the times where the path changes twice at once: a jump (a
+ * `dur: 0` key, or a `step`-eased key landing at `t + dur`) that falls on
+ * another key's boundary on the same path. The value snaps there and glides
+ * on from it, so a count of distinct times sees one change where the frame
+ * shows two.
  */
-function lumaTracks(spec: SaverSpec): { tracks: Array<{ path: string; times: number[] }>; lap: number } {
+function lumaTracks(spec: SaverSpec): { tracks: Array<{ path: string; times: number[]; jumps: number[] }>; lap: number } {
   const tl = spec.timeline;
   if (!tl) return { tracks: [], lap: 0 };
   const lap = tl.loop && tl.duration ? tl.duration : 0;
-  const tracks: Array<{ path: string; times: number[] }> = [];
+  const tracks: Array<{ path: string; times: number[]; jumps: number[] }> = [];
+  const laps = (ts: number[]): number[] => (lap ? [...ts, ...ts.map((b) => b + lap)] : ts);
   for (const [path, keys] of timelineTracks(spec)) {
     if (!LUMA_PATH.test(path)) continue;
     const bounds: number[] = [];
-    for (const k of keys) {
+    const owners = new Map<number, Set<number>>();
+    const jumpAt: Array<[number, number]> = [];
+    keys.forEach((k, i) => {
       const dur = k.dur ?? DEFAULT_KEY_DUR;
-      bounds.push(k.t);
-      if (dur > 0) bounds.push(k.t + dur);
-    }
-    tracks.push({ path, times: lap ? [...bounds, ...bounds.map((b) => b + lap)] : bounds });
+      const own = (t: number): void => { bounds.push(t); owners.set(t, (owners.get(t) ?? new Set()).add(i)); };
+      own(k.t);
+      if (dur > 0) own(k.t + dur);
+      if (dur <= 0) jumpAt.push([k.t, i]);
+      else if (k.ease === 'step') jumpAt.push([k.t + dur, i]);
+    });
+    // Under `loop` the wrap is a boundary too: a key at 0 meets the lap's last glide ending at `lap`.
+    const shared = (t: number, i: number): boolean => [...(owners.get(t) ?? []), ...(lap && t === 0 ? owners.get(lap) ?? [] : [])].some((j) => j !== i);
+    const jumps = [...new Set(jumpAt.filter(([t, i]) => shared(t, i)).map(([t]) => t))];
+    tracks.push({ path, times: laps(bounds), jumps: laps(jumps) });
   }
   return { tracks, lap };
+}
+
+/** Distinct boundary times, each weighted by the changes it carries (1, plus 1 where some path jumps on a boundary). */
+function weighted(tracks: Array<{ times: number[]; jumps: number[] }>): { times: number[]; weight: (t: number) => number } {
+  const extra = new Set(tracks.flatMap((tr) => tr.jumps));
+  return { times: [...new Set(tracks.flatMap((tr) => tr.times))].sort((a, b) => a - b), weight: (t) => (extra.has(t) ? 2 : 1) };
 }
 
 /** Key boundaries on luminance-bearing paths, sorted and distinct (see `lumaTracks`). */
 export function lumaKeyTimes(spec: SaverSpec): { times: number[]; lap: number } {
   const { tracks, lap } = lumaTracks(spec);
-  return { times: [...new Set(tracks.flatMap((tr) => tr.times))].sort((a, b) => a - b), lap };
+  return { times: weighted(tracks).times, lap };
 }
 
 /**
@@ -146,24 +171,37 @@ function pathCells(spec: SaverSpec): Map<string, number[] | null> | null {
  * so it needs {@link MIN_BOUNDARIES} of them within a second (2 ms of slack
  * for the ±1 ms samples). Paths with no cells reach every cell.
  */
-function cellsThatCanFlash(tracks: Array<{ path: string; times: number[] }>, cellsOf: Map<string, number[] | null>, from: number, to: number): number {
-  const perCell: number[][] = Array.from({ length: COLS * ROWS }, () => []);
+function cellsThatCanFlash(tracks: Array<{ path: string; times: number[]; jumps: number[] }>, cellsOf: Map<string, number[] | null>, from: number, to: number): number {
+  const perCell: Array<Array<{ times: number[]; jumps: number[] }>> = Array.from({ length: COLS * ROWS }, () => []);
   for (const tr of tracks) {
     const ts = tr.times.filter((t) => t >= from && t <= to);
     if (ts.length === 0) continue;
+    const part = { times: ts, jumps: tr.jumps };
     const cells = cellsOf.get(tr.path);
-    if (cells === null || cells === undefined) for (const list of perCell) list.push(...ts);
-    else for (const c of cells) perCell[c]!.push(...ts);
+    if (cells === null || cells === undefined) for (const list of perCell) list.push(part);
+    else for (const c of cells) perCell[c]!.push(part);
   }
   let n = 0;
-  for (const list of perCell) {
-    if (list.length < MIN_BOUNDARIES) continue;
-    const ts = [...new Set(list)].sort((a, b) => a - b);
-    for (let i = 0; i + MIN_BOUNDARIES - 1 < ts.length; i++) {
-      if (ts[i + MIN_BOUNDARIES - 1]! - ts[i]! <= WINDOW + 2) { n++; break; }
-    }
+  for (const parts of perCell) {
+    if (parts.length === 0) continue;
+    const { times: ts, weight } = weighted(parts);
+    if (denseRun(ts, weight, WINDOW + 2) !== null) n++;
   }
   return n;
+}
+
+/**
+ * The first run of times inside `span` whose weights reach
+ * {@link MIN_BOUNDARIES}, as [first index, end index), or null.
+ */
+function denseRun(ts: number[], weight: (t: number) => number, span: number): [number, number] | null {
+  let sum = 0;
+  for (let i = 0, e = 0; i < ts.length; i++) {
+    while (e < ts.length && ts[e]! - ts[i]! <= span) sum += weight(ts[e++]!);
+    if (sum >= MIN_BOUNDARIES) return [i, e];
+    sum -= weight(ts[i]!);
+  }
+  return null;
 }
 
 /**
@@ -186,18 +224,20 @@ export function timelineFlashReport(spec: SaverSpec): TimelineFlashReport {
   const pass: TimelineFlashReport = { fails: false, flashesPerSecond: 0, flashingArea: 0, at: null };
   if (!spec.timeline) return pass;
   const { tracks, lap } = lumaTracks(spec);
-  const times = [...new Set(tracks.flatMap((tr) => tr.times))].sort((a, b) => a - b);
+  const { times, weight } = weighted(tracks);
 
-  // Dense windows, densest first, merged where they overlap.
+  // Dense windows (by changes, not distinct times), densest first, merged where they overlap.
   const dense: Array<{ from: number; to: number; n: number }> = [];
-  for (let i = 0, e = 0; i < times.length; i++) {
-    while (e < times.length && times[e]! < times[i]! + WINDOW) e++;
-    if (e - i < MIN_BOUNDARIES) continue;
-    const last = dense[dense.length - 1];
-    if (last && times[i]! <= last.to) {
-      last.to = Math.max(last.to, times[e - 1]!);
-      last.n = Math.max(last.n, e - i);
-    } else dense.push({ from: times[i]!, to: times[e - 1]!, n: e - i });
+  for (let i = 0, e = 0, sum = 0; i < times.length; i++) {
+    while (e < times.length && times[e]! < times[i]! + WINDOW) sum += weight(times[e++]!);
+    if (sum >= MIN_BOUNDARIES) {
+      const last = dense[dense.length - 1];
+      if (last && times[i]! <= last.to) {
+        last.to = Math.max(last.to, times[e - 1]!);
+        last.n = Math.max(last.n, sum);
+      } else dense.push({ from: times[i]!, to: times[e - 1]!, n: sum });
+    }
+    sum -= weight(times[i]!);
   }
   if (dense.length === 0) return pass;
   dense.sort((a, b) => b.n - a.n);
