@@ -36,16 +36,25 @@ final class ContentReportTests: XCTestCase {
     // MARK: Report
 
     func testReportArgumentsAreOnlyAppWrittenWords() {
-        let args = ContentReport.arguments(channelId: "pyramids", label: "Pyramids",
-                                           reason: .infringement, surface: "iPhone")
+        let args = ContentReport.arguments(channelId: "pyramids", reason: .infringement, surface: "iPhone")
         XCTAssertEqual(args["kind"], .string("other"))
         XCTAssertEqual(args["channelId"], .string("pyramids"))
         XCTAssertEqual(args["title"], .string("Content report: pyramids (infringement)"))
         guard case .string(let body)? = args["body"] else { return XCTFail("no body") }
-        XCTAssertTrue(body.contains(#""Pyramids" (pyramids)"#), body)
+        XCTAssertTrue(body.contains("the channel pyramids from"), body)
         XCTAssertTrue(body.contains("Reason: Uses someone else's work or brand."), body)
         XCTAssertTrue(body.contains("iPhone app"), body)
         XCTAssertEqual(Set(args.keys), ["kind", "title", "body", "channelId"])
+    }
+
+    /// Labels are agent-authored: an offensive name must not be republished
+    /// on the public board by the report about it.
+    func testReportNeverQuotesTheChannelLabel() {
+        let channel = PublicChannel(channelId: "c1", label: "SOME SLUR", tags: nil, viewers: nil)
+        let args = ContentReport.arguments(channelId: channel.id, reason: .hateful, surface: "iPhone")
+        for case .string(let text) in args.values {
+            XCTAssertFalse(text.contains("SOME SLUR"), text)
+        }
     }
 
     /// The server caps title at 120 and channelId at 64; the longest id plus
@@ -54,7 +63,7 @@ final class ContentReportTests: XCTestCase {
         let id = String(repeating: "x", count: 64)
         for reason in ContentReport.Reason.allCases {
             guard case .string(let title)? = ContentReport.arguments(
-                channelId: id, label: nil, reason: reason, surface: "Apple TV")["title"] else {
+                channelId: id, reason: reason, surface: "Apple TV")["title"] else {
                 return XCTFail("no title")
             }
             XCTAssertLessThanOrEqual(title.count, 120, title)
@@ -65,7 +74,7 @@ final class ContentReportTests: XCTestCase {
         let transport = MockTransport()
         transport.handler = { _ in (MockTransport.mcpEnvelope(resultText: #"{"id":"X1"}"#), 200) }
         let client = MCPClient(baseURL: URL(string: "https://example.com")!, transport: transport)
-        try await client.reportChannel(channelId: "fishtank", label: "Fishtank", reason: .sexual)
+        try await client.reportChannel(channelId: "fishtank", reason: .sexual)
 
         let request = try XCTUnwrap(transport.requests.first)
         let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any]
@@ -86,7 +95,7 @@ final class ContentReportTests: XCTestCase {
         }
         let client = MCPClient(baseURL: URL(string: "https://example.com")!, transport: transport)
         do {
-            try await client.reportChannel(channelId: "fishtank", label: nil, reason: .other)
+            try await client.reportChannel(channelId: "fishtank", reason: .other)
             XCTFail("a refused report must not read as sent")
         } catch {}
     }

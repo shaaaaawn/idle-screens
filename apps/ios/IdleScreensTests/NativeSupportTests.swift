@@ -30,15 +30,21 @@ final class NativeSupportTests: XCTestCase {
         let cases: [(String, NativeSupport.Gap)] = [
             (#"{"format":"idle-sequence","segments":[{"duration":4000,"scene":{"layers":[]}}]}"#, .sequence),
             (#"{"layers":[\#(layer)],"timeline":{"keys":[{"t":0,"path":"a.opacity","value":0}]}}"#, .timeline),
-            (#"{"layers":[\#(layer)],"groups":{"moon":{"opacity":1}}}"#, .groups),
             (#"{"segments":[],"bed":{"layers":[]}}"#, .bed),
-            (#"{"layers":[{"key":"a","transform":{"scale":2}}]}"#, .layerTransform),
-            (#"{"layers":[{"key":"a","group":"moon"}]}"#, .layerGroup),
-            (#"{"layers":[{"key":"a","opacity":0}]}"#, .layerOpacity),
         ]
         for (source, gap) in cases {
             XCTAssertTrue(NativeSupport.gaps(in: try json(source)).contains(gap), "\(gap) not caught in \(source)")
         }
+    }
+
+    func testGroupsTransformsAndOpacityStayNative() throws {
+        // The shared renderer draws these (#319); routing them to the web
+        // engine cost every history page a WebView for nothing.
+        let spec = try json("""
+        {"layers":[{"key":"a","group":"moon","transform":{"scale":2,"rotate":15},"opacity":0.4},
+                   {"key":"b","opacity":0}],"groups":{"moon":{"opacity":0.8,"transform":{"x":0.1}}}}
+        """)
+        XCTAssertEqual(NativeSupport.gaps(in: spec), [])
     }
 
     func testGracefulGapsDoNotCount() throws {

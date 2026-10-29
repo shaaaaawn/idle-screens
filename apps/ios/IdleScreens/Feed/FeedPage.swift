@@ -231,8 +231,7 @@ struct FeedPage: View {
         }
         .reportChannelFlow(isPresented: $showReport, channelLabel: channel.displayLabel,
                            report: { reason in
-                               try await app.mcp.reportChannel(channelId: channelId,
-                                                               label: channel.label, reason: reason)
+                               try await app.mcp.reportChannel(channelId: channelId, reason: reason)
                            },
                            hide: { app.hideChannel(channelId) })
         .sheet(isPresented: $showCast) {
