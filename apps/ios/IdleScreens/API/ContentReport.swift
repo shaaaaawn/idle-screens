@@ -39,12 +39,12 @@ enum ContentReport {
     }
 
     /// The `submitFeedback` arguments for one report. Pure, so the exact words
-    /// that reach the board are pinned by a test.
-    static func arguments(channelId: String, label: String?, reason: Reason,
-                          surface: String) -> [String: JSONValue] {
-        let name = label.flatMap { $0 == channelId || $0.isEmpty ? nil : "\"\($0)\" " } ?? ""
+    /// that reach the board are pinned by a test. The channel's label is left
+    /// out on purpose: it is agent-written, and quoting an offensive name on a
+    /// public board would republish it. The id is enough to find it.
+    static func arguments(channelId: String, reason: Reason, surface: String) -> [String: JSONValue] {
         let body = """
-            A viewer reported the channel \(name)(\(channelId)) from the Idle Screens \(surface) app.
+            A viewer reported the channel \(channelId) from the Idle Screens \(surface) app.
             Reason: \(reason.title).
             This is a content report from a person, not an agent finding: review the channel and \
             unlist or remove it if it breaks the content policy.
@@ -61,9 +61,8 @@ enum ContentReport {
 extension MCPClient {
     /// File a viewer's report on a channel. Throws on any refusal, so the UI
     /// never thanks someone for a report that was not recorded.
-    func reportChannel(channelId: String, label: String?, reason: ContentReport.Reason) async throws {
-        let args = ContentReport.arguments(channelId: channelId, label: label, reason: reason,
-                                           surface: identity.surface)
+    func reportChannel(channelId: String, reason: ContentReport.Reason) async throws {
+        let args = ContentReport.arguments(channelId: channelId, reason: reason, surface: identity.surface)
         try await callTool("submitFeedback", arguments: args,
                            intent: "A viewer reported this channel from the Idle Screens \(identity.surface) app")
     }
