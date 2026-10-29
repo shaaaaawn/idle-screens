@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { expect, it, vi, afterEach } from 'vitest';
+import { expect, it, afterEach } from 'vitest';
 import { createRng, type SaverInstance } from '@idle-screens/core';
 import { compileSaver } from './compile';
 import { buildEntities, positionAt, sizeAt, alphaAt } from './simulate';
