@@ -180,7 +180,8 @@ private struct FocusBackdrop: View {
                                 ClassicSaverView(kind: kind,
                                                  seed: ClassicSaverKind.seed(forChannel: focused.id),
                                                  tier: tier,
-                                                 live: false)
+                                                 live: false,
+                                                 params: focused.classicParams)
                             } else {
                                 ProceduralChannelArt(channelId: focused.id)
                             }
@@ -278,6 +279,7 @@ struct ChannelCard: View {
     /// on screen re-evaluate on every remote swipe; this one changes for the
     /// two cards a move actually touches.
     @FocusState private var isFocused: Bool
+    @State private var showReport = false
 
     var body: some View {
         let _ = RenderProbe.hit("card.body")
@@ -291,6 +293,19 @@ struct ChannelCard: View {
             .focused($isFocused)
             .onChange(of: isFocused) { if isFocused { focusReport?.id = channel.id } }
             .accessibilityLabel(accessibilityLabel)
+            // Hold Select: the remote's long-press, where tvOS keeps the rare
+            // actions — the same Report and Hide the player has on Play/Pause.
+            .contextMenu {
+                Button { showReport = true } label: {
+                    Label("Report this channel…", systemImage: "flag")
+                }
+                Button(role: .destructive) { app.hideChannel(channel.id) } label: {
+                    Label("Hide this channel", systemImage: "eye.slash")
+                }
+            }
+            .reportChannelFlow(isPresented: $showReport, channelLabel: channel.displayLabel,
+                               report: { try await app.reportChannel(channel.id, reason: $0) },
+                               hide: { app.hideChannel(channel.id) })
 
             caption
         }
@@ -395,10 +410,17 @@ struct ChannelPoster: View {
                 // Classic savers have no schema spec — poster them from the
                 // native port (one static frame, same seed as the fullscreen
                 // view) rather than the server thumb, which is usually black.
-                ClassicSaverView(kind: kind,
-                                 seed: ClassicSaverKind.seed(forChannel: channel.id),
-                                 tier: tier,
-                                 live: false)
+                let still = ClassicPosterImage(kind: kind,
+                                               seed: ClassicSaverKind.seed(forChannel: channel.id),
+                                               params: channel.classicParams,
+                                               tier: tier)
+                if kind.prefersServerThumb {
+                    // The server's render of the real 3D tank once it has one; the
+                    // native still meanwhile and on a 404.
+                    ThumbImage(url: app.gallery.thumbURL(for: channel.id)) { still }
+                } else {
+                    still
+                }
             } else {
                 ThumbImage(url: app.gallery.thumbURL(for: channel.id)) {
                     ProceduralChannelArt(channelId: channel.id)

@@ -88,7 +88,7 @@ enum HomeSections {
                                    ownedTags: owns, channels: picked))
         }
 
-        take("featured", "Featured", "Hand-picked, always open to steer",
+        take("featured", "Featured", "Hand-picked",
              owns: ["featured"]) { $0.isFeatured }
 
         take("evals", "Evals", "Artist-style studies published by the eval runs",

@@ -1,13 +1,15 @@
-import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type ValidationResult } from './types';
+import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type SpriteSpec, type ValidationResult } from './types';
 import { applyDeltasShared, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, type PathFillRule } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** An array of finite [x, y] pairs (shape is checked elsewhere; this only guards a path built from it). */
+const validPointPairs = (v: unknown): boolean => Array.isArray(v) && v.length >= 2 && v.every((p) => Array.isArray(p) && p.length === 2 && isNum(p[0]) && isNum(p[1]));
 const isRange = (v: unknown): v is [number, number] =>
   Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] <= v[1];
 
@@ -19,7 +21,7 @@ const KNOWN_LAYER = new Set([
   'region', 'pulse', 'spin', 'grow', 'key', 'position', 'trail', 'links',
   'layout', 'life', 'emit', 'clock', 'rotate', 'rock', 'opacity', 'transform', 'group',
 ]);
-const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'rotate', 'origin']);
+const KNOWN_TRANSFORM = new Set(['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotate', 'origin']);
 const KNOWN_GROUP = new Set(['transform', 'opacity']);
 const GROUP_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const KNOWN_POSITION = new Set(['x', 'y', 'dx', 'dy']);
@@ -37,7 +39,7 @@ const KNOWN_STROKE = new Set(['kind', 'length', 'points', 'color', 'width', 'cur
 const KNOWN_EMOJI = new Set(['kind', 'glyphs', 'cycle']);
 const KNOWN_TEXT = new Set(['kind', 'strings', 'color', 'font', 'align', 'baseline', 'maxWidth', 'cycle', 'role']);
 const KNOWN_TEXT_BLOCK = new Set(['kind', 'text', 'maxWidth', 'fontSize', 'lineHeight', 'align', 'color', 'reveal', 'anchor', 'font', 'opacity', 'role', 'number']);
-const KNOWN_TEXT_NUMBER = new Set(['value', 'decimals', 'prefix', 'suffix', 'grouping']);
+const KNOWN_TEXT_NUMBER = new Set(['value', 'decimals', 'prefix', 'suffix', 'grouping', 'minDigits']);
 const TEXT_ROLES = new Set(['read', 'atmosphere']);
 const TEXT_BLOCK_ANCHORS = new Set(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
 /**
@@ -349,7 +351,9 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
       for (const l of spec.layers as Array<Record<string, unknown>>) {
         const sp = isObj(l) ? (l.sprite as Record<string, unknown> | undefined) : undefined;
         if (!sp || sp.kind !== 'polygon') continue;
-        const pieces = Array.isArray(sp.parts) ? (sp.parts as unknown[]) : typeof sp.path === 'string' ? [sp] : [];
+        const pieces = Array.isArray(sp.parts) ? (sp.parts as unknown[]) : typeof sp.path === 'string' ? [sp]
+          // A points polygon with path paint draws as a path, so it spends the budget too (X711).
+          : isPointsPath(sp as unknown as SpriteSpec) && validPointPairs(sp.points) ? [{ ...sp, path: pointsPathD(sp.points as Array<[number, number]>), fillRule: undefined }] : [];
         const n = typeof l.count === 'number' && l.count > 0 ? l.count : 1;
         for (const pc of pieces) {
           if (!isObj(pc) || typeof pc.path !== 'string') continue;
@@ -377,7 +381,7 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
 
 /** A paint `transform` (a layer's, or a group's — `anchorOk: false` forbids `origin: 'anchor'`). */
 function validateTransform(tf: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown, anchorOk: boolean): void {
-  if (!isObj(tf)) return err(path, 'must be an object {x?, y?, scale?, scaleX?, rotate?, origin?}');
+  if (!isObj(tf)) return err(path, 'must be an object {x?, y?, scale?, scaleX?, scaleY?, rotate?, origin?}');
   for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
   const [off, unit] = offsetBound(spec);
   const sc = LIMITS.maxLayerTransformScale;
@@ -385,7 +389,9 @@ function validateTransform(tf: unknown, path: string, err: (p: string, m: string
     if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > off)) err(`${path}.${axis}`, `must be a number within ±${off} (${unit})`);
   }
   if (tf.scale !== undefined && (!isNum(tf.scale) || tf.scale < 0 || tf.scale > sc)) err(`${path}.scale`, `must be a number 0..${sc}`);
-  if (tf.scaleX !== undefined && (!isNum(tf.scaleX) || Math.abs(tf.scaleX) > sc)) err(`${path}.scaleX`, `must be a number within ±${sc} (negative mirrors)`);
+  for (const axis of ['scaleX', 'scaleY'] as const) {
+    if (tf[axis] !== undefined && (!isNum(tf[axis]) || Math.abs(tf[axis] as number) > sc)) err(`${path}.${axis}`, `must be a number within ±${sc} (negative mirrors)`);
+  }
   if (tf.rotate !== undefined && (!isNum(tf.rotate) || Math.abs(tf.rotate) > LIMITS.maxLayerTransformRotate)) {
     err(`${path}.rotate`, `must be a number of degrees within ±${LIMITS.maxLayerTransformRotate}`);
   }
@@ -740,8 +746,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.pulse !== undefined) {
     if (!isObj(layer.pulse)) err(`${path}.pulse`, 'must be an object');
     else {
-      if (!isNum(layer.pulse.amp) || layer.pulse.amp <= 0 || layer.pulse.amp > LIMITS.maxPulseAmp) {
-        err(`${path}.pulse.amp`, `must be within 0..${LIMITS.maxPulseAmp}`);
+      // 0 is no pulse: a generator can write one layer shape for its lit and unlit variants (X706).
+      if (!isNum(layer.pulse.amp) || layer.pulse.amp < 0 || layer.pulse.amp > LIMITS.maxPulseAmp) {
+        err(`${path}.pulse.amp`, `must be a number from 0 (no pulse) to ${LIMITS.maxPulseAmp}`);
       }
       if (!isNum(layer.pulse.period) || layer.pulse.period < LIMITS.minPulsePeriod) {
         err(`${path}.pulse.period`, `must be >= ${LIMITS.minPulsePeriod} ms (flash-safety floor)`);
@@ -1115,8 +1122,12 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     } else if (sprite.path !== undefined) {
       if (sprite.points !== undefined || sprite.sides !== undefined) err(`${path}.path`, 'use path, points or sides, not more than one');
       validatePathPiece(sprite, path, err, warn);
+    } else if (sprite.points !== undefined) {
+      // A points polygon with path paint draws as the closed path through its points (X711).
+      validatePiecePaint(sprite, path, err, warn);
+      if (sprite.fillRule !== undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
     } else {
-      for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path (or parts)`);
+      for (const k of ['gradient', 'stroke', 'fill'] as const) if (sprite[k] !== undefined) err(`${path}.${k}`, `${k} applies only to a polygon with a path, points or parts`);
       if (sprite.fillRule !== undefined) warn(`${path}.fillRule`, 'unknown-property', 'fillRule applies only to a path — ignored');
     }
     if (sprite.span !== undefined || sprite.origin !== undefined) {
@@ -1178,7 +1189,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     validateTextRole(sprite, path, err);
     if (sprite.number !== undefined) {
       const n = sprite.number as unknown;
-      if (!isObj(n)) err(`${path}.number`, 'must be { value, decimals?, prefix?, suffix?, grouping? }');
+      if (!isObj(n)) err(`${path}.number`, 'must be { value, decimals?, prefix?, suffix?, grouping?, minDigits? }');
       else {
         if (!isNum(n.value)) err(`${path}.number.value`, 'must be a finite number');
         if (n.decimals !== undefined && (!isNum(n.decimals) || !Number.isInteger(n.decimals) || n.decimals < 0 || n.decimals > LIMITS.maxTextNumberDecimals)) {
@@ -1189,6 +1200,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
           if (v !== undefined && (!isStr(v) || v.length > LIMITS.maxTextAffix)) err(`${path}.number.${k}`, `must be a string of at most ${LIMITS.maxTextAffix} characters`);
         }
         if (n.grouping !== undefined && typeof n.grouping !== 'boolean') err(`${path}.number.grouping`, 'must be a boolean');
+        if (n.minDigits !== undefined && (!isNum(n.minDigits) || !Number.isInteger(n.minDigits) || n.minDigits < 1 || n.minDigits > LIMITS.maxTextNumberMinDigits)) {
+          err(`${path}.number.minDigits`, `must be a whole number 1..${LIMITS.maxTextNumberMinDigits} (integer digits, zero-padded)`);
+        }
         for (const k of unknownKeys(n, KNOWN_TEXT_NUMBER)) warn(`${path}.number.${k}`, 'unknown-property', `unknown number property '${k}' — will be ignored`);
       }
     }
@@ -1478,11 +1492,16 @@ function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p
     const problem = pathGeometryProblem(piece.path, (piece.fillRule as PathFillRule | undefined) ?? 'auto', piece.fill !== false);
     if (problem && !(keyedPathDepth > 0 && (problem === NO_AREA || problem === NO_LINE))) err(`${path}.path`, problem);
   }
+  validatePiecePaint(piece, path, err, warn);
+  if (piece.fillRule !== undefined && !['auto', 'nonzero', 'evenodd'].includes(piece.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
+}
+
+/** The paint a path piece (or a points polygon) carries: `fill`, `gradient`, `stroke`. */
+function validatePiecePaint(piece: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
   if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err);
   if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err, warn);
-  if (piece.fillRule !== undefined && !['auto', 'nonzero', 'evenodd'].includes(piece.fillRule as string)) err(`${path}.fillRule`, "must be 'auto' | 'nonzero' | 'evenodd'");
 }
 
 /** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
@@ -1539,14 +1558,15 @@ function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string
   }
 }
 
-/** A line's draw-on span: `{ start?, end? }`, each a fraction of its arc length 0..1. */
+/** A line's draw-on span: `{ start?, end?, mode? }`, each a fraction of its arc length 0..1. */
 function validateDraw(d: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
-  if (!isObj(d)) return err(path, 'must be { start?, end? } — fractions of the line, 0..1');
+  if (!isObj(d)) return err(path, "must be { start?, end?, mode? } — fractions of the line, 0..1; mode 'run' | 'each'");
   for (const k of ['start', 'end'] as const) {
     const v = d[k];
     if (v !== undefined && (!isNum(v) || v < 0 || v > 1)) err(`${path}.${k}`, 'must be 0..1 (a fraction of the line\'s length)');
   }
-  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start and end; will be ignored`);
+  if (d.mode !== undefined && d.mode !== 'run' && d.mode !== 'each') err(`${path}.mode`, "must be 'run' (one pen run through every subpath, default) | 'each' (every subpath draws at once)");
+  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end' && k !== 'mode') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start, end and mode; will be ignored`);
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */

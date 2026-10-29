@@ -289,13 +289,16 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(drift.reasons.join(' ')).toContain('drift');
   });
 
+  // An asymmetric shard: its spin shows, and repeats only once a full turn.
+  const shard = { kind: 'polygon', radius: [0.01, 0.02], color: '#ffffff', points: [[0, -1], [0.5, 0.5], [-0.9, 0.4]] } as LayerSpec['sprite'];
+
   it('combines parts that repeat between whole milliseconds exactly, never by rounding', () => {
-    const spinning = (spin: number): LayerSpec => ({ ...pulsing(4000), spin });
+    const spinning = (spin: number): LayerSpec => ({ ...pulsing(4000), spin, sprite: shard });
     expect(scenePeriod(scene([spinning(90)])).period).toBe(4000); // 360000 / 90
     // spin 7 laps every 51428.57… ms; seven laps (360000 ms) are 90 pulses: that is the period.
     expect(scenePeriod(scene([spinning(7)])).period).toBe(360000);
     // Alone it has no whole-ms repeat at all.
-    const alone = scenePeriod(scene([{ ...pulsing(0), pulse: undefined, spin: 7 } as LayerSpec]));
+    const alone = scenePeriod(scene([{ ...pulsing(0), pulse: undefined, spin: 7, sprite: shard } as LayerSpec]));
     expect(alone.period).toBeNull();
     expect(alone.reasons.join(' ')).toContain('whole number of milliseconds');
     // A 1000 ms pulse at clock rate 0.3 repeats every 3333⅓ ms: three of them fit a 10 s lap.
@@ -310,9 +313,33 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(scenePeriod(field(10000)).period).toBe(10000);
   });
 
+  it('takes no period from a still field (drift amount 0), so a looping timeline fits it', () => {
+    const still = (extra: Partial<SaverSpec> = {}): SaverSpec =>
+      scene([{ ...pulsing(3000), key: 'p', opacity: 1 }], {
+        background: { type: 'field', scale: 2, bands: ['#000000', '#ffffff'], drift: { amount: 0, period: 10000 } } as never,
+        ...extra,
+      });
+    expect(scenePeriod(still()).period).toBe(3000);
+    const looped = still({ timeline: { loop: true, duration: 6000, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] } });
+    expect(scenePeriod(looped).period).toBe(6000);
+    expect(adviseSpec(looped, { width: 960, height: 540 }).map((w) => w.code)).not.toContain('loop-seam');
+  });
+
   it('treats a zero-start fade as a one-shot build, not a static scene', () => {
     expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 1000 } }])).period).toBeNull();
     expect(scenePeriod(scene([{ ...line(), life: { enter: 0, fade: 0 } }])).period).toBe(0);
+  });
+
+  it('treats a staggered instant entrance as a one-shot build, whatever the layer count', () => {
+    // The drawn count scales with the viewport, so a count of 1 can draw several and a count of 2 just one.
+    const dots = (count: number): LayerSpec => ({ ...pulsing(4000), pulse: undefined, count, life: { enter: 0, fade: 0, stagger: 1000 } });
+    for (const count of [1, 2, 4]) {
+      const r = scenePeriod(scene([dots(count)]));
+      expect(r.period).toBeNull();
+      expect(r.reasons.join(' ')).toContain('life builds in or out once');
+    }
+    // Without a stagger the same instant entrance is still static.
+    expect(scenePeriod(scene([{ ...dots(4), life: { enter: 0, fade: 0 } }])).period).toBe(0);
   });
 
   it('is aperiodic when a timeline key moves a period or rate', () => {
@@ -321,6 +348,78 @@ describe('scenePeriod and the loop-seam advisory', () => {
     expect(r.period).toBeNull();
     expect(r.reasons.join(' ')).toContain('p.pulse.period');
     expect(scenePeriod(scene([{ ...pulsing(4000), key: 'p', opacity: 1 }], { timeline: { loop: true, duration: 12000, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] } })).period).toBe(12000);
+  });
+
+  it('takes no period from a pulse of amp 0 (X706: it breathes nothing)', () => {
+    expect(scenePeriod(scene([{ ...pulsing(4000), pulse: { amp: 0, period: 4000 } }])).period).toBe(0);
+  });
+
+  describe('spin repeats at the drawing\'s rotational symmetry (X709)', () => {
+    const f = (v: number): number => Number(v.toFixed(4));
+    const at = (a: number, r: number): string => `${f(Math.cos(a) * r)} ${f(Math.sin(a) * r)}`;
+    /** n thin spokes from the hub, one SVG subpath each; spoke `long` reaches 0.9 instead of 1. */
+    const spokes = (n: number, long = -1): string[] =>
+      Array.from({ length: n }, (_, i) => {
+        const a = (i * 2 * Math.PI) / n;
+        return `M ${at(a - 0.04, 0.2)} L ${at(a, i === long ? 0.9 : 1)} L ${at(a + 0.04, 0.2)} Z`;
+      });
+    const polygon = (extra: Record<string, unknown>): LayerSpec['sprite'] => ({ kind: 'polygon', radius: [0.3, 0.3], color: '#ffffff', ...extra }) as LayerSpec['sprite'];
+    const spinner = (sprite: LayerSpec['sprite'], spin: number, lap?: number): SaverSpec =>
+      scene([{ key: 'spokes', count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, spin, opacity: 1, sprite }], lap ? { timeline: { loop: true, duration: lap, keys: [{ t: 0, path: 'spokes.opacity', value: 1, dur: 0 }] } } : {});
+    const seams = (s: SaverSpec): boolean => adviseSpec(s, { width: 960, height: 540 }).some((w) => w.code === 'loop-seam');
+
+    it('repeats 18 identical spokes every 20° of spin: spin 16 → 1250 ms', () => {
+      const r = scenePeriod(spinner(polygon({ path: spokes(18).join(' ') }), 16));
+      expect(r.period).toBe(1250);
+      expect(r.parts).toEqual(['layers[0] (spokes) spin (18-fold): 1250 ms']);
+      // A lap of 5 s holds four repeats; a full turn (22.5 s) does not divide it.
+      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 16, 5000))).toBe(false);
+      // Spin 25 on the reported 36 s lap: 800 ms repeats fit 45 times, though a full turn (14.4 s) does not.
+      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 25, 36000))).toBe(false);
+      // At spin 16 a 36 s lap is 28.8 repeats, so it still seams — 16° of turn left over.
+      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 16, 36000))).toBe(true);
+    });
+
+    it('still warns for a drawing that is not symmetric', () => {
+      const r = scenePeriod(spinner(polygon({ path: spokes(18, 3).join(' ') }), 16));
+      expect(r.period).toBe(22500);
+      expect(seams(spinner(polygon({ path: spokes(18, 3).join(' ') }), 16, 5000))).toBe(true);
+      // A triangle facet that is not equilateral has no symmetry either.
+      expect(scenePeriod(spinner(polygon({ points: [[0, -1], [0.5, 0.5], [-0.9, 0.4]] }), 16)).period).toBe(22500);
+    });
+
+    it('matches each paint on its own: one spoke a different colour breaks the symmetry', () => {
+      const all = spokes(18);
+      const parts = [{ path: all.filter((_, i) => i !== 5).join(' ') }, { path: all[5]!, color: '#ff0000' }];
+      expect(scenePeriod(spinner(polygon({ parts }), 16)).period).toBe(22500);
+      // Alternating colours: 9-fold, the period of the colour pattern.
+      const alternating = [{ path: all.filter((_, i) => i % 2 === 0).join(' ') }, { path: all.filter((_, i) => i % 2 === 1).join(' '), color: '#ff0000' }];
+      expect(scenePeriod(spinner(polygon({ parts: alternating }), 16)).period).toBe(2500);
+    });
+
+    it('finds the symmetry of curved arms through the flattener, and of regular n-gons', () => {
+      const arms = Array.from({ length: 3 }, (_, i) => {
+        const r = (i * 2 * Math.PI) / 3;
+        const p = (x: number, y: number): string => `${f(x * Math.cos(r) - y * Math.sin(r))} ${f(x * Math.sin(r) + y * Math.cos(r))}`;
+        return `M ${p(0.05, 0)} C ${p(0.5, 0.1)} ${p(0.8, 0.5)} ${p(0.3, 0.95)}`;
+      }).join(' ');
+      expect(scenePeriod(spinner(polygon({ path: arms, fill: false, stroke: { color: '#ffffff', width: 0.05 } }), 40)).period).toBe(3000);
+      expect(scenePeriod(spinner(polygon({ sides: 6 }), 40)).period).toBe(1500);
+    });
+
+    it('turns about the drawing\'s origin, and trusts no symmetry it does not model', () => {
+      const path = spokes(18).join(' ');
+      expect(scenePeriod(spinner(polygon({ path, origin: [0.2, 0] }), 16)).period).toBe(22500);
+      expect(scenePeriod(spinner(polygon({ path, stroke: { color: '#ff0000', width: 0.02, draw: { end: 0.5 } } }), 16)).period).toBe(22500);
+      expect(scenePeriod(spinner(polygon({ path, gradient: { type: 'linear', from: [-1, 0], to: [1, 0], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] } }), 16)).period).toBe(22500);
+    });
+
+    it('takes no period from a spinning circle or ring, even at seeded speeds', () => {
+      const circle = { kind: 'circle', radius: [0.1, 0.1], color: '#ffffff' } as LayerSpec['sprite'];
+      const ring = { kind: 'ring', radius: [0.1, 0.1], color: '#ffffff' } as LayerSpec['sprite'];
+      expect(scenePeriod(spinner(circle, 7)).period).toBe(0);
+      expect(scenePeriod(scene([{ count: 4, motion: { type: 'static' }, spin: [5, 30], sprite: ring }])).period).toBe(0);
+    });
   });
 
   it('fires only when a looping timeline does not fit the rest of the scene', () => {

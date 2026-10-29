@@ -30,7 +30,9 @@ final class TVAppState {
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
-    /// Editorial shelf catalog, server-ordered.
+    /// Channels this viewer hid (Report → Hide), filtered out of `channels`
+    /// at every load. Injected so tests never touch the real list.
+    let hidden: HiddenChannels
     var categories: [ChannelCategory] = []
     var isLoadingGallery = false
     var galleryError: String?
@@ -53,6 +55,11 @@ final class TVAppState {
     var specBackground: SpecSubset.Background?
     /// 0…1 frame persistence declared by the scene (motion smear).
     var specGhosting: Double = 0
+    /// The on-screen scene's render seed (a `field` background and the
+    /// `finish` grain hash it) and its print finish — a sequence's own
+    /// finish wins over its segment's (FORMAT.md `finish`).
+    var specSeed: Int = 0
+    var specFinish: SpecSubset.Finish?
     /// True when the channel runs a non-schema spec (e.g. classic saver
     /// `{"id":"warp"}`) — no native render possible, route to the thumb stream.
     var isClassicSpec = false
@@ -143,7 +150,9 @@ final class TVAppState {
     private var baseURL: URL
     private var wsTask: Task<Void, Never>?
 
-    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL) {
+    init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL,
+         hidden: HiddenChannels = HiddenChannels(storage: .inMemory)) {
+        self.hidden = hidden
         self.gallery = gallery
         self.mcp = mcp
         self.ws = ws
@@ -172,7 +181,8 @@ final class TVAppState {
             mcp: MCPClient(baseURL: baseURL, transport: transport, confirmer: MCPConfirmPrompt.confirmer),
             ws: ChannelWSClient(),
             pair: PairClient(baseURL: baseURL, transport: transport),
-            baseURL: baseURL
+            baseURL: baseURL,
+            hidden: HiddenChannels()
         )
     }
 
@@ -183,13 +193,13 @@ final class TVAppState {
         // specs make it fully renderable), then let the network refresh
         // replace it. A cold boot shows real content in one frame.
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
-            channels = cached
+            channels = hidden.visible(cached)
         }
         if categories.isEmpty, let cached = await gallery.cachedCategories() {
             categories = cached
         }
         do {
-            channels = try await gallery.fetchChannels()
+            channels = hidden.visible(try await gallery.fetchChannels())
             galleryError = nil
         } catch {
             // Keep showing cached content on refresh failure; only surface
@@ -248,6 +258,7 @@ final class TVAppState {
         compiledScene = []
         specBackground = nil
         specGhosting = 0
+        specFinish = nil
         isClassicSpec = false
         classicSaverId = nil
         thumbFailed = false
@@ -264,9 +275,8 @@ final class TVAppState {
         // (and classic channels have no decodable inline spec, so they keep
         // the spinner until the snapshot routes them to the thumb stream).
         if let cached = channels.first(where: { $0.id == channelId })?.spec {
-            compiledScene = cached.compile(seed: cached.seed ?? 0, budget: sceneBudget)
-            specBackground = cached.background
-            specGhosting = cached.ghosting ?? 0
+            compiledScene = cached.compile(seed: cached.seed ?? 42, budget: sceneBudget)
+            setGround(cached, seed: cached.seed ?? 42)
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
@@ -300,6 +310,28 @@ final class TVAppState {
             .filter { $0.sleeping != true || $0.id == selectedChannelId }
         guard let i = ring.firstIndex(where: { $0.id == selectedChannelId }) else { return nil }
         return (i + 1, ring.count)
+    }
+
+    /// Take a channel off this TV, now and on every reload. Hidden while it
+    /// is playing: on to the next channel, or back to the grid if none.
+    func hideChannel(_ channelId: String) {
+        let next = selectedChannelId == channelId
+            ? Self.surfTarget(from: channelId, step: 1, in: channels) : nil
+        hidden.hide(channelId)
+        channels.removeAll { $0.id == channelId }
+        guard selectedChannelId == channelId else { return }
+        if let next, next != channelId {
+            selectChannel(next, from: presentingSurface)
+        } else {
+            exitChannel()
+        }
+    }
+
+    /// File a viewer's report on a channel (see `ContentReport`).
+    func reportChannel(_ channelId: String, reason: ContentReport.Reason) async throws {
+        try await mcp.reportChannel(channelId: channelId,
+                                    label: channels.first { $0.id == channelId }?.label,
+                                    reason: reason)
     }
 
     func surf(_ step: Int) {
@@ -438,10 +470,9 @@ final class TVAppState {
         if let spec = scene.spec {
             isClassicSpec = false
             classicSaverId = nil
-            let seed = scene.seed ?? spec.seed ?? 0
+            let seed = spec.seed ?? scene.seed ?? 42
             compiledScene = spec.compile(seed: seed, budget: sceneBudget)
-            specBackground = spec.background
-            specGhosting = spec.ghosting ?? 0
+            setGround(spec, seed: seed)
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
             // A timed piece in the past plays its keyframes too, not its base.
             if let raw = scene.rawSpec { startKeyframes(raw, seed: seed) }
@@ -452,8 +483,7 @@ final class TVAppState {
             classicParams = [:]
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
-            specBackground = nil
-            specGhosting = 0
+            setGround(nil, seed: 0)
         }
     }
 
@@ -577,11 +607,40 @@ final class TVAppState {
             // restyles the past scene nor gets lost for the return.
             liveClassicParams = Self.trackParams(from: snapshot.scene)
             if timeline == .live { classicParams = liveClassicParams }
-            if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
-                applySpec(spec, fallbackSeed: snapshot.epoch)
+            if let epoch = snapshot.epoch { channelEpochMs = epoch }
+            if let now = snapshot.now { serverSkew = Double(now) / 1000 - Date().timeIntervalSince1970 }
+            // The web seeds a scene with the spec's seed, else the scene's, else 42.
+            let sceneSeed: Int? = { if case .object(let o)? = snapshot.scene { return o["seed"]?.intValue } else { return nil } }()
+            let track: JSONValue? = { if case .object(let o)? = snapshot.scene { return o["track"] } else { return nil } }()
+            if let base = Self.publishMount(snapshot.scene, track: track) {
+                // A publish's own glide plays from this screen's mount (F85).
+                applySpec(base, fallbackSeed: sceneSeed ?? 42)
+                if timeline == .live { applyLiveTrack(track) }
+            } else if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
+                applySpec(spec, fallbackSeed: sceneSeed ?? 42)
             }
-        case .scene(let spec, let seed, let transition):
+        case .reseed(let seed, let epoch):
+            if let epoch { channelEpochMs = epoch }
+            // The saved live scene takes the new seed too, so returning from
+            // history (or a reseed received while browsing it) keeps it.
+            if let live = liveScene { liveScene = (live.json, seed ?? 42) }
+            guard timeline == .live, let json = currentSpecJSON else { break }
+            // A new arrangement: the steered scene remounts on the new seed.
+            let shown = steeredJSON ?? json
+            stopSteer(); stopKeyframes(); stopSequence()
+            steeredJSON = nil; steerShown = nil; currentSpecJSON = nil
+            sceneRevision &+= 1
+            render(shown, fallbackSeed: seed ?? 42)
+        case .scene(let spec, let seed, let transition, let epoch, let track):
+            if let epoch { channelEpochMs = epoch }
             if let spec {
+                // A publish replaces the scene, and the steers made on the old one.
+                if timeline == .live {
+                    stopSteer()
+                    steeredJSON = nil
+                    steerShown = nil
+                    currentSpecJSON = nil
+                }
                 // A new scene on the channel: the renderer identity changes, so
                 // the player dissolves old into new instead of swapping layers
                 // in place at the old clock (a hard cut).
@@ -590,7 +649,11 @@ final class TVAppState {
                     beginCrossfade(seconds: sceneCrossfade)
                     sceneRevision &+= 1
                 }
-                applySpec(spec, fallbackSeed: seed)
+                // Kept and recalled steers are in force from the first frame;
+                // a publish's own glide (`fromPublish`) plays from here.
+                let mount = Self.mountDeltas(track).map { SpecTimeline.applyDeltas(spec, $0) } ?? spec
+                applySpec(mount, fallbackSeed: seed ?? 42)
+                if timeline == .live, track != nil { applyLiveTrack(track) }
             }
         case .sleep:
             sleeping = true
@@ -606,6 +669,8 @@ final class TVAppState {
             }
         case .delta:
             break
+        case .track(let track, _):
+            applyLiveTrack(track)
         case .switchChannel(let channelId, let sceneId):
             // Any switch push proves a paired phone is steering this TV —
             // the pairing screen uses it as its "✓ Paired" cue (the phone
@@ -620,7 +685,12 @@ final class TVAppState {
                 pinScene(sceneId)
             } else {
                 // Same channel, no scene: the phone wants it live (sync mode
-                // following the phone back to live, or "send live").
+                // following the phone back to live, or "send live"). A
+                // stored scene still downloading from an earlier push would
+                // land after this and pin over live, so it goes first, even
+                // when the timeline already reads live.
+                historyTask?.cancel()
+                historyTask = nil
                 returnToLive()
             }
         }
@@ -640,26 +710,10 @@ final class TVAppState {
         }
     }
 
-    /// Flatten a classic scene's track into last-write-wins string params.
-    /// Only t=0 "set" deltas matter here — the TV interprets the scene's
-    /// standing state, not its glide timing.
+    /// Flatten a classic scene's track into last-write-wins string params
+    /// (shared with the phone's posters: `PublicChannel.classicParams`).
     static func trackParams(from scene: JSONValue?) -> [String: String] {
-        guard case .object(let obj)? = scene,
-              case .object(let track)? = obj["track"],
-              case .array(let deltas)? = track["deltas"] else { return [:] }
-        var out: [String: String] = [:]
-        for delta in deltas {
-            guard case .object(let d) = delta,
-                  case .string(let path)? = d["path"] else { continue }
-            switch d["value"] {
-            case .string(let v): out[path] = v
-            case .int(let v): out[path] = String(v)
-            case .double(let v): out[path] = v == v.rounded() ? String(Int(v)) : String(v)
-            case .bool(let v): out[path] = String(v)
-            default: break
-            }
-        }
-        return out
+        PublicChannel.trackParams(from: scene)
     }
 
     private func applySpec(_ json: JSONValue, fallbackSeed: Int?) {
@@ -672,6 +726,13 @@ final class TVAppState {
     }
 
     private func render(_ json: JSONValue, fallbackSeed: Int?) {
+        sceneClockOffset = 0
+        // A new document replaces whatever the steers had made of the old one.
+        if json != currentSpecJSON {
+            stopSteer()
+            steeredJSON = nil
+            steerShown = nil
+        }
         currentSpecJSON = json
         guard let data = try? JSONEncoder().encode(json) else { return }
         // Sequence envelope? Route to the timeline player — it carries no
@@ -695,8 +756,7 @@ final class TVAppState {
             // survives re-publishes and matches the grid poster exactly.
             classicSeed = ClassicSaverKind.seed(forChannel: selectedChannelId ?? "")
             compiledScene = []
-            specBackground = nil
-            specGhosting = 0
+            setGround(nil, seed: 0)
             return
         }
         // A valid schema spec clears the classic flag (re-publish scenario).
@@ -706,10 +766,11 @@ final class TVAppState {
         // Snapshots repeat the document. A timed scene already being driven
         // keeps its clock and its current frame: recompiling the base here
         // would flash the un-keyed scene, and restarting would rewind it.
+        liveSeed = seed
         if isDrivingKeyframes(json, seed: seed) { return }
+        if steeredJSON != nil { return }   // a steered scene keeps its steers on a repeat
         compiledScene = spec.compile(seed: seed, budget: sceneBudget)
-        specBackground = spec.background
-        specGhosting = spec.ghosting ?? 0
+        setGround(spec, seed: seed)
         complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         startKeyframes(json, seed: seed)
     }
@@ -738,6 +799,7 @@ final class TVAppState {
         let layers: [CompiledLayer]
         let background: SpecSubset.Background?
         let ghosting: Double
+        let seed: Int
         /// Seconds it had been running, so the copy carries on from there.
         let elapsed: TimeInterval
         /// Drawn over a bed, so see-through, as the live renderer paints it.
@@ -750,6 +812,7 @@ final class TVAppState {
             let layers: [CompiledLayer]
             let background: SpecSubset.Background?
             let ghosting: Double
+            let seed: Int
             let elapsed: TimeInterval
         }
     }
@@ -778,9 +841,9 @@ final class TVAppState {
               effectiveTier == .t3 || effectiveTier == .t2 else { return }
         outgoingSerial &+= 1
         let bed = hasBed && withBed ? OutgoingScene.Bed(layers: bedScene, background: bedBackground, ghosting: bedGhosting,
-                                            elapsed: now.timeIntervalSince(bedMountedAt)) : nil
+                                            seed: bedSeed, elapsed: now.timeIntervalSince(bedMountedAt) + bedClockOffset) : nil
         outgoing = OutgoingScene(id: outgoingSerial, layers: compiledScene, background: specBackground,
-                                 ghosting: specGhosting, elapsed: now.timeIntervalSince(rendererMountedAt),
+                                 ghosting: specGhosting, seed: specSeed, elapsed: now.timeIntervalSince(rendererMountedAt) + sceneClockOffset,
                                  transparent: hasBed, bed: bed)
         outgoingOpacity = 1
         let serial = outgoingSerial
@@ -816,6 +879,19 @@ final class TVAppState {
     private(set) var bedScene: [CompiledLayer] = []
     private(set) var bedBackground: SpecSubset.Background?
     private(set) var bedGhosting: Double = 0
+    private(set) var bedSeed: Int = 0
+    /// Seconds the on-screen scene's own clock had run when its renderer
+    /// mounted (a segment entered mid-way), and the bed's.
+    private(set) var sceneClockOffset: TimeInterval = 0
+    private(set) var bedClockOffset: TimeInterval = 0
+    /// The grain seed: a sequence-level finish keeps the sequence's seed
+    /// across segments (compile.ts `frameFinishSeed`).
+    private(set) var finishSeed: Int = 0
+    /// The live scene's publish time (ms), the origin of the channel's shared
+    /// clock — what `sync: 'epoch'` sequences anchor to.
+    private(set) var channelEpochMs: Int?
+    /// Server clock − device clock (s), from the snapshot's `now`.
+    private var serverSkew: TimeInterval = 0
     /// True while the active sequence has a bed (even one with no layers —
     /// its ground alone still replaces every segment's background).
     private(set) var hasBed = false
@@ -825,27 +901,48 @@ final class TVAppState {
         guard seq != activeSequence else { return }
         sequenceTask?.cancel()
         activeSequence = seq
-        sequenceEpoch = Date()
+        // `sync: 'epoch'` starts the clock where the channel's shared clock
+        // is (every screen in the room on one segment); `mount` at 0.
+        let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date().addingTimeInterval(serverSkew))
+        sequenceEpoch = Date().addingTimeInterval(-baseT)
         if let bed = seq.bed {
-            bedScene = bed.compile(seed: seq.bedSeed(fallback: fallbackSeed ?? 0), budget: sceneBudget)
+            bedSeed = seq.bedSeed(fallback: fallbackSeed ?? 42)
+            bedClockOffset = baseT
+            bedScene = bed.compile(seed: bedSeed, budget: sceneBudget)
             bedBackground = bed.background
             bedGhosting = bed.ghosting ?? 0
-            if !hasBed { bedMountedAt = Date() }
+            if !hasBed { bedMountedAt = sequenceEpoch ?? Date() }
             hasBed = true
         } else {
             clearBed()
         }
-        applySegment(seq, at: 0, fallbackSeed: fallbackSeed, advancing: false)
+        applySegment(seq, at: baseT, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
+    }
+
+    /// Seconds already elapsed on a `sync: 'epoch'` sequence's shared clock
+    /// (the site's `sequenceBaseT`): `now − epoch`, wrapped into the lap when
+    /// it loops, never negative; 0 for `mount` or without an epoch.
+    nonisolated static func sequenceBaseT(_ seq: SequenceSubset, epochMs: Int?, now: Date) -> TimeInterval {
+        guard seq.sync == "epoch", let epochMs else { return 0 }
+        var elapsed = max(0, now.timeIntervalSince1970 - Double(epochMs) / 1000)
+        if seq.loop == true {
+            var lap: TimeInterval = 0
+            for seg in seq.segments { guard let d = seg.duration else { break }; lap += d / 1000 }
+            if lap > 0 { elapsed = elapsed.truncatingRemainder(dividingBy: lap) }
+        }
+        return elapsed
     }
 
     private func stopSequence() {
         sequenceTask?.cancel()
         sequenceTask = nil
+        stopMorph()
         activeSequence = nil
         sequenceEpoch = nil
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
+        sequenceWipe = nil
         clearBed()
     }
 
@@ -856,36 +953,143 @@ final class TVAppState {
         hasBed = false
     }
 
+    /// The wipe in flight entering the current segment, if that is how it
+    /// arrived (nil for every other crossing).
+    private(set) var sequenceWipe: SequenceSubset.Wipe?
+    /// When that wipe began and how long it runs (the authored `dur`).
+    private(set) var sequenceWipeStart = Date()
+    private(set) var sequenceWipeDuration: TimeInterval = 0
+
     /// `advancing` is a step to the next segment of the sequence already on
     /// screen; the first segment of a new sequence is dissolved in by the scene
     /// message (or the channel change) that started it.
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?,
                               advancing: Bool = true) {
         stopKeyframes()
+        stopMorph()
         let resolved = seq.resolve(at: T)
-        let segment = seq.segments[resolved.index]
+        let index = resolved.index
+        let segment = seq.segments[index]
+        // The crossing is the OUTGOING segment's transition (web parity).
+        let crossing = seq.crossing(into: index, wrapped: index == 0 && seq.hasWrapped(at: T))
+        var dissolve: TimeInterval = 0
+        var wipe: SequenceSubset.Wipe?
+        switch crossing {
+        case .fade(let seconds): dissolve = seconds
+        case .wipe(let w, let seconds): dissolve = seconds; wipe = w
+        case .cut, .morph: break
+        }
         // Two renderers overlap during a dissolve: same cap as a scene message.
-        let authored = seq.transitionDuration(entering: resolved.index)
-        sequenceCrossfade = renderClass == .legacy ? min(authored, 0.4) : authored
-        let nextKey = segment.key ?? "segment-\(resolved.index)"
-        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey {
+        let remaining = max(0, dissolve - resolved.localT)
+        sequenceCrossfade = renderClass == .legacy ? min(remaining, 0.4) : remaining
+        sequenceWipe = remaining > 0 ? wipe : nil
+        sequenceWipeStart = Date().addingTimeInterval(-resolved.localT)
+        sequenceWipeDuration = renderClass == .legacy ? min(dissolve, 0.4) : dissolve
+        if sequenceWipe != nil {
+            // Done sweeping: drop the mask so it stops animating.
+            let key = segment.key ?? "segment-\(index)"
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(remaining + 0.2))
+                if self?.sequenceSegmentKey == key { self?.sequenceWipe = nil }
+            }
+        }
+        let nextKey = segment.key ?? "segment-\(index)"
+        if advancing, sequenceSegmentKey != nil, sequenceSegmentKey != nextKey, sequenceCrossfade > 0 {
             beginCrossfade(seconds: sequenceCrossfade, withBed: false)
         }
         sequenceSegmentKey = nextKey
+        // Entities render with the morph chain root's seed (sequence.ts
+        // `segmentRenderSeed`), so a chain of twins never re-seats.
+        let seed = seq.renderSeed(index, fallback: fallbackSeed ?? 0)
         let scene = segment.scene
-        let seed = scene.seed ?? seq.seed ?? fallbackSeed ?? 0
+        let entered = Date().addingTimeInterval(-resolved.localT)
+        // Entered mid-segment (an epoch joiner, a reconnect): the renderer's
+        // clock starts at the segment's local time, as the web's child does.
+        sceneClockOffset = resolved.localT
+        if case .morph(let from, let seconds, let text) = crossing, resolved.localT < seconds,
+           seq.rawScenes.indices.contains(from), seq.rawScenes.indices.contains(index) {
+            setGround(scene, seed: seed)
+            if hasBed { specBackground = nil; specGhosting = 0 }
+            specFinish = seq.finish ?? scene.finish
+            if seq.finish != nil { finishSeed = seq.seed ?? fallbackSeed ?? 42 }
+            startMorph(seq, from: from, into: index, seconds: seconds, text: text, seed: seed, entered: entered)
+            complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
+            return
+        }
         compiledScene = scene.compile(seed: seed, budget: sceneBudget)
         // Over a bed, a segment paints transparently: the bed owns the
         // ground, and a smear needs an opaque ground to decay into.
-        specBackground = hasBed ? nil : scene.background
-        specGhosting = hasBed ? 0 : (scene.ghosting ?? 0)
+        setGround(scene, seed: seed)
+        if hasBed { specBackground = nil; specGhosting = 0 }
+        specFinish = seq.finish ?? scene.finish
+        if seq.finish != nil { finishSeed = seq.seed ?? fallbackSeed ?? 42 }
         complexityCap = SceneComplexity.precap(for: compiledScene + bedScene, renderClass: renderClass)
         // A segment's own keyframes run on its local clock (from 0 at entry).
-        if case .object(let root)? = currentSpecJSON,
-           case .array(let segs)? = root["segments"], segs.indices.contains(resolved.index),
-           case .object(let seg) = segs[resolved.index], let raw = seg["scene"] {
-            startKeyframes(raw, seed: seed)
+        if seq.rawScenes.indices.contains(index) {
+            startKeyframes(seq.rawScenes[index], seed: seed, epoch: entered)
         }
+    }
+
+    // MARK: Morph — a lerp between structural twins
+
+    private var morphTask: Task<Void, Never>?
+
+    private func stopMorph() {
+        morphTask?.cancel()
+        morphTask = nil
+    }
+
+    /// Drive a morph into `index` (compile.ts SequenceInstance): each tick the
+    /// outgoing scene (resolved on its own clock, `duration + localT`) and
+    /// the incoming one (at `localT`) are lerped at `easeSmooth(localT / dur)`
+    /// and compiled with the chain root's seed, so every entity keeps its
+    /// place; `text: crossfade | dip` paints differing words twice. When the
+    /// window closes the incoming segment takes over, keyframes and all.
+    private func startMorph(_ seq: SequenceSubset, from: Int, into index: Int, seconds: TimeInterval,
+                            text: String, seed: Int, entered: Date) {
+        let outDur = (seq.segments[from].duration ?? 0) / 1000
+        let rawA = seq.rawScenes[from], rawB = seq.rawScenes[index]
+        let twoPass = text == "crossfade" || text == "dip"
+        let frame = { [weak self] (localT: TimeInterval) -> Bool in
+            guard let self else { return false }
+            let k = SpecTimeline.easeSmooth(localT / seconds)
+            let a = SpecTimeline.resolve(rawA, at: (outDur + localT) * 1000)
+            let b = SpecTimeline.resolve(rawB, at: localT * 1000)
+            let lerped = SpecTimeline.lerpSpec(SpecTimeline.withoutTimeline(a), SpecTimeline.withoutTimeline(b), k)
+            guard var layers = Self.compileJSON(lerped, seed: seed, budget: self.sceneBudget) else { return false }
+            if twoPass { MorphText.applyCrossfade(&layers, from: a, to: b, lerped: lerped, k: k, dip: text == "dip") }
+            self.compiledScene = layers
+            // The ground glides with the foreground (no bed owns it).
+            if !self.hasBed, let spec = Self.decodeSpec(lerped) { self.specBackground = spec.background }
+            return true
+        }
+        _ = frame(Date().timeIntervalSince(entered))
+        morphTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let localT = Date().timeIntervalSince(entered)
+                if localT >= seconds {
+                    // The window closed: the incoming segment, on its own clock.
+                    self.compiledScene = seq.segments[index].scene.compile(seed: seed, budget: self.sceneBudget)
+                    self.morphTask = nil
+                    self.startKeyframes(rawB, seed: seed, epoch: entered)
+                    return
+                }
+                guard frame(localT) else { return }
+                try? await Task.sleep(for: .seconds(self.keyframeInterval))
+            }
+        }
+    }
+
+    /// A raw scene compiled the way a decoded one is; nil when it no longer decodes.
+    nonisolated static func compileJSON(_ json: JSONValue, seed: Int,
+                                        budget: (layers: Int, entities: Int)) -> [CompiledLayer]? {
+        decodeSpec(json)?.compile(seed: seed, budget: budget)
+    }
+
+    nonisolated static func decodeSpec(_ json: JSONValue) -> SpecSubset? {
+        guard let data = try? JSONEncoder().encode(json) else { return nil }
+        return try? JSONDecoder().decode(SpecSubset.self, from: data)
     }
 
     private func scheduleSequenceAdvance(fallbackSeed: Int?) {
@@ -904,6 +1108,126 @@ final class TVAppState {
         }
     }
 
+    /// The deltas a scene MOUNTS with (live-track.ts `mountDeltas`): every
+    /// delta but a publish's own (`fromPublish`), which glides in after.
+    nonisolated static func mountDeltas(_ track: JSONValue?) -> [(path: String, value: JSONValue)]? {
+        guard case .object(let t)? = track, let raw = t["deltas"]?.array, !raw.isEmpty else { return nil }
+        return raw.compactMap { item in
+            guard case .object(let d) = item, let path = d["path"]?.string, let value = d["value"],
+                  d["fromPublish"] != .bool(true) else { return nil }
+            return (path, value)
+        }
+    }
+
+    /// A snapshot whose track still carries a publish's glide mounts at the
+    /// spec plus the other deltas, not at the resolved end state; nil otherwise.
+    nonisolated static func publishMount(_ scene: JSONValue?, track: JSONValue?) -> JSONValue? {
+        guard case .object(let s)? = scene, let spec = s["spec"]?.normalizedSpec(),
+              case .object(let root) = spec, root["layers"] != nil,
+              case .object(let t)? = track, let raw = t["deltas"]?.array,
+              raw.contains(where: { if case .object(let d) = $0 { return d["fromPublish"] == .bool(true) } else { return false } }),
+              let mount = mountDeltas(track) else { return nil }
+        return SpecTimeline.applyDeltas(spec, mount)
+    }
+
+    // MARK: Live steering (`track`)
+
+    /// The live scene as steering has left it (JSON), and the frame on screen
+    /// while a glide runs toward it. Nil until the first steer.
+    private var steeredJSON: JSONValue?
+    private var steerShown: JSONValue?
+    private var steerTask: Task<Void, Never>?
+    private var liveSeed = 0
+
+    private func stopSteer() {
+        steerTask?.cancel()
+        steerTask = nil
+    }
+
+    /// A steer reached the channel (compile.ts `applyTrack`): the whole track's
+    /// deltas applied to what is on screen, glided to over the longest delta's
+    /// `dur` with the ease of that delta when it is a steer ease (`in` / `out`
+    /// / `spring`), else smooth. A timeline scene takes the steer into its
+    /// base and keeps its clock. Sequences and classic savers steer elsewhere.
+    func applyLiveTrack(_ track: JSONValue?) {
+        if isClassicSpec {
+            liveClassicParams = Self.trackParams(from: track.map { .object(["track": $0]) })
+            if timeline == .live { classicParams = liveClassicParams }
+            return
+        }
+        guard timeline == .live, activeSequence == nil, let base = steeredJSON ?? currentSpecJSON,
+              case .object(let t)? = track, let raw = t["deltas"]?.array else { return }
+        if SpecTimeline.hasTimeline(base) { armTimelineSteers(raw, on: base); return }
+        var deltas: [(path: String, value: JSONValue)] = []
+        var glide = 0.0, ease: String?
+        for item in raw {
+            guard case .object(let d) = item, let path = d["path"]?.string, let value = d["value"] else { continue }
+            deltas.append((path, value))
+            let dur = d["dur"]?.number ?? 1000
+            if dur > glide || deltas.count == 1 {
+                glide = max(glide, dur)
+                ease = d["ease"]?.string.flatMap { SpecTimeline.steerEases.contains($0) ? $0 : nil }
+            }
+        }
+        guard !deltas.isEmpty else { return }
+        let target = SpecTimeline.applyDeltas(base, deltas)
+        guard target != base else { return }
+        steeredJSON = target
+        let seed = liveSeed
+        stopSteer()
+        let from = steerShown ?? base
+        let began = Date()
+        let frame = { [weak self] (k: Double) -> Bool in
+            guard let self else { return false }
+            let shown = k >= 1 ? target : SpecTimeline.lerpSpec(from, target, SpecTimeline.easeGlide(ease, k))
+            guard let data = try? JSONEncoder().encode(shown),
+                  let spec = try? JSONDecoder().decode(SpecSubset.self, from: data) else { return false }
+            self.steerShown = shown
+            self.compiledScene = spec.compile(seed: seed, budget: self.sceneBudget)
+            self.setGround(spec, seed: seed)
+            return true
+        }
+        guard glide > 0 else { _ = frame(1); return }
+        _ = frame(0)
+        steerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let k = Date().timeIntervalSince(began) * 1000 / glide
+                guard frame(min(1, k)), k < 1 else { self.steerTask = nil; return }
+                try? await Task.sleep(for: .seconds(self.keyframeInterval))
+            }
+        }
+    }
+
+    /// Steers on a timeline scene follow the steering rule (compile.ts
+    /// `overrideAuthored`): one steer per field (the last delta for it), each
+    /// armed once — a re-sent track does not re-arm a hold the timeline has
+    /// already taken back — gliding in from the value on screen.
+    private func armTimelineSteers(_ raw: [JSONValue], on authored: JSONValue) {
+        guard let epoch = keyframeEpoch else { return }
+        let now = Date().timeIntervalSince(epoch) * 1000
+        let shown = keyframeShown ?? authored
+        var latest: [(path: String, id: String, value: JSONValue, dur: Double, ease: String?)] = []
+        for item in raw {
+            guard case .object(let d) = item, let p = d["path"]?.string, let value = d["value"],
+                  let path = SpecTimeline.canonicalPath(SpecTimeline.withoutTimeline(authored), p) else { continue }
+            latest.removeAll { $0.path == path }
+            let id = "\(d["t"]?.number ?? 0)|\((try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "")"
+            latest.append((path, id, value, d["dur"]?.number ?? 1000,
+                           d["ease"]?.string.flatMap { SpecTimeline.steerEases.contains($0) ? $0 : nil }))
+        }
+        // The batch glides on one curve, the longest delta's.
+        let glide = latest.map(\.dur).max() ?? 1000
+        let batchEase = latest.first { $0.dur == glide }?.ease
+        for s in latest where seenSteers[s.path] != s.id {
+            seenSteers[s.path] = s.id
+            keyframeOverrides[s.path] = SpecTimeline.Override(
+                spec: authored, path: s.path, from: glide > 0 ? SpecTimeline.read(shown, s.path) : s.value,
+                to: s.value, now: now, glide: glide, ease: batchEase)
+        }
+        keyframeWake?()
+    }
+
     // MARK: Keyframes (`timeline`)
 
     /// Drives a scene's `timeline`: re-resolves the authored JSON on the
@@ -915,28 +1239,45 @@ final class TVAppState {
     private var keyframeTask: Task<Void, Never>?
     /// What the driver is playing: the authored JSON and its seed.
     private var keyframeSource: (json: JSONValue, seed: Int)?
+    /// Live steers held on the driven timeline, by index-form path, and which
+    /// server steer each path last armed (`t|value`).
+    private var keyframeOverrides: [String: SpecTimeline.Override] = [:]
+    private var seenSteers: [String: String] = [:]
+    /// The frame the driver last put on screen, and a nudge for its sleep.
+    private var keyframeShown: JSONValue?
+    private var keyframeWake: (() -> Void)?
+    /// When the driven timeline's clock read 0.
+    private var keyframeEpoch: Date?
 
     private func isDrivingKeyframes(_ json: JSONValue, seed: Int) -> Bool {
         guard keyframeTask != nil, let src = keyframeSource else { return false }
         return src.seed == seed && src.json == json
     }
 
-    /// How often a glide is re-resolved: smooth on Canvas; on the sprite tier
-    /// every recompile rebuilds textures, so a glide steps a few times a second.
-    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 30 : 0.25 }
+    /// How often a glide is re-resolved: every frame on Canvas; the sprite
+    /// tier rebinds its nodes in place (cached, tinted textures), at 12 Hz.
+    var keyframeInterval: TimeInterval { effectiveTier == .t3 ? 1.0 / 60 : 1.0 / 12 }
 
     private func stopKeyframes() {
         keyframeTask?.cancel()
         keyframeTask = nil
         keyframeSource = nil
+        keyframeWake?()
+        keyframeWake = nil
+        keyframeShown = nil
+        keyframeOverrides = [:]
     }
 
-    private func startKeyframes(_ source: JSONValue, seed: Int) {
+    /// `epoch`: when the scene's clock read 0 (a segment entered earlier
+    /// resumes its timeline where it is, not from the top).
+    private func startKeyframes(_ source: JSONValue, seed: Int, epoch: Date = Date()) {
         if isDrivingKeyframes(source, seed: seed) { return }
         stopKeyframes()
         guard SpecTimeline.hasTimeline(source) else { return }
         keyframeSource = (source, seed)
-        let epoch = Date()
+        keyframeEpoch = epoch
+        keyframeOverrides = [:]
+        seenSteers = [:]
         keyframeTask = Task { [weak self] in
             var last: JSONValue?
             var slow = 0
@@ -944,7 +1285,11 @@ final class TVAppState {
                 guard let self else { return }
                 let interval = self.keyframeInterval
                 let t = Date().timeIntervalSince(epoch) * 1000
-                let resolved = SpecTimeline.resolve(source, at: t)
+                var resolved = SpecTimeline.resolve(source, at: t)
+                if !self.keyframeOverrides.isEmpty {
+                    (resolved, self.keyframeOverrides) = SpecTimeline.applyOverrides(resolved, self.keyframeOverrides, at: t)
+                }
+                self.keyframeShown = resolved
                 if resolved != last {
                     let began = Date()
                     guard self.applyKeyframe(resolved, seed: seed) else { return }
@@ -954,11 +1299,28 @@ final class TVAppState {
                     slow = Date().timeIntervalSince(began) > interval ? slow + 1 : 0
                     if slow >= 3 { return }
                 }
-                guard let next = SpecTimeline.nextChange(source, after: t) else { return }
-                let wait = next <= t ? interval : Swift.max(interval, (next - t) / 1000)
-                try? await Task.sleep(for: .seconds(wait))
+                // A held steer animates on its own; otherwise sleep to the next key
+                // (a new steer wakes the loop early).
+                let next = self.keyframeOverrides.isEmpty ? SpecTimeline.nextChange(source, after: t) : t
+                let wait = next.map { $0 <= t ? interval : Swift.max(interval, ($0 - t) / 1000) } ?? 3600
+                await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                    let once = OnceFlag()
+                    let fire = { if once.claim() { done.resume() } }
+                    self.keyframeWake = fire
+                    Task { try? await Task.sleep(for: .seconds(wait)); fire() }
+                }
+                self.keyframeWake = nil
             }
         }
+    }
+
+    /// The ground, smear, seed and finish of the scene now on screen.
+    private func setGround(_ spec: SpecSubset?, seed: Int) {
+        specBackground = spec?.background
+        specGhosting = spec?.ghosting ?? 0
+        specSeed = seed
+        finishSeed = seed
+        specFinish = spec?.finish
     }
 
     /// One resolved keyframe state on screen. False when it no longer decodes.
@@ -970,6 +1332,7 @@ final class TVAppState {
             specBackground = spec.background
             specGhosting = spec.ghosting ?? 0
         }
+        if activeSequence?.finish == nil { specFinish = spec.finish }
         return true
     }
 
@@ -997,4 +1360,16 @@ enum TVConfig {
         ProcessInfo.processInfo.environment["IDLE_SCREENS_BASE_URL"]
             ?? "https://idlescreens.com"
     }()
+}
+
+/// A latch that lets exactly one of several racers resume a continuation.
+private final class OnceFlag: @unchecked Sendable {
+    private var used = false
+    private let lock = NSLock()
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if used { return false }
+        used = true
+        return true
+    }
 }

@@ -1,31 +1,52 @@
 import SwiftUI
+import UIKit
 
 extension Color {
-    static let appBackground    = Color(hex: "0A0A0F")
-    static let appSurface       = Color(hex: "14141C")
-    static let appSurfaceRaised = Color(hex: "1D1D28")
-    static let appBorder        = Color(hex: "2A2A38")
-    static let appPrimary       = Color(hex: "8B7CFF")
-    static let appAccent        = Color(hex: "5EEAD4")
-    static let appSuccess       = Color(hex: "30D158")
+    // Each colour is a light/dark pair. The chrome (Channels, Agents,
+    // Settings, sheets) follows the appearance chosen in Settings; the Watch
+    // feed and the TV app pin dark, so they always resolve the right-hand
+    // value. Light is iOS's grouped-list greys with the brand violet darkened
+    // enough to pass as text on white (#6655DD ≈ 5.6:1; #8B7CFF is 3.3:1).
+    static let appBackground    = Color(light: "F2F2F7", dark: "0A0A0F")
+    static let appSurface       = Color(light: "FFFFFF", dark: "14141C")
+    static let appSurfaceRaised = Color(light: "E9E9F0", dark: "1D1D28")
+    static let appBorder        = Color(light: "D5D5DE", dark: "2A2A38")
+    static let appPrimary       = Color(light: "6655DD", dark: "8B7CFF")
+    static let appAccent        = Color(light: "0E8A7B", dark: "5EEAD4")
+    static let appSuccess       = Color(light: "248A3D", dark: "30D158")
     /// Softer than system red — errors here are recoverable ("that code
     /// expired"), and full-saturation red reads as damage.
-    static let appDanger        = Color(hex: "FF6B6B")
+    static let appDanger        = Color(light: "D93F3F", dark: "FF6B6B")
     /// "It didn't answer" — a condition to notice, not a failure to fix.
-    static let appWarning       = Color(hex: "FFB454")
-    static let textPrimary      = Color.white
-    static let textSecondary    = Color(hex: "8E8E93")
-    static let textTertiary     = Color(hex: "48484A")
+    static let appWarning       = Color(light: "B36A00", dark: "FFB454")
+    static let textPrimary      = Color(light: "111114", dark: "FFFFFF")
+    static let textSecondary    = Color(light: "6C6C72", dark: "8E8E93")
+    static let textTertiary     = Color(light: "9C9CA3", dark: "48484A")
+
+    /// A pair that resolves against the view's colour scheme, so a subtree
+    /// pinned dark (`.environment(\.colorScheme, .dark)`) gets the dark value
+    /// even while the app around it is light.
+    init(light: String, dark: String) {
+        let l = parseHexRGB(light), d = parseHexRGB(dark)
+        self.init(uiColor: UIColor { traits in
+            let c = traits.userInterfaceStyle == .light ? l : d
+            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
 
     init(hex: String) {
-        let hex = hex.trimmingCharacters(in: .alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8) & 0xFF) / 255
-        let b = Double(int & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        let c = parseHexRGB(hex)
+        self.init(red: c.0, green: c.1, blue: c.2)
     }
+}
+
+/// `#rrggbb` or `#rgb` (each digit doubled, as CSS reads it) → sRGB 0…1.
+func parseHexRGB(_ hex: String) -> (Double, Double, Double) {
+    var digits = hex.trimmingCharacters(in: .alphanumerics.inverted)
+    if digits.count == 3 { digits = digits.map { "\($0)\($0)" }.joined() }
+    var int: UInt64 = 0
+    Scanner(string: digits).scanHexInt64(&int)
+    return (Double((int >> 16) & 0xFF) / 255, Double((int >> 8) & 0xFF) / 255, Double(int & 0xFF) / 255)
 }
 
 // Allow `.foregroundStyle(.textPrimary)` inside Button labels and other

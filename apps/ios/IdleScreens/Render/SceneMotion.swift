@@ -27,8 +27,11 @@ enum SceneMotion {
                                      in size: CGSize, dim: CGFloat, wrap: Bool) -> CGPoint {
         let x0 = entity.x * size.width + entity.offDX * dim
         let y0 = entity.y * size.height + entity.offDY * dim
-        let m = entity.size * dim
+        // The web's e.size (a circle's diameter) is the wrap margin.
+        let m = (entity.extent > 0 ? entity.extent : entity.size) * dim
         let tms = t * 1000
+        // Travel time: identity, or eased (settle / buoyant).
+        let dt = motionSeconds(entity, t)
 
         switch entity.motionType {
         case "static":
@@ -57,14 +60,13 @@ enum SceneMotion {
 
         case "bounce":
             return CGPoint(
-                x: reflect(x0 + entity.vx * dim * t, m / 2, size.width - m / 2),
-                y: reflect(y0 + entity.vy * dim * t, m / 2, size.height - m / 2))
+                x: reflect(x0 + entity.vx * dim * dt, m / 2, size.width - m / 2),
+                y: reflect(y0 + entity.vy * dim * dt, m / 2, size.height - m / 2))
 
         case "rise":
             let sway = entity.bob != 0 ? entity.bob * dim * sin(tms / 700 + entity.phase) : 0
-            return CGPoint(
-                x: x0 + sway,
-                y: wrapValue(y0 + entity.vy * dim * t, -m, size.height + m))
+            let ry = y0 + entity.vy * dim * dt
+            return CGPoint(x: x0 + sway, y: wrap ? wrapValue(ry, -m, size.height + m) : ry)
 
         case "wander" where entity.wander != nil:
             let w = entity.wander!
@@ -81,9 +83,10 @@ enum SceneMotion {
                 }
             }
             let margin = m + w.margin * dim
-            return CGPoint(
-                x: wrapValue(x0 + entity.vx * dim * t + hx, -margin, size.width + margin),
-                y: wrapValue(y0 + entity.vy * dim * t + hy, -margin, size.height + margin))
+            let wx = x0 + entity.vx * dim * dt + hx, wy = y0 + entity.vy * dim * dt + hy
+            return wrap
+                ? CGPoint(x: wrapValue(wx, -margin, size.width + margin), y: wrapValue(wy, -margin, size.height + margin))
+                : CGPoint(x: wx, y: wy)
 
         default:  // drift + unknown
             // Web parity, corrected on four counts (simulate.ts, end of
@@ -94,9 +97,9 @@ enum SceneMotion {
             // rise is the one that sways horizontally, on 700; and a layer
             // with wrapping disabled simply leaves, rather than being clamped
             // to the border where sprites pile up in a line.
-            let rawX = x0 + entity.vx * dim * t
+            let rawX = x0 + entity.vx * dim * dt
             let px = wrap ? wrapValue(rawX, -m, size.width + m) : rawX
-            let rawY = y0 + entity.vy * dim * t
+            let rawY = y0 + entity.vy * dim * dt
             var py = (wrap && entity.vy != 0)
                 ? wrapValue(rawY, -m, size.height + m)
                 : rawY
@@ -104,6 +107,53 @@ enum SceneMotion {
                 py += entity.bob * dim * sin(tms / 500 + entity.phase)
             }
             return CGPoint(x: px, y: py)
+        }
+    }
+
+    /// simulate.ts `motionSeconds`, in seconds.
+    static func motionSeconds(_ e: CompiledEntity, _ t: TimeInterval) -> TimeInterval {
+        guard let ease = e.ease else { return t }
+        var tl = t * 1000
+        if let emit = e.emit, emit.every > 0 {
+            tl = ((tl - emit.phase).truncatingRemainder(dividingBy: emit.every) + emit.every)
+                .truncatingRemainder(dividingBy: emit.every)
+        }
+        let k = 1 - exp(-tl / ease.tau)
+        return (ease.settle ? ease.tau * k : tl - ease.tau * k) / 1000
+    }
+
+    /// simulate.ts `headingAt`: the direction of travel (radians, y down) from
+    /// a 32 ms finite difference of the real path, or nil across a wrap seam
+    /// or at rest — what a streak and an oriented stroke point along.
+    static func heading(of entity: CompiledEntity, at t: TimeInterval, in size: CGSize, dim: CGFloat,
+                        wrap: Bool, parent: CompiledEntity? = nil) -> Double? {
+        let step = 0.032
+        let t1 = t < step ? t + step : t
+        let a = position(of: entity, at: t1 - step, in: size, dim: dim, wrap: wrap, parent: parent)
+        let b = position(of: entity, at: t1, in: size, dim: dim, wrap: wrap, parent: parent)
+        let dx = b.x - a.x, dy = b.y - a.y
+        if abs(dx) > size.width / 2 || abs(dy) > size.height / 2 { return nil }
+        if dx == 0, dy == 0 { return nil }
+        return atan2(dy, dx)
+    }
+
+    /// simulate.ts `spriteIndexAt`: an emoji / text layer's variant at `t`,
+    /// cycling every `cycle.period` (in step, as a marquee, under a data layout).
+    static func variantIndex(of e: CompiledEntity, at t: TimeInterval, variants: Int) -> Int {
+        guard e.cyclePeriod > 0, variants > 1 else { return e.glyphIndex }
+        let ct = t * 1000 * e.clockRate
+        if e.ordered { return (e.glyphIndex + Int((ct / e.cyclePeriod).rounded(.down))) % variants }
+        let k = Int((ct / e.cyclePeriod + (e.cyclePhase ?? e.phase) / (2 * .pi)).rounded(.down))
+        return ((k % variants) + variants) % variants
+    }
+
+    /// The glyph an emoji / text entity paints at `t` (its cycled variant).
+    static func glyph(of e: CompiledEntity, sprite: SpecSubset.Sprite, at t: TimeInterval) -> String? {
+        guard e.cyclePeriod > 0 else { return e.glyph }
+        switch sprite {
+        case .emoji(let g) where !g.isEmpty: return g[variantIndex(of: e, at: t, variants: g.count)]
+        case .text(let s, _) where !s.isEmpty: return s[variantIndex(of: e, at: t, variants: s.count)]
+        default: return e.glyph
         }
     }
 
@@ -182,8 +232,13 @@ enum SceneMotion {
     /// Rotation in degrees at time `t` (seconds). 0 for non-spinning entities.
     static func rotationDegrees(of entity: CompiledEntity, at t: TimeInterval) -> Double {
         // Static `rotate` holds even when nothing spins.
-        guard entity.spinSpeed != 0 else { return entity.rotate }
-        return entity.rotate + entity.spinAngle + entity.spinSpeed * t
+        var base = entity.rotate
+        if entity.rockAmp != 0, entity.rockPeriod > 0 {
+            // `rock`: a swing about the resting angle, on the layer's clock.
+            base += entity.rockAmp * sin(t * 1000 * entity.clockRate * 2 * .pi / entity.rockPeriod + entity.rockPhase)
+        }
+        guard entity.spinSpeed != 0 else { return base }
+        return base + entity.spinAngle + entity.spinSpeed * t
     }
 
     /// Pulse alpha at time `t` (seconds), matching the Canvas renderer.

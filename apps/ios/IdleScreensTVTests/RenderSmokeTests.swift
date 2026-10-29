@@ -125,7 +125,7 @@ final class RenderSmokeTests: XCTestCase {
         let sprite = present(s.layers, s.spec.background)
         // Background + at least one node per layer.
         XCTAssertGreaterThan(sprite.children.count, s.layers.count)
-        XCTAssertTrue(sprite.matches(s.layers))
+        XCTAssertTrue(sprite.matches(s.layers, s.spec.background))
     }
 
     func testSpriteSceneAdvancesWithoutLosingNodes() throws {

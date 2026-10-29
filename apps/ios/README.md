@@ -71,7 +71,8 @@ xcrun simctl io "$UDID" screenshot /tmp/shot.png    # output is in pixels, not p
 Debug launch arguments jump straight to one surface instead of walking there
 with the remote: `-channel <id>` (add `-past <n>` to step n scenes into its history),
 `-classic <warp|rainstorm|metaquarium>`, `-poster <id>`, `-pair`, `-settings`,
-`-search [-q <query>]`, `-fallback`.
+`-search [-q <query>]`, `-fallback`; with `-channel`, `-options` / `-report`
+open the player's Report-or-Hide dialog (Play/Pause on a real remote).
 
 **In the player the remote is a dial.** Up/Down surf channels in the iPhone
 feed's order (most recently steered first, sleeping channels skipped);
@@ -90,7 +91,15 @@ breaks the TV; list such files under the TV target's `excludes:` in
 
 **Parity with the web engine is tested, not eyeballed.** The native renderer
 re-implements the SaverSpec format, so each ported rule is pinned to the
-engine's own output: `SpecTimelineTests` (keyframes — `timeline.ts`, against
+engine's own output: `StreamParityTests` (entity placement and motion —
+`createRng` + `buildEntities`, then position, size, alpha, rotation, heading
+and cycled variant at four times, over every shipped example: the same seed
+seats the same scene as the web), `FieldTests` (the `field` background and
+the `finish` tiles), `MorphTests` (sequence morph `lerpSpec`, structural
+twins, text cross-fade), `TextParityTests` (line breaking under the
+proportional, mono and full-width tables; `revealState` with `glyphFade`),
+`MotionVocabTests` (glide eases, draw-on trims, counters, `life.stagger`),
+`SpecTimelineTests` (keyframes — `timeline.ts`, against
 live specs), `PaintTests` (`position.dx/dy`, layer `opacity`/`transform`,
 `groups` — `paint.ts`), `ShapeParityTests` (stroke outlines, trail echoes,
 feather — `shapes.ts`/`trail.ts`), `FishMixTests` (`parseFishMix`) and

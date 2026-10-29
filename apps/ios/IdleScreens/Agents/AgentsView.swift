@@ -1,17 +1,20 @@
 import SwiftUI
 import UIKit
 
-/// The MCP tab. Scenes here are made by agents, over MCP, from whatever
-/// harness you already use — so instead of pretending to be an editor, this
-/// tab does the three things that actually get a scene made: brief an agent,
-/// connect a harness, and keep the keys to what they build.
+/// The MCP tab. Scenes here are made by agents, over MCP — so the tab leads
+/// with the one address every agent needs, then gets a scene started from the
+/// phone: brief an agent, keep the keys to what it makes.
+///
+/// Each agent appears once. Connecting is a one-time chore that lives in the
+/// hero's Connect menu (Claude, ChatGPT, or a coding agent at a computer);
+/// the brief's buttons are the thing you come back for.
 struct AgentsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openURL) private var openURL
     @State private var brief = ""
     @State private var target: AgentHandoff.Target = .newChannel
-    @State private var openClient: String?
     @State private var showingChannels = false
+    @State private var showingSetup = false
     @State private var toast: String?
 
     private var mcp: String { AgentHandoff.mcpURL() }
@@ -19,21 +22,44 @@ struct AgentsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 30) {
-                    ColumnTitleText(title: "agents")
-                    header
-                    briefSection
-                    connectSection
-                    channelsSection
+            List {
+                ListColumnTitle(title: "agents")
+
+                Section {
+                    MCPHero(mcp: mcp, onCopy: { copy(mcp, "address copied") },
+                            onCodingAgent: { showingSetup = true }) { agent in
+                        // Their connector screens take the address by paste,
+                        // so it is on the clipboard before you land there.
+                        copy(mcp, "address copied — add it as a custom connector")
+                        if let connectors = agent.connectors { openURL(connectors) }
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .readableColumn()
+
+                briefSection
+
+                Section {
+                    Button { showingChannels = true } label: {
+                        HStack {
+                            SettingsLabel(title: app.credentials.isEmpty ? "Start a channel" : "Your channels",
+                                          icon: "rectangle.stack.fill", tint: .appPrimary,
+                                          detail: app.credentials.isEmpty ? nil : "\(app.credentials.count)")
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.textTertiary)
+                        }
+                    }
+                    NavigationLink { MCPExplorerView() } label: {
+                        SettingsLabel(title: "Inside the MCP", icon: "server.rack", tint: .teal)
+                    }
+                }
+                .houseRow()
             }
+            .houseList()
             .scrollDismissesKeyboard(.interactively)
-            .background(Color.appBackground.ignoresSafeArea())
             .modifier(ColumnTitle(title: "agents"))
+            .navigationDestination(isPresented: $showingSetup) { ComputerSetupView() }
             .overlay(alignment: .bottom) {
                 if let toast {
                     Text(toast)
@@ -51,295 +77,90 @@ struct AgentsView: View {
         .sheet(isPresented: $showingChannels) { MyChannelsView() }
     }
 
-    // MARK: Header — the one address everything else hangs off
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Agents make the scenes.")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(Color.textPrimary)
-            Text("Every channel is authored over MCP — one address, any agent. Point yours at it and ask for what you want on the wall.")
-                .font(.subheadline)
-                .foregroundStyle(Color.textSecondary)
-            HStack(spacing: 10) {
-                Text(mcp)
-                    .font(.system(.footnote, design: .monospaced).weight(.medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 4)
-                Button { copy(mcp, "address copied") } label: {
-                    Image(systemName: "doc.on.doc").frame(width: 34, height: 34).contentShape(Rectangle())
-                }
-                ShareLink(item: mcp) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 34, height: 34).contentShape(Rectangle())
-                }
-            }
-            .foregroundStyle(Color.appPrimary)
-            .padding(.leading, 14)
-            .padding(.trailing, 6)
-            .padding(.vertical, 5)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
-        }
-    }
-
     // MARK: Brief an agent
 
     private var briefSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("brief an agent", "Say what you want. It opens in your agent as a ready-to-run prompt.")
-
-            TextField("a slow aurora over a frozen lake…", text: $brief, axis: .vertical)
+        Section {
+            TextField("Describe a scene…", text: $brief, axis: .vertical)
                 .lineLimit(2...5)
-                .padding(13)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 12))
-                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
                 .foregroundStyle(Color.textPrimary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(AgentHandoff.starterBriefs, id: \.self) { idea in
-                        Button { brief = idea } label: {
+                        Button { withAnimation(.snappy) { brief = idea } } label: {
                             Text(idea)
                                 .font(.caption.weight(.medium))
                                 .lineLimit(1)
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 7)
-                                .foregroundStyle(Color.textSecondary)
-                                .background(Color.appSurface, in: Capsule())
+                                .foregroundStyle(brief == idea ? Color.appPrimary : Color.textSecondary)
+                                .background(brief == idea ? Color.appPrimary.opacity(0.14) : Color.appSurfaceRaised,
+                                            in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 16)
             }
+            .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
 
-            Menu {
-                Picker("Where", selection: $target) {
-                    Label("A new channel", systemImage: "plus").tag(AgentHandoff.Target.newChannel)
-                    ForEach(app.credentials) { credential in
-                        Text(credential.label)
-                            .tag(AgentHandoff.Target.channel(id: credential.channelId, label: credential.label))
-                    }
+            Picker("Make it on", selection: $target) {
+                Text("A new channel").tag(AgentHandoff.Target.newChannel)
+                ForEach(app.credentials) { credential in
+                    Text(credential.label)
+                        .tag(AgentHandoff.Target.channel(id: credential.channelId, label: credential.label))
                 }
-            } label: {
-                HStack {
-                    Text("on").foregroundStyle(Color.textSecondary)
-                    Text(targetLabel).foregroundStyle(Color.textPrimary).fontWeight(.medium)
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(Color.textTertiary)
-                }
-                .font(.subheadline)
-                .contentShape(Rectangle())
             }
+            .foregroundStyle(Color.textPrimary)
 
             HStack(spacing: 10) {
                 ForEach(AgentHandoff.promptApps) { agent in
+                    let lead = agent.id == AgentHandoff.promptApps.first?.id
                     Button {
                         if let link = agent.link(for: prompt) { openURL(link) }
                     } label: {
                         Label {
-                            Text("Open in \(agent.name)")
+                            Text(agent.name)
                         } icon: {
                             // The product's own mark, as a template: it takes
                             // the button's text colour in either style.
                             Image(agent.markAsset)
                                 .resizable()
                                 .scaledToFit()
-                                .frame(width: 17, height: 17)
+                                .frame(width: 16, height: 16)
                                 .accessibilityHidden(true)
                         }
-                        .labelStyle(.titleAndIcon)
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
-                            .foregroundStyle(agent.id == "claude" ? Color.appBackground : Color.textPrimary)
-                            .background(agent.id == "claude" ? Color.textPrimary : Color.appSurface, in: Capsule())
-                            .overlay { Capsule().strokeBorder(Color.appBorder.opacity(agent.id == "claude" ? 0 : 0.6), lineWidth: 1) }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .foregroundStyle(lead ? Color.appBackground : Color.textPrimary)
+                        .background(lead ? Color.textPrimary : Color.appSurfaceRaised, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Open in \(agent.name)")
                 }
-            }
-            HStack(spacing: 18) {
-                Button { copy(prompt, "prompt copied — paste it into any agent") } label: {
-                    Label("Copy prompt", systemImage: "doc.on.doc")
-                }
-                ShareLink(item: prompt) { Label("Send to…", systemImage: "square.and.arrow.up") }
-            }
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(Color.appPrimary)
-
-            Text("The prompt never includes a key. For a channel you own, the agent will ask — paste the key yourself if you trust where you're pasting it.")
-                .font(.caption)
-                .foregroundStyle(Color.textTertiary)
-        }
-    }
-
-    private var targetLabel: String {
-        switch target {
-        case .newChannel: "a new channel"
-        case .channel(_, let label): label
-        }
-    }
-
-    // MARK: Connect a harness
-
-    private var connectSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("connect your harness", "One-time setup on the computer where your agent runs. Send the recipe to yourself, or AirDrop an install link.")
-            VStack(spacing: 0) {
-                let clients = AgentHandoff.clients()
-                ForEach(clients) { client in
-                    clientRow(client)
-                    if client.id != clients.last?.id {
-                        Divider().overlay(Color.appBorder.opacity(0.5))
+                Menu {
+                    Button { copy(prompt, "prompt copied — paste it into any agent") } label: {
+                        Label("Copy prompt", systemImage: "doc.on.doc")
                     }
-                }
-            }
-            .padding(.horizontal, 16)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
-
-            HStack(spacing: 16) {
-                ForEach(AgentHandoff.promptApps) { agent in
-                    if let connectors = agent.connectors {
-                        Link(destination: connectors) {
-                            Label("\(agent.name) connectors", systemImage: "arrow.up.right")
-                        }
-                    }
-                }
-            }
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(Color.appPrimary)
-            Text("In Claude or ChatGPT, add a custom connector with the address above.")
-                .font(.caption)
-                .foregroundStyle(Color.textTertiary)
-        }
-    }
-
-    private func clientRow(_ client: AgentHandoff.Client) -> some View {
-        let open = openClient == client.id
-        return VStack(alignment: .leading, spacing: 10) {
-            Button {
-                withAnimation(.spring(duration: 0.3, bounce: 0.1)) { openClient = open ? nil : client.id }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: client.icon)
-                        .foregroundStyle(Color.appPrimary)
-                        .frame(width: 26)
-                    Text(client.name).foregroundStyle(Color.textPrimary)
-                    Spacer()
-                    if client.installLink != nil {
-                        Text("install link")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.textSecondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.appBackground, in: Capsule())
-                    }
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.textTertiary)
-                        .rotationEffect(.degrees(open ? 180 : 0))
-                }
-                .padding(.vertical, 13)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if open {
-                VStack(alignment: .leading, spacing: 10) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(client.recipe)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(Color.textPrimary)
-                            .textSelection(.enabled)
-                            .padding(12)
-                    }
-                    .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 10))
-                    Text(client.note)
-                        .font(.caption)
-                        .foregroundStyle(Color.textSecondary)
-                    HStack(spacing: 18) {
-                        Button { copy(client.recipe, "\(client.name) recipe copied") } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-                        ShareLink(item: client.recipe) { Label("Send", systemImage: "square.and.arrow.up") }
-                        if let link = client.installLink {
-                            ShareLink(item: link) { Label("Install link", systemImage: "link") }
-                        }
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.appPrimary)
-                }
-                .padding(.bottom, 14)
-                .transition(.opacity)
-            }
-        }
-    }
-
-    // MARK: Your channels
-
-    private var channelsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NavigationLink { MCPExplorerView() } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "server.rack")
-                        .foregroundStyle(Color.appPrimary)
-                        .frame(width: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Inside the MCP").foregroundStyle(Color.textPrimary)
-                        Text("Every tool, what agents read, and the feedback board")
-                            .font(.caption)
-                            .foregroundStyle(Color.textSecondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.textTertiary)
-                }
-                .padding(16)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            sectionTitle("your channels", "What your agents have built, and the keys to steer it. Start one here and hand it to an agent.")
-            Button { showingChannels = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "rectangle.stack")
-                        .foregroundStyle(Color.appPrimary)
-                        .frame(width: 26)
-                    Text(app.credentials.isEmpty ? "Start a channel" : "Open your channels")
+                    ShareLink(item: prompt) { Label("Send to…", systemImage: "square.and.arrow.up") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 44, height: 44)
                         .foregroundStyle(Color.textPrimary)
-                    Spacer()
-                    if !app.credentials.isEmpty {
-                        Text("\(app.credentials.count)").foregroundStyle(Color.textSecondary)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.textTertiary)
+                        .background(Color.appSurfaceRaised, in: Circle())
                 }
-                .padding(16)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.appBorder.opacity(0.6), lineWidth: 1) }
-                .contentShape(Rectangle())
+                .accessibilityLabel("More ways to send the prompt")
             }
-            .buttonStyle(.plain)
+            .listRowSeparator(.hidden, edges: .top)
+        } header: {
+            Text("Ask for a scene")
+        } footer: {
+            Text("Opens as a ready-to-run prompt. It never carries a key — the agent asks when it needs one.")
         }
-    }
-
-    // MARK: Bits
-
-    private func sectionTitle(_ title: String, _ detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.textPrimary)
-            Text(detail)
-                .font(.footnote)
-                .foregroundStyle(Color.textSecondary)
-        }
+        .houseRow()
     }
 
     private func copy(_ text: String, _ message: String) {
@@ -350,5 +171,109 @@ struct AgentsView: View {
             try? await Task.sleep(for: .seconds(2.2))
             if toast == message { toast = nil }
         }
+    }
+}
+
+/// The address every agent needs, as the page's one big thing. Dark in either
+/// appearance: it is a lit card, like the screens it feeds.
+private struct MCPHero: View {
+    let mcp: String
+    let onCopy: () -> Void
+    let onCodingAgent: () -> Void
+    let onConnect: (AgentHandoff.PromptApp) -> Void
+    @Environment(\.deviceScale) private var scale
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("MCP server", systemImage: "sparkles")
+                    .font(.caption.weight(.bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color(hex: "C9C1FF"))
+                Spacer()
+                ShareLink(item: mcp) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .accessibilityLabel("Share the address")
+            }
+
+            Text("Any agent can paint your screens.")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: onCopy) {
+                HStack(spacing: 10) {
+                    Text(mcp.replacingOccurrences(of: "https://", with: ""))
+                        .font(.system(.callout, design: .monospaced).weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 4)
+                    Image(systemName: "doc.on.doc")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Copy \(mcp)")
+
+            // Connecting is done once per agent, so it is one menu rather
+            // than a second pair of brand buttons above the brief's.
+            Menu {
+                Section("Add as a connector") {
+                    ForEach(AgentHandoff.promptApps) { agent in
+                        Button { onConnect(agent) } label: {
+                            Label { Text(agent.name) } icon: { Image(agent.markAsset) }
+                        }
+                    }
+                }
+                Button(action: onCodingAgent) {
+                    Label("A coding agent on a computer…", systemImage: "laptopcomputer")
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                    Text("Connect an agent")
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .opacity(0.6)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                }
+                .contentShape(Rectangle())
+            }
+            .accessibilityHint("Claude, ChatGPT, or a coding agent")
+        }
+        .padding(20 * scale)
+        .background {
+            ZStack {
+                LinearGradient(colors: [Color(hex: "241C5C"), Color(hex: "0E0B24")],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [Color(hex: "8B7CFF").opacity(0.55), .clear],
+                               center: .topTrailing, startRadius: 0, endRadius: 260 * scale)
+                RadialGradient(colors: [Color(hex: "5EEAD4").opacity(0.28), .clear],
+                               center: .bottomLeading, startRadius: 0, endRadius: 220 * scale)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+        }
+        .environment(\.colorScheme, .dark)
     }
 }

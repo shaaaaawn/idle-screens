@@ -153,11 +153,14 @@ final class SpecCoverageTests: XCTestCase {
           "motion":{"type":"static"},"position":{"x":0.2,"y":0.1},
           "layout":{"type":"list","gap":0.05}}]}
         """)
+        // The anchor is a viewport fraction; the gap steps in min(w,h) units
+        // (simulate.ts: gap × scale), so the stack keeps its spacing on any aspect.
         let e = layers[0].entities
         XCTAssertEqual(e.map(\.x), [0.2, 0.2, 0.2], "one column")
-        XCTAssertEqual(e[0].y, 0.1, accuracy: 1e-9)
-        XCTAssertEqual(e[1].y, 0.15, accuracy: 1e-9)
-        XCTAssertEqual(e[2].y, 0.20, accuracy: 1e-9)
+        XCTAssertEqual(e.map(\.y), [0.1, 0.1, 0.1])
+        XCTAssertEqual(e[0].offDY, 0, accuracy: 1e-9)
+        XCTAssertEqual(e[1].offDY, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(e[2].offDY, 0.10, accuracy: 1e-9)
     }
 
     func testTableLayoutWrapsAcrossColumns() throws {
@@ -167,10 +170,11 @@ final class SpecCoverageTests: XCTestCase {
           "layout":{"type":"table","columns":2,"gap":{"x":0.3,"y":0.2}}}]}
         """)
         let e = layers[0].entities
-        XCTAssertEqual(e[0].x, 0.1, accuracy: 1e-9)
-        XCTAssertEqual(e[1].x, 0.4, accuracy: 1e-9)
-        XCTAssertEqual(e[2].x, 0.1, accuracy: 1e-9, "wrapped to row 2")
-        XCTAssertEqual(e[2].y, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(e[0].offDX, 0, accuracy: 1e-9)
+        XCTAssertEqual(e[1].offDX, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(e[2].offDX, 0, accuracy: 1e-9, "wrapped to row 2")
+        XCTAssertEqual(e[2].offDY, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(e.map(\.x), [0.1, 0.1, 0.1, 0.1])
     }
 
     func testLayoutBurnsTheSameDrawsAsScatter() throws {

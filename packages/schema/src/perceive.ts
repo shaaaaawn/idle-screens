@@ -40,7 +40,7 @@ import {
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
-import { paintMap, paintOpacity, paintRotation, paintSize, type Pt } from './paint';
+import { groupOf, maxAxisScale, paintMap, paintOpacity, paintRotation, paintSize, sweptBox, transformOrigin, transformRangeOf, type Pt, type TransformRange } from './paint';
 import { resolveTimelineAt } from './timeline';
 import { LIMITS, type IdleSequence, type LayerSpec, type PathGradient, type SaverSpec } from './types';
 
@@ -920,8 +920,17 @@ function finishGrid(cols: number, rows: number, cells: number[], bgRow: number[]
  * fixed — it moves, emits, links, trails, orbits or cycles its text — and so may reach
  * any cell. Each entity is a disc about its position that holds its whole
  * outline at its largest size under any rotation: generous, never short.
+ *
+ * `sweep` (by layer index) widens a layer to everywhere its own and its
+ * group's transforms can carry it while they range over the given values —
+ * a timeline that glides them (X681). Either side missing is held at the
+ * spec's own transform.
  */
-export function layerCellFootprints(spec: SaverSpec, opts: LuminanceGridOptions = {}): Array<number[] | null> {
+export function layerCellFootprints(
+  spec: SaverSpec,
+  opts: LuminanceGridOptions = {},
+  sweep?: ReadonlyMap<number, { layer?: TransformRange; group?: TransformRange }>,
+): Array<number[] | null> {
   const scene = buildScene(spec, opts);
   const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
   const rows = Math.max(8, Math.min(200, opts.rows ?? 48));
@@ -929,14 +938,40 @@ export function layerCellFootprints(spec: SaverSpec, opts: LuminanceGridOptions 
   const cellW = w / cols;
   const cellH = h / rows;
   const fontScale = fontScaleFor(spec, w, h);
-  return scene.layers.map(({ layer, entities }) => {
+  return scene.layers.map(({ layer, entities }, li) => {
     if (layer.motion.type !== 'static' || layer.emit || layer.links || layer.trail) return null;
     const s = layer.sprite;
-    const k = layer.transform !== undefined || layer.group !== undefined ? paintSize(spec, layer) : 1;
+    const sw = sweep?.get(li);
+    const own = sw ? sw.layer ?? transformRangeOf(layer.transform) : null;
+    const grp = sw ? sw.group ?? transformRangeOf(groupOf(spec, layer)?.transform) : null;
+    // The largest stretch either transform reaches on any axis (swept, or the static one).
+    const k = own && grp ? maxAxisScale(own) * maxAxisScale(grp)
+      : layer.transform !== undefined || layer.group !== undefined ? maxAxisScale(transformRangeOf(layer.transform)) * maxAxisScale(transformRangeOf(groupOf(spec, layer)?.transform))
+      : 1;
+    const pivot = own ? transformOrigin(layer.transform ?? {}, layer, w, h, scale) : null;
+    const centre = { x: w / 2, y: h / 2 };
     const cells = new Set<number>();
     for (const e of entities) {
       if (e.orbitParent || e.cyclePeriod > 0) return null;
-      const p = posOf(scene, e, 0);
+      // Where the entity's centre can be: one point, or (under a sweep) a box —
+      // the layer's own transform about its pivot, then the group's about the
+      // viewport centre over each corner of that (each map is affine, so a
+      // box's image lies in its corners' images).
+      let box: { x0: number; y0: number; x1: number; y1: number };
+      if (own && grp && pivot) {
+        const lb = sweptBox(own, positionAt(e, 0, w, h), pivot, scale);
+        box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+        for (const x of [lb.x0, lb.x1]) {
+          for (const y of [lb.y0, lb.y1]) {
+            const gb = sweptBox(grp, { x, y }, centre, scale);
+            box = { x0: Math.min(box.x0, gb.x0), y0: Math.min(box.y0, gb.y0), x1: Math.max(box.x1, gb.x1), y1: Math.max(box.y1, gb.y1) };
+          }
+        }
+      } else {
+        const q = posOf(scene, e, 0);
+        box = { x0: q.x, y0: q.y, x1: q.x, y1: q.y };
+      }
+      const p = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
       const grow = 1 + Math.abs(e.growAmp);
       const sz = e.size * grow * k;
       const per = e.size > 0 ? sz / e.size : 1;
@@ -962,11 +997,11 @@ export function layerCellFootprints(spec: SaverSpec, opts: LuminanceGridOptions 
         const b = s.kind === 'text' ? textBox(s, e, p, fontScale, scale) : textBlockBox(s, e, p, w, h);
         reach = Math.hypot(Math.abs(b.cx - p.x) + b.halfX, Math.abs(b.cy - p.y) + b.halfY) * grow * Math.max(1, k);
       } else reach = sz; // emoji: a glyph about its size
-      if (!Number.isFinite(reach) || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
-      const c0 = Math.max(0, Math.floor((p.x - reach - 1) / cellW));
-      const c1 = Math.min(cols - 1, Math.floor((p.x + reach + 1) / cellW));
-      const r0 = Math.max(0, Math.floor((p.y - reach - 1) / cellH));
-      const r1 = Math.min(rows - 1, Math.floor((p.y + reach + 1) / cellH));
+      if (!Number.isFinite(reach) || ![box.x0, box.x1, box.y0, box.y1].every(Number.isFinite)) return null;
+      const c0 = Math.max(0, Math.floor((box.x0 - reach - 1) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((box.x1 + reach + 1) / cellW));
+      const r0 = Math.max(0, Math.floor((box.y0 - reach - 1) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((box.y1 + reach + 1) / cellH));
       for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.add(r * cols + c);
     }
     return [...cells].sort((a, b) => a - b);

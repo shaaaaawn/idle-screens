@@ -63,6 +63,20 @@ enum AgentHandoff {
         ]
     }
 
+    /// Everything a computer needs, as one message to AirDrop or send to
+    /// yourself: the address, the one-line Claude Code command, and the
+    /// harnesses that install from a link.
+    static func setupNote(mcp: String = mcpURL()) -> String {
+        var lines = ["idle screens MCP server: \(mcp)"]
+        if let claude = clients(mcp: mcp).first(where: { $0.id == "claude-code" }) {
+            lines += ["", "Claude Code:", claude.recipe]
+        }
+        if let cursor = cursorInstallLink(mcp: mcp) { lines += ["", "Cursor (one click):", cursor.absoluteString] }
+        if let vscode = vscodeInstallLink(mcp: mcp) { lines += ["", "VS Code (one click):", vscode.absoluteString] }
+        lines += ["", "Anything else: add a remote MCP server with the address above."]
+        return lines.joined(separator: "\n")
+    }
+
     /// Cursor's documented install link: a name plus base64 of the server's
     /// config object. https form, so it survives being AirDropped to a Mac.
     static func cursorInstallLink(mcp: String) -> URL? {

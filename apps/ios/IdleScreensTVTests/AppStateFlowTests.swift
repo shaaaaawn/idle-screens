@@ -52,6 +52,25 @@ final class AppStateFlowTests: XCTestCase {
 
     // MARK: - Surfing
 
+    /// Report → Hide while watching: the channel leaves the wall and the
+    /// player moves on rather than holding a channel the viewer refused.
+    func testHidingThePlayingChannelSurfsOnAndStaysHidden() async {
+        let app = makeApp()
+        await app.loadGallery()
+        app.selectChannel("newest", from: .search)
+
+        app.hideChannel("newest")
+        XCTAssertEqual(app.selectedChannelId, "mid")
+        XCTAssertEqual(app.presentingSurface, .search)
+        XCTAssertFalse(app.channels.contains { $0.id == "newest" })
+
+        await app.loadGallery()
+        XCTAssertFalse(app.channels.contains { $0.id == "newest" }, "a reload must not bring it back")
+
+        app.hideChannel("mid"); app.hideChannel("old")
+        XCTAssertNil(app.selectedChannelId, "nothing left to surf to: back to browse")
+    }
+
     func testSurfWalksTheFeedOrderAndKeepsTheSurface() async {
         let app = makeApp()
         await app.loadGallery()
@@ -80,6 +99,28 @@ final class AppStateFlowTests: XCTestCase {
         app.surf(1)
         XCTAssertEqual(app.timeline, .live)
         XCTAssertNil(app.pastScene)
+    }
+
+    // MARK: - Live steering
+
+    func testALiveSteerReachesTheTelevision() async throws {
+        let app = makeApp()
+        await app.loadGallery()
+        app.selectChannel("newest")
+        app.handle(.scene(spec: json(dots), seed: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#fff")
+        // The server sends the whole track after every steer; dur 0 is a cut.
+        app.handle(.track(json(##"{"deltas":[{"t":5,"path":"layers.0.sprite.color","value":"#00ff00","dur":0}]}"##), epoch: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#00ff00")
+        // A glide lands on its target, positions untouched.
+        let before = app.compiledScene.first?.entities.map(\.x)
+        app.handle(.track(json(##"{"deltas":[{"t":5,"path":"layers.0.sprite.color","value":"#00ff00","dur":0},{"t":9,"path":"layers.0.sprite.radius","value":[0.03,0.03],"dur":120,"ease":"out"}]}"##), epoch: 1))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.size ?? 0, 0.03, accuracy: 1e-9)
+        XCTAssertEqual(app.compiledScene.first?.entities.map(\.x), before, "a paint glide re-seats nothing")
+        // A repeat of the same track changes nothing; a new scene clears the steers.
+        app.handle(.scene(spec: json(dots), seed: 1))
+        XCTAssertEqual(app.compiledScene.first?.entities.first?.color, "#fff")
     }
 
     func testSurfOnAnEmptyGalleryIsANoOp() {
@@ -253,5 +294,42 @@ final class AppStateFlowTests: XCTestCase {
         XCTAssertEqual(makeApp().rotateMinutes, 15, "a relaunch keeps the choice")
         app.rotateMinutes = 0
         XCTAssertEqual(makeApp().rotateMinutes, 0)
+    }
+
+    // MARK: - Pair pushes racing
+
+    /// Greptile on #322: the phone sends a stored scene, then live, before the
+    /// scene's download finishes. The late download must not pin over live.
+    func testALivePushCancelsAStoredSceneStillDownloading() async throws {
+        let scene = ##"{"id":2,"label":"Tidal Drift","seed":5,"spec":{"seed":5,"layers":[{"count":7,"sprite":{"kind":"circle","radius":[0.02,0.04],"color":"#fff"},"motion":{"type":"static"}}]}}"##
+        let base = URL(string: "https://flow-stub.test")!
+        let transport = SlowSceneTransport(inner: StubTransport(routes: [
+            "/api/channels": Self.gallery, "/c/tide/scene/2": scene,
+        ]))
+        let app = TVAppState(gallery: GalleryClient(baseURL: base, transport: transport),
+                             mcp: MCPClient(baseURL: base, transport: transport),
+                             ws: ChannelWSClient(),
+                             pair: PairClient(baseURL: base, transport: transport),
+                             baseURL: base)
+        app.selectChannel("tide")
+
+        app.handle(.switchChannel(channelId: "tide", sceneId: 2))
+        app.handle(.switchChannel(channelId: "tide", sceneId: nil))
+        try await Task.sleep(for: .milliseconds(600))   // past the download
+
+        XCTAssertEqual(app.timeline, .live)
+        XCTAssertNil(app.pastScene)
+    }
+}
+
+/// Answers like StubTransport, but a stored scene takes 300 ms to arrive.
+private struct SlowSceneTransport: HTTPTransport {
+    let inner: StubTransport
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if request.url?.path.contains("/scene/") == true {
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        return try await inner.data(for: request)
     }
 }

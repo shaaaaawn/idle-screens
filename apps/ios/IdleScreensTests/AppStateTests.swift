@@ -92,4 +92,39 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.scene?.id, "warp")
         XCTAssertEqual(state.scene?.label, "Warp")
     }
+
+    // MARK: - Sync follow
+
+    /// Greptile on #322: A sent, swipe to B and back to A inside the 450 ms
+    /// settle, and the screens got B while the phone showed A.
+    func testSyncDropsASwipeAbandonedBeforeItSettles() {
+        let app = makeApp { _ in (Data(), 404) }
+        let a = SyncTarget(channelId: "a", sceneId: nil)
+        app.syncTargets = ["screen-1"]
+        app.lastSynced = a
+
+        app.syncFollow(channelId: "b", sceneId: nil)
+        let pendingB = app.syncTask
+        XCTAssertEqual(app.pendingSync, SyncTarget(channelId: "b", sceneId: nil))
+
+        app.syncFollow(channelId: "a", sceneId: nil)
+        XCTAssertEqual(pendingB?.isCancelled, true, "the send for B never goes out")
+        XCTAssertNil(app.pendingSync)
+        XCTAssertNil(app.syncTask)
+        XCTAssertEqual(app.lastSynced, a)
+    }
+
+    /// A send already under way is the one for this target: landing on it
+    /// again must not abort it.
+    func testSyncLeavesASendUnderWayAlone() {
+        let app = makeApp { _ in (Data(), 404) }
+        app.syncTargets = ["screen-1"]
+        app.lastSynced = SyncTarget(channelId: "a", sceneId: nil)
+        let underWay = Task<Void, Never> { try? await Task.sleep(for: .seconds(5)) }
+        defer { underWay.cancel() }
+        app.syncTask = underWay   // committed: pendingSync is already nil
+
+        app.syncFollow(channelId: "a", sceneId: nil)
+        XCTAssertFalse(underWay.isCancelled)
+    }
 }

@@ -16,6 +16,7 @@ struct ContentView: View {
     }()
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    @AppStorage(Appearance.storageKey) private var appearance: Appearance = Appearance.defaultValue
 
     var body: some View {
         // Measured once, here: every screen sizes its chrome from it.
@@ -43,6 +44,15 @@ struct ContentView: View {
         }
     }
 
+    /// The chrome follows Settings → Appearance; a feed on screen is artwork
+    /// and turns the whole window dark. It has to be the window: the status
+    /// bar takes its colour from here, not from the feed's own environment,
+    /// and would draw black on black. Decided once, at the root, so two
+    /// views never compete for it.
+    private var scheme: ColorScheme? {
+        tab == "watch" || PreviewBudget.shared.fullscreenDepth > 0 ? .dark : appearance.colorScheme
+    }
+
     private var tabs: some View {
         TabView(selection: $tab) {
             WatchFeedView()
@@ -58,7 +68,7 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag("settings")
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(scheme)
         .tint(.appPrimary)
         .background(Color.appBackground.ignoresSafeArea())
     }

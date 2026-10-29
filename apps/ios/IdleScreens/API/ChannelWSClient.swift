@@ -68,14 +68,25 @@ struct ChannelSnapshot: Equatable, Sendable {
     var sleeping: Bool?
     var viewers: Int?
     var presets: [String]?
+    /// The server's wall clock when it sent this (ms): the device's skew.
+    var now: Int?
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
     case snapshot(ChannelSnapshot)
     /// A new scene went live (publish, recall, a scheduled entry). `transition`
     /// is how the agent asked screens to replace the old one; nil = the default.
-    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil)
+    /// `epoch`: the publish time (ms) the channel's shared clock counts from.
+    /// `track`: the scene's control track — kept steers, and a publish's own
+    /// glide (`fromPublish`) that each screen plays from its mount.
+    case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
+               track: JSONValue? = nil)
+    /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
+    case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
+    /// The channel's whole control track after a steer (the server sends it
+    /// beside every `delta` so screens converge instead of stacking steers).
+    case track(JSONValue?, epoch: Int?)
     case sleep
     case wake
     case overlay(text: String?, ttl: Int?)
@@ -274,16 +285,24 @@ actor ChannelWSClient {
                 epoch: message["epoch"]?.intValue,
                 sleeping: message["sleeping"]?.boolValue,
                 viewers: message["viewers"]?.intValue,
-                presets: message["presets"]?.stringArray
+                presets: message["presets"]?.stringArray,
+                now: message["now"]?.intValue
             ))
         case "scene":
             return .scene(
                 spec: message["spec"]?.normalizedSpec(),
                 seed: message["seed"]?.intValue,
-                transition: SceneTransition(message["transition"])
+                transition: SceneTransition(message["transition"]),
+                epoch: message["epoch"]?.intValue,
+                track: message["track"]
             )
+        case "seed":
+            return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
         case "delta":
-            return .delta(message["delta"] ?? message["patch"])
+            // The server spreads the delta's fields onto the message itself.
+            return .delta(message["delta"] ?? message["patch"] ?? .object(message.filter { $0.key != "type" }))
+        case "track":
+            return .track(message["track"], epoch: message["epoch"]?.intValue)
         case "sleep":
             return .sleep
         case "wake":

@@ -283,8 +283,13 @@ private struct OnNowRail: View {
     @Environment(\.deviceScale) private var scale
     let channels: [PublicChannel]
     @Environment(AppState.self) private var app
+    /// Kept after the reason dialog closes: the "hide it too?" alert that
+    /// follows still needs to know which channel it is about.
+    @State private var reportTarget: PublicChannel?
+    @State private var showReport = false
 
     var body: some View {
+        let target = reportTarget
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 10) {
                 ForEach(channels) { channel in
@@ -293,11 +298,19 @@ private struct OnNowRail: View {
                         tile(channel)
                     }
                     .buttonStyle(.plain)
-                    .contextMenu { CardMenu(channel: channel) }
+                    .contextMenu { CardMenu(channel: channel) { reportTarget = channel; showReport = true } }
                 }
             }
             .padding(.horizontal, DeviceScale.margin(scale))
         }
+        .reportChannelFlow(isPresented: $showReport,
+                           channelLabel: target?.displayLabel ?? "",
+                           report: { reason in
+                               guard let target else { return }
+                               try await app.mcp.reportChannel(channelId: target.id,
+                                                               label: target.label, reason: reason)
+                           },
+                           hide: { if let target { app.hideChannel(target.id) } })
     }
 
     private func tile(_ channel: PublicChannel) -> some View {
@@ -489,6 +502,7 @@ private struct ChannelCard: View {
     /// Tags the shelf title already says out loud. A "featured" chip on every
     /// card of the Featured row is one word repeated four times.
     var ownedTags: Set<String> = []
+    @State private var showReport = false
 
     private var tagLine: String? {
         let tags = (channel.tags ?? []).filter { !ownedTags.contains($0) }
@@ -507,7 +521,7 @@ private struct ChannelCard: View {
                         if let viewers = channel.viewers, viewers > 0 {
                             Label("\(viewers)", systemImage: "eye.fill")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.textPrimary)
+                                .foregroundStyle(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(.black.opacity(0.55), in: Capsule())
@@ -567,8 +581,14 @@ private struct ChannelCard: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            CardMenu(channel: channel)
+            CardMenu(channel: channel) { showReport = true }
         }
+        .reportChannelFlow(isPresented: $showReport, channelLabel: channel.displayLabel,
+                           report: { reason in
+                               try await app.mcp.reportChannel(channelId: channel.id,
+                                                               label: channel.label, reason: reason)
+                           },
+                           hide: { app.hideChannel(channel.id) })
     }
 }
 
@@ -599,6 +619,7 @@ private struct CardFollowButton: View {
 
 private struct CardMenu: View {
     let channel: PublicChannel
+    let onReport: () -> Void
     @Environment(AppState.self) private var app
 
     var body: some View {
@@ -613,6 +634,13 @@ private struct CardMenu: View {
         }
         ShareLink(item: app.gallery.viewerURL(for: channel.id)) {
             Label("Share", systemImage: "square.and.arrow.up")
+        }
+        Divider()
+        Button(action: onReport) {
+            Label("Report channel…", systemImage: "flag")
+        }
+        Button(role: .destructive) { app.hideChannel(channel.id) } label: {
+            Label("Hide this channel", systemImage: "eye.slash")
         }
     }
 }
@@ -643,34 +671,72 @@ private struct GridWidthKey: PreferenceKey {
 
 // MARK: - Preview tile (shared)
 
-/// Live scene preview when the channel publishes a spec; otherwise the
-/// viewer-captured thumb; otherwise a styled placeholder — never a bare
-/// empty tile.
+/// Live scene preview when the channel publishes a spec; a classic saver
+/// from its native port; otherwise the viewer-captured thumb; otherwise the
+/// channel's generative art — never a bare placeholder.
 struct ChannelPreviewTile: View {
     @Environment(AppState.self) private var app
     let channel: PublicChannel
 
     var body: some View {
+        // Artwork, so dark in either appearance: the placeholder sits under
+        // white titles, and a light one would swallow them.
+        art.environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder
+    private var art: some View {
         if let spec = channel.spec {
             ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+        } else if let kind = ClassicSaverKind.supported(id: channel.classicSaverId) {
+            // A classic saver has no layers to preview and the server has no
+            // thumb for it (404), which left every tank a dot on the wall.
+            // One still from the native port, with the tank's own steered
+            // look — the same field the viewer opens into.
+            let still = ClassicPosterImage(kind: kind,
+                                           seed: ClassicSaverKind.seed(forChannel: channel.id),
+                                           params: channel.classicParams)
+            if kind.prefersServerThumb {
+                // The real 3D tank when the server has rendered one; the
+                // native still until then, and whenever the thumb 404s.
+                ShapedThumb(channelId: channel.id) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        still
+                    }
+                }
+            } else {
+                still
+            }
         } else {
-            AsyncImage(url: app.gallery.thumbURL(for: channel.id)) { phase in
+            ShapedThumb(channelId: channel.id) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 default:
-                    ZStack {
-                        LinearGradient(
-                            colors: [Color.appSurfaceRaised, Color.appBackground],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        Circle()
-                            .fill(Color.appPrimary.opacity(0.6))
-                            .frame(width: 16, height: 16)
-                    }
+                    ProceduralChannelArt(channelId: channel.id)
                 }
             }
+        }
+    }
+}
+
+/// The server thumb in the tile's own shape: a card taller than it is wide
+/// asks for the upright picture (`?aspect=portrait`), a wide one for 16:9, so
+/// a tank on the iPhone grid is composed for the card, not cropped from TV art.
+private struct ShapedThumb<Content: View>: View {
+    @Environment(AppState.self) private var app
+    let channelId: String
+    @ViewBuilder let content: (AsyncImagePhase) -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            AsyncImage(url: app.gallery.thumbURL(for: channelId, portrait: geo.size.height > geo.size.width)) { phase in
+                content(phase)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
         }
     }
 }

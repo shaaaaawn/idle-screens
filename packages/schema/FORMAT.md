@@ -52,7 +52,9 @@ scene's own clock), paint-level layer `opacity` and `transform`,
 and path strokes, the `in` / `out` / `spring` glide eases (timeline keys and
 live steers), `rock`, `life.stagger`, `reveal.rise`, `textBlock.number`, the
 `wipe` transition, `scenePeriod` and the `loop-seam` advisory
-(2026-10-25 — motion vocabulary).
+(2026-10-25 — motion vocabulary); path paint on `points` polygons,
+`textBlock.number.minDigits`, `stroke.draw.mode` and `transform.scaleY`
+(2026-10-27 — small format adds).
 
 ## Safety invariants
 
@@ -213,10 +215,8 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   two field segments glides the field; a gradient → field morph steps
   (different shape).
 
-  **Native:** tvOS ignores the field and paints a **vertical gradient through
-  `bands` in order** (first band at the top, last at the bottom), so a field
-  scene still carries its palette on the Apple TV until the native player
-  rasters the same sampler.
+  **Native:** tvOS rasters the same sampler (bit-identical hash), at 96 px on
+  the short side and 48 px on its sprite tier — the `basic` tier's raster.
 
 ### `finish`
 
@@ -278,7 +278,9 @@ steps. Declare the block (`"finish": { "grain": 0 }`) to make the paths
 exist — a steer cannot add a `finish` to a spec without one. A sequence's
 own `finish` is not steerable; steer a segment's, or republish.
 
-**Native:** tvOS **ignores `finish`** — the frame is presented as drawn.
+**Native:** tvOS screens the same seeded grain and Bayer tiles with `overlay`
+over the composed frame; `animate` steps on the Canvas tier and holds static
+on the sprite tier (the `basic` tier rule).
 
 ### `layers[]`
 
@@ -293,22 +295,22 @@ own `finish` is not steerable; steer a segment's, or republish.
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
 | `blend` | `lighter` \| `screen` \| `multiply` | source-over | additive glow / gentle additive / darkening |
 | `region` | `{x?, y?}` ranges 0..1 | full viewport | fractional spawn window (placement only, not travel) |
-| `pulse` | `{amp ≤ 0.5, period ≥ 500, wave?}` | none | opacity breathing: `amp` is **added** to the entity's `alpha` (alpha ± amp, clamped to 0..1), not a fraction of it — a dim layer (`alpha` 0.2, `amp` 0.3) swings through 0 and sits fully dark for part of every period; keep `amp` ≤ the alpha floor for a breath that never blacks out. `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
+| `pulse` | `{amp 0..0.5, period ≥ 500, wave?}` | none | opacity breathing (`amp: 0` is no pulse — one layer shape can serve a lit and an unlit variant): `amp` is **added** to the entity's `alpha` (alpha ± amp, clamped to 0..1), not a fraction of it — a dim layer (`alpha` 0.2, `amp` 0.3) swings through 0 and sits fully dark for part of every period; keep `amp` ≤ the alpha floor for a breath that never blacks out. `wave: {wavelength, angle?}` turns it into a traveling wave across the field |
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
-| `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** tvOS reads `spin` only ⇒ 0 |
+| `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** rendered |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Rotation is not in the luminance grid, so perception does not see it. **Native:** ignored ⇒ no swing |
+| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Rotation is not in the luminance grid, so perception does not see it. **Native:** rendered |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` (`gap`: a number or `{x?, y?}`) | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}` — a list is one column, so only its `y`, the row pitch, applies). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
-| `life` | `{enter?, exit?, fade?, stagger?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit`. `stagger` shifts entity *i*'s whole envelope (enter and exit) by *i* × `stagger` in entity order (reading order for `list` / `table` / `grid`), so a row of labels builds one after another; paint, no RNG draws. Density scaling changes the count, so the build takes (count − 1) × `stagger`. **Native:** ignored ⇒ all together |
+| `life` | `{enter?, exit?, fade?, stagger?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit`. `stagger` shifts entity *i*'s whole envelope (enter and exit) by *i* × `stagger` in entity order (reading order for `list` / `table` / `grid`), so a row of labels builds one after another; paint, no RNG draws. Density scaling changes the count, so the build takes (count − 1) × `stagger`. **Native:** rendered |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
-| `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** tvOS ignores the offset |
-| `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** ignored ⇒ 1 |
-| `transform` | `{x?, y?, scale?, scaleX?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8) and `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors). **Order:** `scale`/`scaleX` (along the layer's own horizontal) and `rotate` apply about the origin first, then `x`/`y` translate in **screen space** — an offset is never turned or stretched by the layer's own `rotate`/`scale`, so `{ "rotate": 90, "x": 0.2 }` moves the layer right, not down. A group's transform wraps the result (*group(layer(p))*), so a group's `scale` and `rotate` do act on its members' offsets. Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** ignored ⇒ identity |
-| `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** ignored |
+| `position` | `{x, y, dx?, dy?}` — `x`/`y` 0..1, `dx`/`dy` ±2 (±17280 px under `units: "px"`) | none | exact placement; **requires `count: 1`** — except with a `list`/`table` layout, where it anchors the block's top-left; overrides `region`. `dx`/`dy` offset the point in **`min(w, h)` units** (px under `units: "px"`): `x`/`y` are fractions of width and height while every size is a fraction of `min(w, h)`, so parts placed at computed fractions only register at the aspect they were computed for — anchor a compound form's parts on one shared fraction (the centre is the only aspect-safe one) and offset each with `dx`/`dy`. Placement (structural). **Native:** rendered |
+| `opacity` | number 0..1 | `1` | **paint-level** layer opacity: multiplies every entity's `alpha` and the `life` envelope at draw time. Unlike `alpha` (a range baked into each entity), it is outside the structural signature, so `setParam`, a `timeline` key or a `morph` **glides** it instead of re-seeding the layer. `0` skips the layer. **Native:** rendered |
+| `transform` | `{x?, y?, scale?, scaleX?, scaleY?, rotate?, origin?}` | identity | **paint-level** transform of the whole layer, about the viewport centre — or, with `origin: "anchor"`, about the layer's own anchor (its `position` point with `dx`/`dy`; a `list`/`table` block's anchor; without `position`, the centre of its `region`), so a word scales **in place** on every aspect (`origin` is an enum: not a steer or key target, and it steps across a morph — keep one origin per layer): translate `x`/`y` (±2 in `min(w, h)` units; px under `units: "px"`, ±17280), `rotate` (degrees, ±3600), `scale` (0..8), `scaleX` (±8, × `scale` horizontally — toward 0 reads as a turn about the vertical axis, negative mirrors) and `scaleY` (±8, × `scale` vertically — key it against `scaleX` for squash-and-stretch: wide-and-short on a landing, narrow-and-tall on take-off; negative flips). **Order:** `scale`/`scaleX`/`scaleY` (along the layer's own axes) and `rotate` apply about the origin first, then `x`/`y` translate in **screen space** — an offset is never turned or stretched by the layer's own `rotate`/`scale`, so `{ "rotate": 90, "x": 0.2 }` moves the layer right, not down. A group's transform wraps the result (*group(layer(p))*), so a group's `scale` and `rotate` do act on its members' offsets. Outside the structural signature: a camera for a timed piece, a slow drift for an ambient one, and it glides under steering. Sprites are not re-rasterised, so a large `scale` enlarges pixels of soft sprites, not detail. **Native:** rendered (the sprite tier applies the summed rotation and per-axis scale, exact unless a rotated layer is scaled unevenly) |
+| `group` | string | none | the name of a `groups` entry this layer paints through — see **Groups**. **Native:** rendered |
 
 `links`: `{ k: 1..8, maxDist, color?, alpha?, width?, mode?, falloff?, closed? }`.
 `mode: "nearest"` (default) wires each entity to its k nearest neighbors within
@@ -365,6 +367,14 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   scaled by each entity's seeded radius (not by the keyed shape's own extent):
   keep every keyed point inside −1..1 (the validator rejects one outside), and
   shrink a target shape by scaling its points, not by exceeding the box.
+  A `points` polygon also takes the path paint below — **`stroke`**,
+  **`fill: false`** and **`gradient`** — and then draws as the closed path
+  through its points (`M p0 L p1 … Z`, the closing edge included), so a
+  keyed `points` array is cheap line art: a stick figure or a wire rig whose
+  joints lerp, with `fill: false` and a `stroke`. An open figure traced as
+  an out-and-back tour (`[[0,0], [0.3,0.6], [0,0], [-0.3,0.6], [0,0], [0,-0.6]]`)
+  strokes each limb twice, which reads as one line. `stroke.draw` works
+  too. `fillRule`, `span` and `origin` stay path-only.
   For anything more detailed than a 24-point facet, give the polygon a
   **path** instead (next entry)
 - **Path drawings** — `{ "kind": "polygon", "radius": [0.3, 0.3], "color": "#2f6a3e", "path": "M 0 -0.9 C 0.5 -0.9 0.7 -0.3 0.5 0.1 … Z" }`:
@@ -400,8 +410,13 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
     part's subpaths counted as one pen run in the order the path draws them
     (a closed ring includes its closing edge, and comes back open when cut) —
     `fill: false` line art plus a glide of `stroke.draw.end` is a drawing
-    that draws itself. Paint; `…stroke.draw.end` is a key target like the
-    stroke's width. **Native:** ignored ⇒ the whole outline.
+    that draws itself. `draw.mode: "each"` draws every subpath at once
+    instead: each is cut to the same `start`..`end` of its **own** length,
+    so 12 spokes of a burst, the ticks of a dial or a field of hatching all
+    grow together from one key (`"run"`, the default, is the one pen run).
+    `mode` is an enum, so a steer or key on it steps. Paint;
+    `…stroke.draw.end` is a key target like the stroke's width.
+    **Native:** rendered.
   - **`fill: false`** draws the stroke only — line art. Then open paths
     (no `Z`) are fine: veins, hatching, antennae, rigging.
   - **`parts`** — a multi-colour drawing in one layer:
@@ -449,7 +464,7 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   and 1) — glide `end` 0 → 1 and the mark draws itself on; glide `start` after
   it and it erases from the tail. Paint (it glides, it is outside the
   structural signature), and perception scales the ink with it.
-  **Native:** ignored ⇒ the whole mark. Van Gogh's stroke, Hokusai's contour,
+  **Native:** rendered (the sprite tier in 1/128 steps of the length). Van Gogh's stroke, Hokusai's contour,
   O'Keeffe's petal, Basquiat's scrawl
 - `{ "kind": "textBlock", "text": "Multi-line text with wrapping.", "maxWidth": 0.8, "fontSize": 0.04, "lineHeight": 1.4, "align": "left", "color": "#e6e8ef", "anchor": "top-left", "font": "system-ui, sans-serif", "opacity": 1 }` —
   multi-line text block with deterministic line-breaking. All dimensions are
@@ -482,8 +497,8 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   it no longer moves the ink. Anchor is placement, so it is part of the
   structural signature (a change rebuilds); rotation stays about the anchor
   point. The perception boxes (`text-overlap`, `text-off-screen`) follow the
-  same rule. Absent ⇒ exactly the pre-anchor behaviour above. **Native
-  clients that do not read `anchor` render as absent (layout-box top-left).**
+  same rule. Absent ⇒ exactly the pre-anchor behaviour above. **Native:**
+  rendered.
 
   `font` is a CSS family and/or weight/style — `"bold monospace"`,
   `"300 'Inter', sans-serif"` — composed with the scaled `fontSize` the way
@@ -493,7 +508,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   SF Mono, Fira Code, …) switches the line-breaker to a uniform 0.6 em
   advance (1 em for a full-width glyph) so mono wraps land where the real face puts them; every other
   family uses the proportional table. Default `system-ui, sans-serif`.
-  **Native clients fall back to the system face** until a face table exists.
+  **Native:** tvOS uses the first family in the stack installed on the
+  device (as the web does) and the same metrics tables, else the system face
+  in the stack's class (serif, monospace, rounded) at its weight and slant.
   `font` names faces **installed on the viewing device** — nothing is
   bundled and no web font is fetched, so `'Inter'` only appears where Inter
   is installed and every other screen falls through the stack. End every
@@ -507,8 +524,8 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   `setParam("h.sprite.opacity", 0, { dur: 1500 })` glides the block out
   without a rebuild (and back in with `1`). Declare `"opacity": 1` on the
   block to make the path steerable (a `setParam` cannot create a field that
-  is not there). Scales perceived ink in the luminance grid. **Native clients
-  without `opacity` render at 1.**
+  is not there). Scales perceived ink in the luminance grid. **Native:**
+  rendered.
 
   `role` (`"read"` | `"atmosphere"`, on `textBlock` **and** `text`) declares
   what the words are *for*, and is the only thing that turns legibility
@@ -550,12 +567,22 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   popping it whole (the caption look); `fade` (0–1 exclusive of 0, default
   0.15, `glyphFade` only) is each glyph's fade window as a fraction of
   progress — small reads as a soft typewriter, large as a wave of
-  overlapping fades. Still a pure function of `progress`, so it glides and
-  deletes exactly like the other modes. Native clients render `glyphFade`
-  as `typewriter` until they gain per-glyph alpha. With `glyphFade`, `rise`
+  overlapping fades. The mapping is exact, so a key can land a beat: with
+  `N` glyphs and fade `f`, glyph `g` (0-based) starts fading in at progress
+  `(g/N)·(1−f)` and is **fully shown at `f + (g/N)·(1−f)`**. `N` counts the
+  graphemes of the **broken** lines — line breaks (authored `\n` or wrap)
+  are not glyphs, and spaces are. So the last glyph of line 1 (index
+  `n₁ − 1`, where `n₁` is line 1's grapheme count) is fully shown at
+  `f + ((n₁ − 1)/N)·(1−f)`, not at `n₁/N`. In `mode: "line"` whole lines
+  pop: `round(progress · L)` of the `L` broken lines show, so line `k`
+  (1-based) appears at progress `(k − ½)/L` — key `k/L` to show exactly `k`
+  lines, and remember a wrapped line counts as its own line.
+  Still a pure function of `progress`, so it glides and
+  deletes exactly like the other modes (tvOS renders it glyph by glyph; its
+  sprite tier re-bakes the block per 1/16 of a glyph's alpha). With `glyphFade`, `rise`
   (0..1 em, default 0) lifts each glyph into its line as it fades in, from
   `rise` em below — still a pure function of progress, and layout never
-  moves (it warns and is ignored on the other modes; native ignores it).
+  moves (it warns and is ignored on the other modes).
   `caret` draws a
   blinking caret at the frontier (`true`, or `{ "blink": 1.2, "color": "#fff" }`;
   blink is in full cycles/sec, capped at 3 for flash safety, and is a square
@@ -574,14 +601,22 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   The block paints `prefix + value + suffix` instead of `text`, `value`
   rounded to `decimals` (0..6, default 0) with its thousands grouped by
   commas unless `grouping: false` — formatted by the engine, never by the
-  viewer's locale, so every screen shows the same digits. `value` is
+  viewer's locale, so every screen shows the same digits. `minDigits`
+  (1..12, default 1) zero-pads the integer part for a fixed-width counter:
+  `{ "value": 42, "minDigits": 4, "grouping": false, "prefix": "FRAME " }`
+  paints `FRAME 0042`. Padding comes before grouping (as `Intl`'s
+  `minimumIntegerDigits` does), so with the default grouping 42 reads
+  `0,042` — set `grouping: false` for a counter. The sign stays outside the
+  padding (`-0042`). With a monospace `font` the counter keeps its width as
+  it rolls. `value` is
   **paint**: `setParam("stats.sprite.number.value", 48210, { dur: 4000 })`
   rolls the digits up over the glide, and a timeline key does the same.
   Line-breaking runs on the formatted string, so a counter that gains a
   digit can re-wrap: give it width to spare and an `anchor` on the edge that
   should stay put. Perception and the text advisories read the formatted
   number. `text` is what clients that do not read `number` show — author it
-  as the counter's rest value. **Native:** ignored ⇒ `text`.
+  as the counter's rest value. **Native:** rendered (the same locale-free
+  formatting); clients that do not read `number` show `text`.
 
 `circle`, `ring`, `streak`, `rect`, `bar`, `polygon` and `stroke` all accept
 `colors: [...]` (seeded per-entity palette pick) and `colorWeights: [...]`
@@ -874,7 +909,7 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   decelerates into place — an arrival) or `spring` (a critically damped
   spring: a quick start that settles with no overshoot). Every ease is
   monotone, so a glide never leaves the range its two values bound.
-  **Native:** an ease it does not know reads as `smooth`.
+  **Native:** tvOS honours all six; an ease it does not know reads as `smooth`.
   Keys address the same dot-paths as `setParam` — index or `key` form — and a
   path must already exist on the spec (a key cannot add a field). The spec must
   still validate with each key's value applied.
@@ -903,9 +938,14 @@ its drift, orbit and pulse run on (from mount; a sequence segment's `localT`):
   paint that cell: a staggered wave of small static dots is busy across the
   frame but sparse in every cell, so it passes without a frame resolved. A
   layer that moves, emits, links or has its geometry keyed counts as
-  reaching every cell. Past 512 frames to resolve, publishing refuses and
+  reaching every cell, except for keys on its own `transform` or its
+  group's: those reach everywhere the transform can carry the drawing while
+  `x`, `y`, `scale`, `scaleX` and `rotate` range over their base and keyed
+  values (a tile turning about its anchor stays in its own cells; an `x`
+  glide covers the cells it sweeps). Past 512 frames to resolve, publishing refuses and
   says the timeline is too dense to verify: put fewer paint keys in that
-  second, or align them to shared times.
+  second, or align them to shared times. That case is known without
+  resolving a frame (`flashSamplingForecast`).
 - **Path drawings: what a key can address.** Every field of a path
   polygon is paint, so all of these glide (`N` is a part's index):
   `sprite.path` and `sprite.parts.N.path` (a morph number by number when the
@@ -966,9 +1006,10 @@ timeline — nothing about it changes. A timed piece (an ident, a film, a
 pre-roll) is a scene whose evolution is a timeline, and a sequence only where
 it genuinely cuts to a different set of layers.
 
-**Native:** tvOS ignores `timeline` and shows the base spec — so **author the
-base as the piece's rest state** (its end card), and a timed piece degrades
-to a valid ambient scene.
+**Native:** tvOS plays the timeline (every frame on its Canvas tier, at 12 Hz
+on its sprite tier). Still **author the base as the piece's rest state** (its
+end card): a client that does not read `timeline` shows the base, and a timed
+piece then degrades to a valid ambient scene.
 
 ## Groups — one handle for a multi-layer subject
 
@@ -995,8 +1036,9 @@ record's grooves and label) can be moved, scaled and faded as one thing:
   end without the group paints it at the identity); moving a layer from one
   group to another steps on the morph's first frame.
 
-**Native:** ignored ⇒ identity transform, opacity 1 — author the base so the
-subject reads without the group's paint.
+**Native:** rendered. A client that does not read `groups` paints the
+identity (no transform, opacity 1), so author the base to read without the
+group's paint.
 
 ## Seeing without eyes — the perception API
 
@@ -1111,8 +1153,14 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   timeline, a self-typing reveal, animated grain) — and likewise when a part
   repeats between whole milliseconds (`spin: 7` laps every 51428.57 ms, which
   no whole-ms period reproduces) or a timeline key moves a period, rate or
-  speed (the cycle itself then varies). An exporter reads it to cut an exact
-  loop.
+  speed (the cycle itself then varies). A spin counts at its drawing's
+  rotational symmetry: a circle or ring never shows its spin, a regular
+  `sides` n-gon repeats every 360°/n, and a `points` or path drawing whose
+  every paint (fill colour, stroke, opacity) maps onto itself under a turn
+  of 360°/n (n up to 64) does too — 18 identical spokes at `spin: 16`
+  repeat every 1250 ms, not 22.5 s. A gradient, a part-drawn stroke
+  (`stroke.draw`), a stretched `span` or a soft fill off its `origin` is
+  taken as asymmetric. An exporter reads it to cut an exact loop.
   The two density advisories read the spec's declared `density` first:
   `sparse-scene` is withheld under `density: "sparse"` and `dense-scene`
   under `"dense"`, and `density-mismatch` fires instead when the measured
@@ -1212,10 +1260,8 @@ place. `text` is a morph option only (a `fade` already cross-fades whole
 frames; a `cut` has no window) and the validator rejects it elsewhere.
 **Default `step` is today's behaviour byte for byte** — the sequence
 baseline pins it — and a flip to `crossfade` by default would be a major
-change, with the baseline regenerated. **Native:** tvOS **steps** the words (it
-ignores `text`) but already cross-fades whole frames on every segment
-change using the transition's `dur`, so the result on the Apple TV is
-close to the web's. Morph requires structurally
+change, with the baseline regenerated. **Native:** tvOS lerps the two
+segments frame by frame on the chain root's seed and honours `text`. Morph requires structurally
 identical adjacent segments (same `structuralSignature`); if they differ, the
 engine falls back to cut and the validator emits a `morph-structural-mismatch`
 warning. When the segments are structural twins whose only differences are
@@ -1245,10 +1291,9 @@ lowest tiers, so a host on the `basic` (canvas2d only) or `minimal` capability
 tier — passed as `capabilityTier` on the `SequenceMountContext`, the tier
 `computeTier` from `@idle-screens/capabilities` reports — renders `fade` as
 `cut`; absent ⇒ fade enabled. `adviseSequence` says so once per sequence with
-the informational `fade-degrades-on-low-tier`. **Native:** tvOS already
-cross-fades on every segment change using the transition's `dur`, so `fade`
-matches the native player rather than diverging from it; native reads
-`fade.dur` where it reads the morph `dur` today.
+the informational `fade-degrades-on-low-tier`. **Native:** tvOS cross-fades
+over `dur` on every tier (capped at 0.4 s on the pre-4K boxes); the
+transition is the outgoing segment's, as here.
 
 `{ type: 'wipe', dur, shape?, origin?, angle?, feather? }` reveals the
 incoming segment through a moving edge instead of a dissolve: `shape:
@@ -1262,7 +1307,7 @@ the edge's mask — with the same `dur` bounds, the same tier gate (`basic` /
 `minimal` hosts cut, and `fade-degrades-on-low-tier` counts wipes), and the
 same answer to `boundary-luminance-jump`: every pixel changes once, a
 spatial ramp, never a flash. `text` is a morph option and is rejected on a
-wipe. **Native:** tvOS cross-fades over `dur`.
+wipe. **Native:** rendered (the same edge, eased the same way).
 
 **Wrap morph:** under `loop: true` a morph declared on the **last** segment
 is ignored at the wrap — the lap cuts back to segment 0, and every stored
@@ -1275,7 +1320,7 @@ entity placement; otherwise it is still a cut and the validator warns
 `wrap-morph-inactive` with the reason. With it, a looping ident is a closed
 cycle of poses. A clicker jump to segment 0 (a `sequence.segment` steer)
 still cuts — it arrives from wherever the presenter was, not from the last
-segment. **Native:** tvOS cross-fades the wrap like any segment change.
+segment. **Native:** rendered.
 
 **Timelines in segments:** a segment's scene may carry a `timeline`; it runs
 on the segment's `localT`. A morph resolves each side on its own clock — the
@@ -1306,9 +1351,9 @@ are the same under both — `advance: 'input'` is armed for every viewer, so a
 late joiner whose seeded clock is already past an unreleased hold lands **on**
 the held segment (still animating), not past it, and the clicker releases it
 from there. `epoch` without a `sequenceBaseT` starts at 0 (a host that does
-not pass the hint loses nothing). **Native clients that anchor at their own
-mount behave as `mount`** until they read the field and seed from the channel
-epoch. The default is never flipped: pre-roll depends on `mount`.
+not pass the hint loses nothing). **Native:** tvOS seeds the clock from the
+channel epoch, as the site does; a client that anchors at its own mount
+behaves as `mount`. The default is never flipped: pre-roll depends on `mount`.
 
 **Bed:** `bed` is one SaverSpec drawn **under every segment on the
 sequence's global clock** — the ground that does not reset. Every segment still
@@ -1346,11 +1391,9 @@ slide content in the segments. Rules:
 - **Perception:** `perceiveSequenceFrame(seq, T)` composes bed + segment (see
   the perception API above). Bed and segments are assumed to share `units` /
   `referenceViewport`.
-- **Native:** tvOS **ignores `bed` initially** and renders segments with their
-  own backgrounds, exactly as it does today — so a sequence authored with a bed
-  should still carry sensible segment backgrounds until the native player
-  draws the bed (a second compiled scene drawn first, which its layer model
-  already supports). Web viewers hide those backgrounds; native shows them.
+- **Native:** tvOS draws the bed under every segment on the sequence clock,
+  as the web does. A client without bed support shows each segment's own
+  background, so a sequence with a bed should still carry sensible ones.
 - **Not a default.** The "cheap form" — rendering a morph chain's root child at
   `T − segmentStart(chainRoot)` so twins keep one continuous clock — is **not**
   implemented and never will be as a default: stored morph-chained sequences

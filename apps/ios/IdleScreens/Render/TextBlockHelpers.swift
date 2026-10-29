@@ -17,9 +17,50 @@ private func charWidthEmUnit(_ unit: UInt16) -> Double {
     return 0.55
 }
 
-func textWidthEm(_ str: String) -> Double {
+/// Every glyph's advance under a monospace `font` (simulate.ts MONO_ADVANCE_EM).
+private let monoAdvanceEm = 0.6
+
+/// `textMetricsClassFor`: a `font` naming a monospace family breaks on a
+/// uniform 0.6 em advance, as the real face sets it.
+func isMonoFont(_ font: String?) -> Bool {
+    guard let font else { return false }
+    return font.range(of: #"\b(?:ui-)?mono(?:space)?\b|courier|menlo|monaco|sfmono|consolas|inconsolata|fira\s*code|source\s*code|jetbrains|ibm\s*plex\s*mono|roboto\s*mono"#,
+                      options: [.regularExpression, .caseInsensitive]) != nil
+}
+
+/// Combining (semi-)voiced kana marks ride on the preceding glyph.
+private func isCombiningKana(_ cp: UInt32) -> Bool { cp == 0x3099 || cp == 0x309A }
+
+/// `isFullWidth`: CJK, kana, Hangul and fullwidth forms advance a full em.
+func isFullWidth(_ cp: UInt32) -> Bool {
+    if isCombiningKana(cp) { return false }
+    return (0x1100...0x115F).contains(cp) || (0x2E80...0x303E).contains(cp)
+        || (0x3041...0x33FF).contains(cp) || (0x3400...0x4DBF).contains(cp)
+        || (0x4E00...0x9FFF).contains(cp) || (0xA000...0xA4CF).contains(cp)
+        || (0xA960...0xA97F).contains(cp) || (0xAC00...0xD7A3).contains(cp)
+        || (0xF900...0xFAFF).contains(cp) || (0xFE30...0xFE4F).contains(cp)
+        || (0xFF01...0xFF60).contains(cp) || (0xFFE0...0xFFE6).contains(cp)
+        || (0x20000...0x3FFFD).contains(cp)
+}
+
+/// Em-width under the web's fixed table (simulate.ts `textWidthEm`): UTF-16
+/// units for proportional faces, grapheme cells under `mono`, a full em for
+/// a full-width glyph either way.
+func textWidthEm(_ str: String, mono: Bool = false) -> Double {
     var w = 0.0
-    for unit in str.utf16 { w += charWidthEmUnit(unit) }
+    if mono {
+        for c in graphemeClusters(str) {
+            guard let cp = c.unicodeScalars.first?.value, !isCombiningKana(cp) else { continue }
+            w += isFullWidth(cp) ? 1 : monoAdvanceEm
+        }
+        return w
+    }
+    for scalar in str.unicodeScalars {
+        let cp = scalar.value
+        if isCombiningKana(cp) { continue }
+        if isFullWidth(cp) { w += 1; continue }
+        for unit in String(scalar).utf16 { w += charWidthEmUnit(unit) }
+    }
     return w
 }
 
@@ -30,7 +71,7 @@ struct TextBlockLine: Equatable, Sendable {
     var widthEm: Double
 }
 
-func breakTextBlock(text: String, maxWidthEm: Double) -> [TextBlockLine] {
+func breakTextBlock(text: String, maxWidthEm: Double, mono: Bool = false) -> [TextBlockLine] {
     let paragraphs = text.components(separatedBy: "\n")
     var lines: [TextBlockLine] = []
 
@@ -46,12 +87,12 @@ func breakTextBlock(text: String, maxWidthEm: Double) -> [TextBlockLine] {
         }
 
         var lineText = words[0]
-        var lineW = textWidthEm(lineText)
-        let spaceW = 0.3 // charWidthEm(' ')
+        var lineW = textWidthEm(lineText, mono: mono)
+        let spaceW = mono ? monoAdvanceEm : 0.3 // charWidthEm(' ')
 
         for i in 1..<words.count {
             let word = words[i]
-            let wordW = textWidthEm(word)
+            let wordW = textWidthEm(word, mono: mono)
             if lineW + spaceW + wordW <= maxWidthEm {
                 lineText += " " + word
                 lineW += spaceW + wordW
@@ -121,6 +162,8 @@ struct RevealStateResult: Equatable, Sendable {
     var partialText: String
     var caretLine: Int
     var caretPrefix: String
+    /// `glyphFade` only: each glyph's 0…1 alpha, per line, in reading order.
+    var glyphAlphas: [[Double]]? = nil
 }
 
 func revealState(lines: [TextBlockLine], reveal: SpecSubset.TextRevealSpec,
@@ -138,6 +181,22 @@ func revealState(lines: [TextBlockLine], reveal: SpecSubset.TextRevealSpec,
     let mode = reveal.mode ?? "typewriter"
     var fullLines = 0
     var partialText = ""
+
+    // glyphFade: glyph g starts fading at (g/total)·(1−fade) and ramps to
+    // opaque over a `fade`-wide window of progress; the frontier below
+    // (shared with typewriter) still anchors the caret.
+    var glyphAlphas: [[Double]]?
+    if mode == "glyphFade" {
+        let f = min(1, max(0.01, reveal.fade ?? 0.15))
+        var g = 0
+        glyphAlphas = lineClusters.map { clusters in
+            clusters.map { _ in
+                let start = totalGraphemes > 0 ? Double(g) / Double(totalGraphemes) * (1 - f) : 0
+                g += 1
+                return max(0, min(1, (progress - start) / f))
+            }
+        }
+    }
 
     if mode == "line" {
         fullLines = Int((progress * Double(lines.count)).rounded())
@@ -188,5 +247,122 @@ func revealState(lines: [TextBlockLine], reveal: SpecSubset.TextRevealSpec,
 
     return RevealStateResult(progress: progress, fullLines: fullLines,
                              partialText: partialText,
-                             caretLine: caretLine, caretPrefix: caretPrefix)
+                             caretLine: caretLine, caretPrefix: caretPrefix,
+                             glyphAlphas: glyphAlphas)
+}
+
+// MARK: - Font (a CSS `font` family/weight list on the system's faces)
+
+#if canImport(UIKit)
+import UIKit
+
+/// The face a textBlock `font` names, at `size` points: the first family in
+/// the CSS stack that is installed on this device (as on the web, nothing is
+/// bundled), else the system face in the stack's generic class — serif,
+/// monospace or rounded — with its weight and slant.
+enum TextBlockFont {
+    nonisolated(unsafe) private static let cache = NSCache<NSString, UIFont>()
+
+    static func uiFont(css: String?, size: CGFloat) -> UIFont {
+        let key = "\(css ?? "")|\(size)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let traits = SpecSubset.TextStyle(anchor: nil, font: css, opacity: nil).fontTraits
+        let weight: UIFont.Weight = traits.bold ? .bold : .regular
+        var font: UIFont?
+        for family in families(css) {
+            let names = UIFont.fontNames(forFamilyName: family)
+            guard !names.isEmpty else { continue }
+            var d = UIFontDescriptor(fontAttributes: [.family: family])
+            var symbolic: UIFontDescriptor.SymbolicTraits = []
+            if traits.bold { symbolic.insert(.traitBold) }
+            if traits.italic { symbolic.insert(.traitItalic) }
+            if !symbolic.isEmpty { d = d.withSymbolicTraits(symbolic) ?? d }
+            font = UIFont(descriptor: d, size: size)
+            break
+        }
+        if font == nil {
+            let base = UIFont.systemFont(ofSize: size, weight: weight)
+            let design: UIFontDescriptor.SystemDesign = traits.design == "mono" ? .monospaced
+                : traits.design == "serif" ? .serif : traits.design == "rounded" ? .rounded : .default
+            var d = base.fontDescriptor.withDesign(design) ?? base.fontDescriptor
+            if traits.italic { d = d.withSymbolicTraits(d.symbolicTraits.union(.traitItalic)) ?? d }
+            font = UIFont(descriptor: d, size: size)
+        }
+        let result = font ?? .systemFont(ofSize: size)
+        cache.setObject(result, forKey: key)
+        return result
+    }
+
+    /// The named families of a CSS font list, quotes and weight/style words
+    /// stripped (generic families are left to the fallback).
+    static func families(_ css: String?) -> [String] {
+        guard let css else { return [] }
+        let generic: Set<String> = ["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui",
+                                    "ui-monospace", "ui-serif", "ui-sans-serif", "ui-rounded"]
+        let words: Set<String> = ["bold", "bolder", "lighter", "normal", "italic", "oblique", "small-caps"]
+        return css.split(separator: ",").compactMap { raw in
+            var part = raw.trimmingCharacters(in: .whitespaces)
+            // Leading weight/style tokens belong to the first family ("300 'Inter'").
+            while let space = part.firstIndex(of: " "),
+                  let head = Optional(String(part[..<space])),
+                  words.contains(head.lowercased()) || Int(head) != nil {
+                part = String(part[part.index(after: space)...]).trimmingCharacters(in: .whitespaces)
+            }
+            part = part.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            return part.isEmpty || generic.contains(part.lowercased()) ? nil : part
+        }
+    }
+}
+#endif
+
+// MARK: - textBlock.number
+
+/// A counter (simulate.ts `textBlockText`): `prefix + value + suffix`, the
+/// value rounded to `decimals` (0…6) places as JS `toFixed` does, the
+/// integer part zero-padded to `minDigits`, thousands grouped with commas
+/// unless `grouping: false`. Locale-free, so every device
+/// paints the same digits.
+struct TextNumber: Decodable, Equatable, Sendable {
+    var value: Double
+    var decimals: Double?
+    var prefix: String?
+    var suffix: String?
+    var grouping: Bool?
+    /// Zero-pad the integer part to this many digits (1…12), before grouping.
+    var minDigits: Double?
+
+    var formatted: String {
+        let d = max(0, min(6, Int((decimals ?? 0).rounded())))
+        let v = value.isFinite ? value : 0
+        let fixed = Self.toFixed(abs(v), d)
+        let parts = fixed.split(separator: ".", omittingEmptySubsequences: false)
+        var whole = String(parts[0])
+        let pad = max(1, min(12, Int((minDigits ?? 1).rounded())))
+        if whole.count < pad { whole = String(repeating: "0", count: pad - whole.count) + whole }
+        if grouping != false {
+            var out = ""
+            for (i, ch) in whole.reversed().enumerated() {
+                if i > 0, i % 3 == 0 { out.append(",") }
+                out.append(ch)
+            }
+            whole = String(out.reversed())
+        }
+        let neg = v < 0 && (Double(fixed) ?? 0) != 0
+        let frac = parts.count > 1 ? "." + parts[1] : ""
+        return (prefix ?? "") + (neg ? "-" : "") + whole + frac + (suffix ?? "")
+    }
+
+    /// JS `toFixed`: rounds the stored binary value, so only a tie that is
+    /// exact in binary (0.5, 2.5, 0.125) rounds up; printf rounds that one to
+    /// even. A decimal like 2.55 is stored just below its half and rounds
+    /// down. No multiplication, which would round the value onto a tie.
+    static func toFixed(_ x: Double, _ d: Int) -> String {
+        guard x.isFinite else { return String(format: "%.\(d)f", x) }
+        let a = x.magnitude
+        // 30 more places than shown: a tie is a 5 followed by only zeros.
+        let tail = String(format: "%.\(d + 30)f", a).suffix(30)
+        let tie = tail.first == "5" && tail.dropFirst().allSatisfy { $0 == "0" }
+        let body = String(format: "%.\(d)f", tie ? a.nextUp : a)
+        return x < 0 ? "-" + body : body
+    }
 }

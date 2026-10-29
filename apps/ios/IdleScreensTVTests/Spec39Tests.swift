@@ -50,9 +50,10 @@ final class Spec39Tests: XCTestCase {
           {"duration":1000,"transition":{"type":"fade","dur":1500},"scene":{"layers":[]}},
           {"duration":1000,"transition":{"type":"cut"},"scene":{"layers":[]}}]}
         """##.utf8))
-        XCTAssertEqual(seq.transitionDuration(entering: 1), 1.5, accuracy: 1e-9,
+        // The outgoing segment owns the crossing: segment 1's fade plays 1 → 2.
+        XCTAssertEqual(seq.crossing(into: 1, wrapped: false), .cut)
+        XCTAssertEqual(seq.crossing(into: 2, wrapped: false), .fade(seconds: 1.5),
                        "fade landed as a hard cut")
-        XCTAssertEqual(seq.transitionDuration(entering: 2), 0)
     }
 
     // MARK: - textBlock style
