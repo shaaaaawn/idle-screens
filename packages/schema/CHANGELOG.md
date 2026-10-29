@@ -1,5 +1,28 @@
 # @idle-screens/schema
 
+## 3.16.0
+
+### Minor Changes
+
+- af1449f: New export `flashSamplingForecast(spec)`: the timeline flash gate's sampling plan with no frame resolved. It takes the same walk as `timelineFlashReport` (the dense windows weighted for coincident jumps, the per-cell pre-check with keyed transforms bounded by their swept footprint, the chunked walk and its 512-frame budget), so it says for the cost of the arithmetic whether the check will run out of budget. `exhausted: true` means `timelineFlashReport` is certain to fail: `incomplete` at the same `at` and `boundariesPerSecond`, unless it finds a flash in the frames it does resolve first. It also returns `samples` (frames the check resolves if it finds no flash), `needed` (frames the whole walk would take with no budget), `budget`, and `report`, the report the check returns when it finds no flash. Both functions now share one internal walk, so the forecast cannot drift from the check. `timelineFlashReport`'s results are unchanged.
+- 887c447: Small format adds from agent feedback:
+  
+  - **`points` polygons take path paint** (X711): `stroke`, `fill: false` and `gradient` on a `points` polygon draw the closed path through its points, so a keyed `points` array is cheap line art (a stick figure, a wire rig) instead of a path morph. Plain `points` polygons are unchanged.
+  - **`textBlock.number.minDigits`** (X677): zero-pads the integer part (1..12) for fixed-width counters — `FRAME 0042`. Padded before grouping, as `Intl` does; pair with `grouping: false`.
+  - **`stroke.draw.mode: "each"`** (X676): every subpath of a path stroke draws over the same span at once (bursts, tick dials, hatching); `"run"` (default) keeps the one pen run.
+  - **`transform.scaleY`** (X698): vertical scale on layer and group transforms, next to `scaleX`, for squash-and-stretch. It glides and keys like `scaleX`. A stored scene that already carried a `scaleY` (previously warned as unknown and ignored) now renders it.
+  - **Docs** (X707): FORMAT.md states the `glyphFade` progress→glyph mapping (glyph g of N is fully shown at `f + (g/N)(1−f)`, N = graphemes of the broken lines) and when `mode: "line"` shows line k.
+
+### Patch Changes
+
+- 4ed56df: Timeline flash gate: a jump that lands on another key of the same path counts as two changes. A `dur: 0` key (or a `step`-eased key's landing) that falls on another key's boundary on one path snaps the value and glides on from it, so the frame changes twice at that time. The gate counted distinct times, so a full-frame sawtooth keyed at the 200 ms floor (a step and a glide at the same `t`, every 200 ms; 5 flashes a second) never reached the density that triggers a check and passed. `timelineFlashReport` now weighs those times twice when it looks for dense seconds, per grid cell as well, and refuses the sawtooth at 5 a second. Times shared across different paths still share one check, a chain of glides that meet end to start is not double-counted, and one jump-then-glide per lap (a loop seam reset) still passes. Over 740 stored and example scenes with timelines, no verdict changed.
+- dc5857a: Timeline flash gate (X681): a layer whose only geometry keys are on its own `transform` (or its group's) no longer counts as reaching every cell of the flash grid. Its reach is now everywhere the keyed transform can carry its drawing while `x`, `y`, `scale`, `scaleX` and `rotate` range over their base and keyed values: a tile turning about its anchor stays in its own cells, a turn about the viewport centre sweeps its arc, and an `x`/`y` glide covers the cells along the way. A staggered colour wave over turning tiles is no longer refused as "too dense to verify". A key the gate cannot bound, such as one that moves the pivot, still reaches every cell.
+- 7cde89a: Two papercuts:
+  
+  - `pulse.amp: 0` is valid and means no pulse (X706). A generator can now write one layer shape for its lit and unlit variants. Negative amps and amps over 0.5 are still refused, and the message now names the real range ("must be a number from 0 (no pulse) to 0.5"). The published JSON Schema allows 0 too, and a pulse of amp 0 no longer sets a period in `scenePeriod`.
+  - `scenePeriod` and the `loop-seam` advisory count a spin at its drawing's rotational symmetry (X709). A spinning circle or ring sets no period at all. A regular `sides` n-gon repeats every 360°/n. A `points` or path drawing repeats every 360°/n when each of its paints maps onto itself under that turn: for example, 18 identical spokes at `spin: 16` repeat every 1250 ms instead of 22.5 s, and the part is labelled `spin (18-fold)`. Gradients, part-drawn strokes, stretched `span`s and soft fills off their `origin` are still treated as asymmetric.
+- d2bdfd3: `scenePeriod` edge cases (Greptile on the 3.15.0 release PR): a field background with `drift.amount: 0` is held still, so its drift period no longer counts towards the scene's period and no longer triggers a false `loop-seam` advisory; and a layer whose entities enter at once but staggered (`life: { enter: 0, fade: 0, stagger }`) now counts as a one-shot build, so it is no longer reported as static.
+
 ## 3.15.0
 
 ### Minor Changes
