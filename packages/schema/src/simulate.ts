@@ -677,6 +677,9 @@ export function lifeStaggerAt(life: { enter?: number; exit?: number; fade?: numb
 
 function wrap(v: number, min: number, max: number): number {
   const range = max - min;
+  // A zero-width/height viewport (a canvas mounted hidden or collapsed) makes
+  // the range 0, and `% 0` is NaN — which createRadialGradient throws on.
+  if (range <= 0) return min;
   return ((((v - min) % range) + range) % range) + min;
 }
 
