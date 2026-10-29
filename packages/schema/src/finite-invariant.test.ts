@@ -9,29 +9,34 @@ import type { SaverSpec } from './types';
 // Guards the analytic invariant end-to-end: every bundled example must produce
 // finite positions/sizes/alphas at every sampled time — a NaN here becomes a
 // crashed canvas call (e.g. createRadialGradient throws on non-finite input).
-// Zero-area viewports are included: a canvas mounted hidden, collapsed or
-// before layout is 0 wide and/or high until its first resize.
-it('no example ever produces a non-finite position/size/alpha', () => {
-  // [W, H, time step]: the zero-area cases sample coarsely — they fail at t=0 when they fail.
-  for (const [W, H, dt] of [[1920, 1080, 313], [0, 0, 7919], [0, 1080, 7919], [1920, 0, 7919]] as const) {
-    for (const spec of EXAMPLE_SPECS) {
-      const rng = createRng((spec.seed ?? 42) >>> 0 || 1);
-      const scale = spec.units === 'px' ? 1 : Math.min(W, H);
-      for (const [li, layer] of spec.layers.entries()) {
-        const ents = buildEntities(layer as never, rng, W, H, scale, 1);
-        for (const [ei, e] of ents.entries()) {
-          for (let t = 0; t <= 120000; t += dt) {
-            const p = positionAt(e, t, W, H);
-            const s = sizeAt(e, t);
-            const a = alphaAt(e, t);
-            if (![p.x, p.y, s, a].every(Number.isFinite)) {
-              throw new Error(`${W}x${H} ${spec.id} layer ${li} (${(layer as {key?:string}).key}) entity ${ei} t=${t}: x=${p.x} y=${p.y} size=${s} alpha=${a} entity=${JSON.stringify(e)}`);
-            }
+function assertFiniteExamples(W: number, H: number, dt: number): void {
+  for (const spec of EXAMPLE_SPECS) {
+    const rng = createRng((spec.seed ?? 42) >>> 0 || 1);
+    const scale = spec.units === 'px' ? 1 : Math.min(W, H);
+    for (const [li, layer] of spec.layers.entries()) {
+      const ents = buildEntities(layer as never, rng, W, H, scale, 1);
+      for (const [ei, e] of ents.entries()) {
+        for (let t = 0; t <= 120000; t += dt) {
+          const p = positionAt(e, t, W, H);
+          const s = sizeAt(e, t);
+          const a = alphaAt(e, t);
+          if (![p.x, p.y, s, a].every(Number.isFinite)) {
+            throw new Error(`${W}x${H} ${spec.id} layer ${li} (${(layer as {key?:string}).key}) entity ${ei} t=${t}: x=${p.x} y=${p.y} size=${s} alpha=${a} entity=${JSON.stringify(e)}`);
           }
         }
       }
     }
   }
+}
+
+it('no example ever produces a non-finite position/size/alpha', () => {
+  assertFiniteExamples(1920, 1080, 313);
+});
+
+// A canvas mounted hidden, collapsed or before layout is 0 wide and/or high
+// until its first resize. Sampled coarsely: these fail at t = 0 when they fail.
+it('no example produces a non-finite position/size/alpha at a zero-area viewport', () => {
+  for (const [W, H] of [[0, 0], [0, 1080], [1920, 0]] as const) assertFiniteExamples(W, H, 7919);
 });
 
 // The prod `ballet` channel threw `createRadialGradient … non-finite` on every
