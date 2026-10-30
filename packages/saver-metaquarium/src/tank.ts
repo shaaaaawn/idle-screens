@@ -62,6 +62,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { needsDraco } from './tank-draco';
+import { dracoPathProblem, fishUrlProblem } from './fetch-origin';
 import { affordableLayers, environmentOf, roomColor, FLOOR_KINDS, type EnvironmentPreset, type FloorKind } from './environments';
 import {
   anchorFraction, bandRange, breedSize, FISH_LENGTH, fishHash, fishSizeMul, fishVariation, FORMATION_SHAPES,
@@ -265,7 +266,38 @@ async function mintedFish(id: number): Promise<{ scene: Object3D; animations: An
  *  a loader (setDecoderPath is ignored after the first decode) and so a path
  *  change never disposes a worker another tank is still parsing on. */
 const DRACO_BY_PATH = new Map<string, DRACOLoader>();
+
+/** The mounting page's (or worker's) location, or null off-DOM. */
+function pageHref(): string | null {
+  return typeof location !== 'undefined' && location ? String(location.href) : null;
+}
+/** A URL relative to this module, or null where a bundle left import.meta.url empty (the Mac IIFE). */
+function packageUrl(rel: string): string | null {
+  try {
+    return new URL(rel, import.meta.url).href;
+  } catch {
+    return null;
+  }
+}
+/** Each refused value is logged once per page, not once per fish. */
+const WARNED_FETCH = new Set<string>();
+function warnFetchOnce(param: string, value: string, why: string, fallback: string): void {
+  const key = `${param}\u0000${value}`;
+  if (WARNED_FETCH.has(key)) return;
+  WARNED_FETCH.add(key);
+  const shown = value.length > 120 ? `${value.slice(0, 120)}…` : value;
+  console.warn(`[metaquarium] ${param} "${shown}" ${why} — using ${fallback}`);
+}
+
 function dracoDecoderPath(path: string): string {
+  // A foreign decoder path is script on this page (fetch-origin.ts): the
+  // package's own copy stands in. Every caller (loader map, refcounts,
+  // dispose) keys on THIS value, so the substitution cannot split them.
+  const problem = dracoPathProblem(path, pageHref(), packageUrl('./draco/'));
+  if (problem) {
+    warnFetchOnce('dracoPath', path, problem, 'the decoder this package ships');
+    path = '';
+  }
   const base = path || new URL('./draco/', import.meta.url).href;
   // Trailing slash is load-bearing — DRACOLoader concatenates the filename
   // straight onto this, and a missing slash yields `…/dracodraco_decoder.wasm`,
@@ -1349,6 +1381,17 @@ class TankInstance implements SaverInstance {
     return typeof v === 'string' ? v : String(this.space[key]?.default ?? '');
   }
 
+  /** `fishUrl`, held to the places this host serves (fetch-origin.ts); a
+   *  refused one swims the default fish instead of a placeholder that retries. */
+  private fishUrlParam(): string {
+    const url = this.str('fishUrl');
+    const problem = fishUrlProblem(url, pageHref(), packageUrl('./'));
+    if (!problem) return url;
+    const fallback = String(this.space.fishUrl?.default ?? FISH_CATALOG[0]!.ipfs3d);
+    warnFetchOnce('fishUrl', url, problem, 'the default fish');
+    return fallback;
+  }
+
   /** Cheap per-frame room params: move the ceiling, set the shaft strength.
    *  No allocation, no teardown — this is what the structure key protects. */
   private applyRoomParams(waterY: number, rayStrength: number): void {
@@ -2253,7 +2296,7 @@ class TankInstance implements SaverInstance {
   private reconcile(): void {
     const cap = this.poolCapNow();
     const mixStr = this.str('fishMix').trim();
-    const url = this.str('fishUrl');
+    const url = this.fishUrlParam();
     const n = Math.min(Math.max(1, Math.round(this.num('fishCount'))), cap);
     const inputKey = `${mixStr}\u0000${url}\u0000${n}\u0000${cap}`;
     if (inputKey === this.wantInputKey) return;
