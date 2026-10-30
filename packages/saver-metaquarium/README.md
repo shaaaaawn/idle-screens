@@ -82,9 +82,9 @@ never changes because a dependency was bumped.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | fishCount | number | 1 | Visible fish, 1–24 (step). Default 1 = hero mode; the pool grows on demand and never shrinks |
-| fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode (`ipfs://` supported; the playground overrides to a local asset) |
+| fishUrl | string | `ipfs://…/fish_257_….glb` | GLB model URL, single-breed mode: `ipfs://`, `https://assets.idlescreens.com/`, or a URL on the page's own origin (the playground overrides to a local asset). Any other host is refused, logged once, and the default fish swims instead |
 | fishMix | string | `""` | Mixed population DSL: `id[:count][@style][*size]` comma-separated (`*size` 0.25–4 scales that token over its breed's length), catalog ids or breed aliases (`"257:2,100:1"`, `"457:3@hover,257:6@school"`), plus the bundled creatures (`shark crab dori glowfish babyfish hackerfish blowfish starfish octopus`, ids 601–606 and 608–610: species, so a count is copies; bundled in the package, see `breeds/README.md`; a crab walks the seabed and climbs rocks on its own legs, `src/crab.ts`; a starfish crawls it and stands up to wave, `src/starfish.ts`; an octopus crawls it, jets off and parachutes down, and watches you with level pupils, `src/octopus.ts`). A minted id is an INDIVIDUAL — no id twice in a scene. Non-empty overrides fishUrl + fishCount; counts absolute, tier-capped |
-| dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package |
+| dracoPath | string | `""` | Where the Draco decoder lives (most Metaquarium models are Draco-compressed). Empty = the copy shipped beside this package. It runs as script, so only a path on the page's own origin (or under the shipped copy) is used; anything else falls back to the shipped copy and is logged once |
 
 ### Motion
 
