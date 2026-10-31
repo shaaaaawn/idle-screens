@@ -279,9 +279,47 @@ function normalizeColors(spec: unknown): void {
   }
 }
 
+/** Sprite kinds whose entity size is the layer's `size` (simulate.ts buildEntities). */
+const LAYER_SIZED_SPRITES = new Set(['emoji', 'text']);
+/** What sizes every other sprite kind, for the "sprite.size is ignored" warning. */
+const SPRITE_SIZE_FIELD: Record<string, string> = {
+  circle: 'radius', ring: 'radius', polygon: 'radius', streak: 'length', stroke: 'length',
+  rect: 'width', bar: 'length and thickness', textBlock: 'fontSize',
+};
+const SPRITE_SIZE_MISPLACED = "'size' belongs on the layer, not inside sprite — move it up one level";
+
+/**
+ * Repair (F24): `size` misplaced inside an emoji/text sprite. It sits naturally
+ * next to `glyphs`, and the renderer only reads `layer.size`, so it used to be
+ * silently dropped and every entity fell back to the default size. For
+ * emoji/text the intent is unambiguous — same field, same units — so when the
+ * layer has no `size` of its own the value is moved up, with a
+ * `misplaced-property` warning so the author learns the placement. Mutates the
+ * spec in place, like `normalizeColors`; runs before validation so the moved
+ * value is range-checked as `layers[i].size`. Every other case (layer.size
+ * already set, a kind that doesn't read layer.size) is left alone and warned
+ * about by `validateLayer`.
+ */
+function aliasSpriteSize(spec: unknown): SpecWarning[] {
+  const out: SpecWarning[] = [];
+  if (!isObj(spec) || !Array.isArray(spec.layers)) return out;
+  spec.layers.forEach((layer, i) => {
+    if (!isObj(layer) || !isObj(layer.sprite)) return;
+    const sp = layer.sprite;
+    if (sp.size === undefined || !LAYER_SIZED_SPRITES.has(sp.kind as string) || layer.size !== undefined) return;
+    layer.size = sp.size;
+    delete sp.size;
+    out.push({ path: `layers[${i}].sprite.size`, code: 'misplaced-property', message: `${SPRITE_SIZE_MISPLACED} (applied as layers[${i}].size this time)` });
+  });
+  return out;
+}
+
 export function validateSpec(spec: unknown): ValidationResult {
   normalizeColors(spec);
-  return validateSpecCore(spec);
+  const repaired = aliasSpriteSize(spec);
+  const result = validateSpecCore(spec);
+  if (repaired.length > 0) result.warnings = [...repaired, ...(result.warnings ?? [])];
+  return result;
 }
 
 /**
@@ -775,6 +813,22 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   }
   if (layer.size !== undefined && (!isRange(layer.size) || layer.size[0] <= 0)) {
     err(`${path}.size`, rangeMsg(spec));
+  }
+  // F24: a `size` still inside the sprite here was not aliased by `validateSpec`
+  // (or this is the pure `ignoredPropertyPaths` path). One warning, worded for
+  // the case — `validateSprite` skips the key so it never doubles up.
+  if (isObj(layer.sprite) && layer.sprite.size !== undefined) {
+    const kind = layer.sprite.kind as string;
+    if (LAYER_SIZED_SPRITES.has(kind)) {
+      warn(`${path}.sprite.size`, 'misplaced-property', layer.size !== undefined
+        ? `${SPRITE_SIZE_MISPLACED} — layer.size is also set, so the layer's value wins and sprite.size is ignored`
+        : SPRITE_SIZE_MISPLACED);
+    } else {
+      const field = SPRITE_SIZE_FIELD[kind];
+      warn(`${path}.sprite.size`, 'unknown-property', field
+        ? `unknown sprite property 'size' — will be ignored; a ${kind} sprite is sized by its ${field}`
+        : `unknown sprite property 'size' — will be ignored`);
+    }
   }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
@@ -1337,6 +1391,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
   }
 
   for (const k of unknownKeys(sprite, knownSet)) {
+    // `size` is kind-dependent (aliased for emoji/text, ignored elsewhere), so
+    // it is warned about in `validateLayer`, which can see `layer.size`.
+    if (k === 'size') continue;
     if (LAYER_PROPS_ON_SPRITE.has(k)) {
       warn(`${path}.${k}`, 'misplaced-property', `'${k}' belongs on the layer, not inside sprite — move it up one level`);
     } else {

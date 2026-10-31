@@ -114,6 +114,26 @@ describe('saver-spec.schema.json', () => {
     expect(validateSpec(spec).valid).toBe(true); // runtime tolerates unknowns
   });
 
+  it('rejects sprite.size at the authoring gate while the runtime repairs it (F24)', () => {
+    const mk = (sprite: object): { layers: Array<Record<string, unknown>> } => ({
+      schemaVersion: 1, id: 'x', label: 'X',
+      layers: [{ count: 1, sprite, motion: { type: 'static' } }],
+    }) as unknown as { layers: Array<Record<string, unknown>> };
+    // `size` is a layer field: the strict JSON Schema refuses it inside sprite, for every kind.
+    expect(check(mk({ kind: 'emoji', glyphs: ['🐟'], size: [0.03, 0.06] }))).toBe(false);
+    expect(check(mk({ kind: 'text', strings: ['HI'], size: [0.03, 0.06] }))).toBe(false);
+    expect(check(mk({ kind: 'circle', radius: [0.01, 0.02], color: '#ffffff', size: [0.03, 0.06] }))).toBe(false);
+    // …and accepts it one level up.
+    expect(check({ ...mk({ kind: 'emoji', glyphs: ['🐟'] }), layers: [{ count: 1, size: [0.03, 0.06], sprite: { kind: 'emoji', glyphs: ['🐟'] }, motion: { type: 'static' } }] })).toBe(true);
+    // The runtime aliases it instead, with a warning, and the repaired spec passes the strict schema.
+    const repaired = mk({ kind: 'emoji', glyphs: ['🐟'], size: [0.03, 0.06] });
+    const r = validateSpec(repaired);
+    expect(r.valid).toBe(true);
+    expect((r.warnings ?? []).some((w) => w.code === 'misplaced-property' && w.path === 'layers[0].sprite.size')).toBe(true);
+    expect(repaired.layers[0]!.size).toEqual([0.03, 0.06]);
+    expect(check(repaired)).toBe(true);
+  });
+
   it('accepts a minimal idle-sequence envelope', () => {
     const scene = {
       schemaVersion: 1, id: 's', label: 'S',

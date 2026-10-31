@@ -96,6 +96,13 @@ Two validators exist with deliberately different strictness:
 
 Author against the JSON Schema; ship through the runtime validator.
 
+Two slips have one unambiguous reading, so `validateSpec()` repairs them in
+place instead of ignoring them: a sprite with `colors` but no `color`
+gets `color: colors[0]`, and a `size` written inside an emoji or text `sprite`
+moves up to the layer (with a `misplaced-property` warning; if the layer
+already has a `size`, the layer's value wins and the sprite's is ignored).
+The JSON Schema still rejects `sprite.size`.
+
 An unknown field that is another motion tool's vocabulary gets a pointer in
 its `unknown-property` warning: `delay` on a layer names `life.enter`,
 `duration` on a timeline key names `dur`, `fps` or `bpm` at the top level
@@ -289,7 +296,7 @@ on the sprite tier (the `basic` tier rule).
 | `count` | int 1..400 | — | entities in this layer. **At most 800 entities across all layers** (and ≤ 36 layers): the validator rejects a spec whose counts sum past 800, and density scaling never takes a screen past it |
 | `sprite` | SpriteSpec | — | what each entity looks like |
 | `motion` | MotionSpec | — | how entities move |
-| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites |
+| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. A **layer** field: it goes next to `count`, never inside `sprite` |
 | `wrap` | boolean | `true` | wrap to the opposite edge when leaving the viewport |
 | `flip` | boolean | `false` | mirror the sprite to face its heading |
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
@@ -324,7 +331,14 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
 ### `sprite` (one of)
 
 - `{ "kind": "emoji", "glyphs": ["🐟", "🐠"], "cycle": { "period": 800 } }` —
-  glyph picked per entity (seeded); optional `cycle` rotates variants over time
+  glyph picked per entity (seeded); optional `cycle` rotates variants over time.
+  The glyph size is the layer's `size`, beside `count`, not a sprite field:
+
+  ```jsonc
+  { "count": 12, "size": [0.03, 0.06],
+    "sprite": { "kind": "emoji", "glyphs": ["🐟"] },
+    "motion": { "type": "drift", "speed": [0.02, 0.05], "bidirectional": true } }
+  ```
 - `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
   viewport (verbatim only under `units: "px"`); a family/weight only
@@ -1111,7 +1125,11 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   its own × its group's — is 0 in the base scene and at every key boundary of
   its `timeline` never shows, so it is not judged and its entities do not count
   toward `dense-scene`; coverage is weighed by paint opacity) (also on
-  `perceiveScene().advisories`). Three of them are **spatial**, for static text:
+  `perceiveScene().advisories`). `giant-entity` flags an emoji/text layer
+  whose glyphs come out taller than the viewport's min dimension — usually
+  px numbers in a viewport-unit spec (`size: [20, 40]` is 21,600 px at
+  1080p), which blankets the frame and otherwise reads as healthy coverage.
+  Three of the advisories are **spatial**, for static text:
   `text-off-screen` (a text/textBlock box crosses the viewport edge by more
   than 1%), `text-overlap` (two static text layers share more than 10% of
   the smaller box; it carries both boxes as `boxes: [{x, y, w, h}]` in

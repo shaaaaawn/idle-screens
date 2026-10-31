@@ -186,6 +186,33 @@ export function adviseSpec(
       });
     }
 
+    // F24: a glyph larger than the frame. A px-scale `size` in a viewport-unit
+    // spec ([20, 40] × min(w,h) ≈ 21,600 px at 1080p) paints blurred blobs that
+    // blanket the frame — coverage reads near-perfect and nothing else fires.
+    // Scoped to emoji/text: their size is a font size, and no glyph is meant to
+    // be taller than the screen, while shaped sprites (soft glows, full-bleed
+    // rects, polygon spans) legitimately exceed it. A text `font` with an
+    // explicit px size renders at that size, rescaled (the `textBoxAt` rule).
+    if (layer.sprite.kind === 'emoji' || layer.sprite.kind === 'text') {
+      const vpMin = Math.min(w, h);
+      const fontPx = layer.sprite.kind === 'text' && layer.sprite.font
+        ? /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/.exec(layer.sprite.font)
+        : null;
+      const maxGlyph = fontPx
+        ? Number(fontPx[1]) * (spec.units === 'px' ? 1 : vpMin / (spec.referenceViewport ?? LIMITS.referenceViewport))
+        : entities.reduce((m, e) => Math.max(m, e.size), 0);
+      if (maxGlyph > vpMin) {
+        const unitHint = spec.units === 'px'
+          ? 'sizes are px under units: "px"'
+          : `sizes are fractions of min(width, height) — ${fontPx ? 'the font\'s px size is rescaled from the reference viewport' : 'write e.g. [0.03, 0.06], not px'}`;
+        warnings.push({
+          path: `layers[${li}]`,
+          code: 'giant-entity',
+          message: `layer ${layer.key ? `'${layer.key}'` : li} renders ${layer.sprite.kind} glyphs up to ${Math.round(maxGlyph)}px — taller than the ${vpMin}px viewport (its min dimension), so they blanket the frame as blurred blobs; ${unitHint}`,
+        });
+      }
+    }
+
     if (layer.sprite.kind === 'circle') {
       const maxR = entities.reduce((m, e) => Math.max(m, e.size / 2), 0);
       const maxAlpha = entities.reduce((m, e) => Math.max(m, e.alpha), 0);
