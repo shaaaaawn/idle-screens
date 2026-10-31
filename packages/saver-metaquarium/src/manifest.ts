@@ -261,6 +261,10 @@ export const METAQUARIUM_PARAMS = {
    *  banding, and restrained bloom on high-end devices. 0 draws straight to
    *  the screen as before; the low tier never runs it. */
   finish: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Tilt-shift: in focus through a band across the middle of the frame,
+   *  softer above and below — a wide shot of a village reads as a model.
+   *  Mid and high tiers. 0 is none. */
+  tiltShift: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Bright light rolls off instead of clipping: shafts, glare and glow that
    *  stack past white ease into it with their hue kept, so a fish in a beam
    *  stays a fish. The brightest seventh of the range is compressed a little.

@@ -56,3 +56,38 @@ describe('finish render path (a stand-in renderer)', () => {
     expect(calls).not.toContain('copy');
   });
 });
+
+describe('tilt-shift (in the finish)', () => {
+  const fake = () => {
+    const calls: string[] = [];
+    let target: unknown = null;
+    const r = {
+      autoClear: true,
+      getDrawingBufferSize: (v: { set: (x: number, y: number) => void }) => { v.set(640, 360); return v; },
+      getRenderTarget: () => target,
+      setRenderTarget: (t: unknown) => { target = t; calls.push(t ? 'target' : 'canvas'); },
+      copyFramebufferToTexture: () => { calls.push('copy'); },
+      clear: () => { calls.push('clear'); },
+    };
+    return { r, calls };
+  };
+
+  it('is off by default and documented', () => {
+    expect(METAQUARIUM_PARAMS.tiltShift).toMatchObject({ type: 'number', default: 0, min: 0, max: 1 });
+    expect(PARAM_DOCS.tiltShift).toMatch(/miniature/);
+  });
+
+  it('adds its own three-step blur only when on, and composites over the canvas', () => {
+    const { r } = fake();
+    const draws: string[] = [];
+    const raw = (s: { children: unknown[] }) => { draws.push(s.children.length ? 'quad' : 'scene'); };
+    const p = new FinishPass({ bloom: false });
+    p.render(r as never, raw as never, { children: [] } as never, {} as never, 0.5);
+    const without = draws.filter((d) => d === 'quad').length;
+    draws.length = 0;
+    p.tilt = 0.8;
+    p.render(r as never, raw as never, { children: [] } as never, {} as never, 0.5);
+    expect(draws.filter((d) => d === 'quad').length).toBe(without + 3);
+    p.dispose();
+  });
+});

@@ -123,7 +123,7 @@ const METAQUARIUM: PanelKnowledge = {
   owns: (saver) => saver.manifest.id === 'metaquarium' || saver.manifest.id.startsWith('metaquarium-'),
   sections: [
     ['camera', ['shot', 'shotBlend', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle', 'followAvoid', 'nearFade']],
-    ['light', ['caustics', 'causticScale', 'surfaceMirror', 'highlights']],
+    ['light', ['caustics', 'causticScale', 'surfaceMirror', 'highlights', 'tiltShift']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     ['dance', ['starfishDance', 'danceTempo']],
     ['snails', ['snailShell']],

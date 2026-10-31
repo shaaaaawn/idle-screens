@@ -56,8 +56,8 @@ const BOX = /* glsl */ `
 `;
 
 const COMPOSITE = /* glsl */ `
-  uniform sampler2D tScene; uniform sampler2D tBloom;
-  uniform float uAmount; uniform float uBloom; uniform vec2 uRes; uniform float uHighlights;
+  uniform sampler2D tScene; uniform sampler2D tBloom; uniform sampler2D tTiltQ; uniform sampler2D tTiltE;
+  uniform float uAmount; uniform float uBloom; uniform vec2 uRes; uniform float uHighlights; uniform float uTilt;
   varying vec2 vUv;
   ${SHOULDER_GLSL}
   float mqLuma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -65,7 +65,16 @@ const COMPOSITE = /* glsl */ `
   void main() {
     // The finished frame, in display space: the grade is where "a touch of
     // contrast" means what it says, and the bloom adds like light on glass.
-    vec3 g = texture2D(tScene, vUv).rgb + texture2D(tBloom, vUv).rgb * uBloom;
+    vec3 g = texture2D(tScene, vUv).rgb;
+    // Tilt-shift: in focus through a band across the middle, softer above and
+    // below it — a quarter-size blur, then an eighth — the way a lens tilted
+    // against a model village sees it. Before the bloom and the grade.
+    if (uTilt > 0.0) {
+      float b = smoothstep(0.08, 0.44, abs(vUv.y - 0.5)) * uTilt;
+      vec3 soft = mix(texture2D(tTiltQ, vUv).rgb, texture2D(tTiltE, vUv).rgb, smoothstep(0.45, 1.0, b));
+      g = mix(g, soft, smoothstep(0.0, 0.55, b));
+    }
+    g += texture2D(tBloom, vUv).rgb * uBloom;
     // With highlights, the source is the half-float frame: what is past white
     // sits out the grade (its S-curve is for 0–1) and comes back for the shoulder.
     vec3 over = vec3(0.0);
@@ -88,6 +97,12 @@ const COMPOSITE = /* glsl */ `
 export class FinishPass {
   private frame = new FramebufferTexture(1, 1);
   private readonly half: WebGLRenderTarget;
+  /** Tilt-shift's own blur chain (no bright pass): half, quarter, eighth. */
+  private readonly tiltH: WebGLRenderTarget;
+  private readonly tiltQ: WebGLRenderTarget;
+  private readonly tiltE: WebGLRenderTarget;
+  /** `tiltShift`, 0..1: set by the tank each frame. 0 skips the chain. */
+  tilt = 0;
   private readonly quarter: WebGLRenderTarget;
   private readonly eighth: WebGLRenderTarget;
   private readonly quad: Mesh;
@@ -100,6 +115,7 @@ export class FinishPass {
   constructor(private readonly o: FinishOptions) {
     const small = (): WebGLRenderTarget => new WebGLRenderTarget(1, 1, { type: UnsignedByteType, minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: false });
     this.half = small(); this.quarter = small(); this.eighth = small();
+    this.tiltH = small(); this.tiltQ = small(); this.tiltE = small();
     this.box = new ShaderMaterial({
       uniforms: { tSrc: { value: null }, uTexel: { value: new Vector2() }, uThreshold: { value: 0 } },
       vertexShader: VERT, fragmentShader: BOX, depthTest: false, depthWrite: false, blending: NoBlending,
@@ -108,6 +124,7 @@ export class FinishPass {
       uniforms: {
         tScene: { value: this.frame }, tBloom: { value: this.half.texture },
         uAmount: { value: 0 }, uBloom: { value: 0 }, uRes: { value: new Vector2(1, 1) }, uHighlights: { value: 0 },
+        tTiltQ: { value: this.tiltQ.texture }, tTiltE: { value: this.tiltE.texture }, uTilt: { value: 0 },
       },
       vertexShader: VERT, fragmentShader: COMPOSITE, depthTest: false, depthWrite: false, toneMapped: false,
     });
@@ -144,6 +161,9 @@ export class FinishPass {
       this.half.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
       this.quarter.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
       this.eighth.setSize(Math.max(1, w >> 3), Math.max(1, h >> 3));
+      this.tiltH.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
+      this.tiltQ.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+      this.tiltE.setSize(Math.max(1, w >> 3), Math.max(1, h >> 3));
     }
     if (!hdr) renderer.copyFramebufferToTexture(this.frame);
     const src = hdr ?? this.frame;
@@ -160,7 +180,14 @@ export class FinishPass {
       this.pass(renderer, raw, this.eighth, this.quarter, 0, true);
       this.pass(renderer, raw, this.quarter, this.half, 0, true);
     }
+    const tilt = Math.max(0, Math.min(1, this.tilt));
+    if (tilt > 0) {
+      this.pass(renderer, raw, src, this.tiltH, 0, false);
+      this.pass(renderer, raw, this.tiltH, this.tiltQ, 0, false);
+      this.pass(renderer, raw, this.tiltQ, this.tiltE, 0, false);
+    }
     const u = this.composite.uniforms;
+    u.uTilt!.value = tilt;
     u.uAmount!.value = amount;
     u.uBloom!.value = bloom;
     u.uHighlights!.value = highlights;
@@ -186,7 +213,7 @@ export class FinishPass {
   }
 
   dispose(): void {
-    for (const t of [this.half, this.quarter, this.eighth]) t.dispose();
+    for (const t of [this.half, this.quarter, this.eighth, this.tiltH, this.tiltQ, this.tiltE]) t.dispose();
     this.frame.dispose();
     this.box.dispose();
     this.composite.dispose();
