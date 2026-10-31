@@ -27,6 +27,7 @@
 
 import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Matrix4, Quaternion, Vector3 } from 'three';
 import type { CrystalRng } from './crystals';
+import { weathered, type StoneStyle } from './stone';
 
 /** How far below the floor a boulder's base is clamped: the buried rim. A
  *  fissure may dip to it, never below the stone — rocks.test.ts pins this. */
@@ -44,6 +45,8 @@ export interface RockSpec {
   /** A host rock: a `propMix` cluster already stands at its centre, so the
    *  breach is dug under THAT and the rock grows no colony of its own. */
   host?: boolean;
+  /** `stoneStyle` (stone.ts). */
+  stone?: StoneStyle;
 }
 
 /** Where a rock's own colony roots, in world space: sunk below the pit floor,
@@ -276,20 +279,23 @@ export function fissures(
 }
 
 /** Stone colouring: slate, darker toward the buried base, a little different
- *  facet to facet, shaded from the same key as the terrain and crystals. */
-export function paintStone(tris: readonly Tri[], place: Matrix4, rng: CrystalRng, base = '#33435a'): BufferGeometry {
+ *  facet to facet, shaded from the same key as the terrain and crystals;
+ *  `weathered` lifts it to river grey with silt on the tops (stone.ts). */
+export function paintStone(tris: readonly Tri[], place: Matrix4, rng: CrystalRng, base = '#33435a', style: StoneStyle = 'classic'): BufferGeometry {
   const pos = new Float32Array(tris.length * 9), col = new Float32Array(tris.length * 9);
   const a = new Vector3(), b = new Vector3(), c = new Vector3(), n = new Vector3(), u = new Vector3(), v = new Vector3();
-  const stone = new Color(base);
+  const stone = new Color(base), tint = new Color();
   tris.forEach((t, i) => {
     a.copy(t[0]).applyMatrix4(place); b.copy(t[1]).applyMatrix4(place); c.copy(t[2]).applyMatrix4(place);
     n.crossVectors(u.subVectors(b, a), v.subVectors(c, a)).normalize();
     const key = 0.36 + 0.64 * Math.max(0, n.x * -0.45 + n.y * 0.78 + n.z * -0.43);
     const depth = 0.72 + 0.28 * Math.min(1, Math.max(0, (t[0].y + t[1].y + t[2].y) / 3 + 0.5));
     const k = key * depth * rng.range(0.9, 1.1);
+    tint.setRGB(stone.r * k, stone.g * k, stone.b * k);
+    if (style === 'weathered') weathered(tint, n.y, a);
     [a, b, c].forEach((p, j) => {
       pos.set([p.x, p.y, p.z], i * 9 + j * 3);
-      col.set([stone.r * k, stone.g * k, stone.b * k], i * 9 + j * 3);
+      col.set([tint.r, tint.g, tint.b], i * 9 + j * 3);
     });
   });
   const g = new BufferGeometry();
@@ -325,7 +331,7 @@ export function buildRock(spec: RockSpec, rng: CrystalRng): RockParts {
     new Vector3(spec.rx, spec.ry, spec.rz),
   );
   if (spec.veins <= 0) {
-    return { stone: paintStone(raw, place, rng.fork(3)), glow: null, triangles: raw.length, seep: null, crystal: null };
+    return { stone: paintStone(raw, place, rng.fork(3), undefined, spec.stone), glow: null, triangles: raw.length, seep: null, crystal: null };
   }
   const br = breach(raw, rng.fork(4), spec.veins, { centre: spec.host });
   // Fractures run from the pit floor (the site itself is the old crown, now air).
@@ -343,7 +349,7 @@ export function buildRock(spec: RockSpec, rng: CrystalRng): RockParts {
     crystal = { x: root.x, y: root.y, z: root.z, normal, size: spec.ry * (1.15 + 0.7 * spec.veins) };
   }
   return {
-    stone: paintStone(stoneTris, place, rng.fork(3)),
+    stone: paintStone(stoneTris, place, rng.fork(3), undefined, spec.stone),
     glow: glowGeometry(cut.positions, cut.colors, place, cut.flow),
     triangles: stoneTris.length + cut.positions.length / 9,
     seep,

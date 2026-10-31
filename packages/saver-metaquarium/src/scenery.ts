@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, type FloraStem, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
+import type { StoneStyle } from './stone';
 import { buildGeodeField, GEODE_FRAGMENT_PARS, GEODE_PARS, GEODE_SHADE, GEODE_VERTEX, type GeodeKind, type MineralName } from './geodes';
 import { buildGeodeInterior, roomScale } from './interior';
 import { buildGlowCards, type GlowCards } from './crystal-mesh';
@@ -44,6 +45,8 @@ export interface SceneryOptions {
   /** Shard-geometry variants the crystal field carries. */
   variants?: number;
   homes: number;
+  /** `stoneStyle` (stone.ts): how the rocks, arches, homes and castle keep read. */
+  stoneStyle?: StoneStyle;
   flora: number;
   /** `floraMix`, parsed: relative weights by species. Empty = the room's garden. */
   floraMix?: Partial<Record<FloraSpecies, number>>;
@@ -218,7 +221,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   };
   const rock = (x: number, y: number, z: number, rx: number, ry: number, rz: number, color: string, host = false, walkable = true): void => {
     const key = 100 + rockIndex++;
-    const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins, host }, rockRng.fork(key));
+    const built = buildRock({ x, y, z, rx, ry, rz, tint: color, veins: opts.veins, host, ...(opts.stoneStyle ? { stone: opts.stoneStyle } : {}) }, rockRng.fork(key));
     stones.push(built.stone);
     if (walkable) boulders.push(built.stone);
     if (built.glow) veins.push(built.glow);
@@ -259,12 +262,12 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       // The crown of the arch broke too: a shallow breach (the span is thin)
       // and a colony standing on the keystone.
       const br = breach(archTris, archRng.fork(4), opts.veins, { pit: 0.1 });
-      stones.push(paintStone([...br.tris, ...br.chips], archPlace, archRng.fork(1), '#384960'));
+      stones.push(paintStone([...br.tris, ...br.chips], archPlace, archRng.fork(1), '#384960', opts.stoneStyle));
       // No fractures down the span: on a thin arch one reads as a stalk.
       const root = br.site.clone().setY(br.floor - 0.03).applyMatrix4(archPlace);
       colony({ x: root.x, y: root.y, z: root.z, normal: up.clone(), size: 11 * s * (0.9 + 0.5 * opts.veins) }, archTint, 950, false);
     } else {
-      stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960'));
+      stones.push(paintStone(archTris, archPlace, archRng.fork(1), '#384960', opts.stoneStyle));
     }
     counts.arches = 1;
     for (const dx of [-24, 24]) rock(x + dx * s, y, z, 10 * s, 8 * s, 12 * s, archTint, false, false);
@@ -308,7 +311,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       x, y: terrain(x, z), z, habit, scale: s,
       // Turned in toward the middle of the crescent, never square-on.
       facing: (flank ? Math.atan2(-x, 46 * s) : -t * 0.75) + homeRng.range(-0.12, 0.12),
-      tint: anchors[i % anchors.length]!.color,
+      tint: anchors[i % anchors.length]!.color, ...(opts.stoneStyle ? { stone: opts.stoneStyle } : {}),
     }, homeRng.fork(20 + i));
     stones.push(...home.stone);
     details.push(...home.voxels);
@@ -341,7 +344,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       mesh.name = name;
       group.add(mesh);
     }
-    const keep = buildGeode({ ...castle.keep, habit: 'tower', facing: 0, tint: anchors[0]!.color }, rng.fork(12));
+    const keep = buildGeode({ ...castle.keep, habit: 'tower', facing: 0, tint: anchors[0]!.color, ...(opts.stoneStyle ? { stone: opts.stoneStyle } : {}) }, rng.fork(12));
     stones.push(...keep.stone); details.push(...keep.voxels); interiors.push(...keep.glow);
     vents.push(keep.vent);
     homeLights.push(keep.emitter, ...castle.emitters);
