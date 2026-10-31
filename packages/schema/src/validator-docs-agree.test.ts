@@ -493,3 +493,19 @@ describe('X707: glyphFade and line reveals follow the documented progress mappin
     }
   });
 });
+
+describe('F24: FORMAT.md\'s emoji example puts size on the layer', () => {
+  const format = readFileSync(['packages/schema/FORMAT.md', 'FORMAT.md'].map((f) => resolve(process.cwd(), f)).find((f) => existsSync(f))!, 'utf8');
+  const section = format.slice(format.indexOf('### `sprite` (one of)'));
+  const block = /- `\{ "kind": "emoji"[\s\S]*?```jsonc\n([\s\S]*?)```/.exec(section)?.[1];
+
+  it('is a complete layer the JSON Schema and the validator both accept without warnings', () => {
+    expect(block).toBeDefined();
+    const layer = JSON.parse(block!) as Record<string, unknown>;
+    expect(layer.size).toBeDefined();
+    expect((layer.sprite as Record<string, unknown>).size).toBeUndefined();
+    const spec = scene([layer]);
+    expect(checkJson(spec)).toBe(true);
+    expect(validateSpec(structuredClone(spec))).toEqual({ valid: true, errors: [], warnings: [] });
+  });
+});
