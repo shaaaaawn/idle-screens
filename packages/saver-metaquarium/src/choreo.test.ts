@@ -40,6 +40,9 @@ describe('choreography: the sheet', () => {
     const short = parseChoreography('0.5:march >right', MOVES);
     expect(long.lines.get('*')).toEqual(short.lines.get('*'));
     expect(long.problems).toEqual(short.problems);
+    // A long run of underscores is one long (unknown) move name, named as a problem, not a hang.
+    const under = parseChoreography(`0.5:march${'_'.repeat(20000)}`, MOVES);
+    expect(under.problems.some((p) => /no move "march_+"/.test(p))).toBe(true);
   });
   it('a bad token is a problem and is dropped, never fatal', () => {
     const { lines, problems } = parseChoreography('a: 4:moonwalk, x:march, 0:jacks, 4:kick >nowhere ?, 4:reach', MOVES);
