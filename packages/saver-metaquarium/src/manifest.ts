@@ -17,10 +17,14 @@ export const METAQUARIUM_PARAMS = {
   /** Camera distance from tank center, world units. */
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
   /** A named framing: `orbit` (the classic camera), hero, front, low, top,
-   *  surface (looking up at the water's underside) or macro (close on the
-   *  landmark nearest the front). Azimuth and autoRotate still turn it;
+   *  surface (looking up at the water's underside), macro (close on the
+   *  landmark nearest the front) or cast (the leads — the mix's first three — wherever they swim,
+   *  as close as their spread allows). Azimuth and autoRotate still turn it;
    *  distance scales it. A change is a cut. */
-  shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro'], ease: 'step' },
+  shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro', 'cast'], ease: 'step' },
+  /** Seconds a change of `shot` takes: 0 (default) cuts; above it the camera
+   *  moves from the old framing to the new one, eased. */
+  shotBlend: { type: 'number', default: 0, min: 0, max: 12, ease: 'step' },
   /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
    *  camera. The orbit params are ignored while following. */
   cameraFollow: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
@@ -121,6 +125,15 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** Light shafts as light in the water rather than sheets of it: their sides
+   *  melt, faint filaments run down them, their feet fade into the floor.
+   *  0 is the classic flat cone. */
+  raySoftness: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The seabed's detail: sand the current has combed into ripples, broad
+   *  patches of silt and grit, a fine grain — and the floor's far edge faded
+   *  into the fog, so no rim shows against the background. 0 is the plain
+   *  floor. */
+  floorDetail: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Caustics: the net of light a rippled surface throws on the floor, rocks,
    *  plants and fish — sharp near the surface, broad and dim deep down,
    *  brightest on faces that look up. 0 compiles the stock programs. */
@@ -227,10 +240,48 @@ export const METAQUARIUM_PARAMS = {
    *  their backs, the water around on their flanks, the floor under their
    *  bellies — and mirrored in silvered plates. 0 is the studio alone. */
   fishAmbient: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A thin edge of the water's light round each fish's silhouette (lit
+   *  mode), brighter on top: what separates a dark fish from dark water.
+   *  0 is none. */
+  fishRim: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A soft shadow on the ground under every swimmer: small and dark near
+   *  the sand, wide and faint high up — what puts a fish at a height instead
+   *  of floating in front of the floor. 0 is none (floor walkers always
+   *  have theirs). */
+  fishShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Seconds a fish takes to dissolve into the water when it first arrives
+   *  (its model loads a few seconds into a scene), instead of popping in.
+   *  0 (default) pops. */
+  fishFadeIn: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
+  /** A soft shadow pooled under everything that stands on the floor — rocks,
+   *  homes, the castle, pyramids, wild geodes, lamps — so it stands on the
+   *  sand instead of floating over it. 0 is none. */
+  sceneryShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A creature that comes too close to the camera dissolves (an ordered
+   *  dither by depth) instead of being cut by the lens: at 1 it is whole
+   *  beyond about a fish and a half and gone inside about half that. 0 is off. */
+  nearFade: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** The finish: one full-screen pass — a gentle grade, dither against
    *  banding, and restrained bloom on high-end devices. 0 draws straight to
    *  the screen as before; the low tier never runs it. */
   finish: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Tilt-shift: in focus through a band across the middle of the frame,
+   *  softer above and below — a wide shot of a village reads as a model.
+   *  Mid and high tiers. 0 is none. */
+  tiltShift: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Depth of field: sharp at what the shot is about (the followed fish, or
+   *  where the shot aims — `cast`: the leads), softer with distance from it.
+   *  High tier only. 0 is none. */
+  depthOfField: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Ambient occlusion: the water's light reaches less into crevices —
+   *  between voxels, under ledges, where a fish meets the sand — from the
+   *  frame's own depth. High tier only. 0 is none. */
+  ambientOcclusion: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Bright light rolls off instead of clipping: shafts, glare and glow that
+   *  stack past white ease into it with their hue kept, so a fish in a beam
+   *  stays a fish. The brightest seventh of the range is compressed a little.
+   *  0 draws as before; mid and high tiers on WebGL2. */
+  highlights: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is non-metallic instead —
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`
@@ -278,6 +329,11 @@ export const METAQUARIUM_PARAMS = {
   /** How fractured the rocks are: fissure width, forks, and crystals pushing
    *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
   rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
+  /** The world's stone — rocks, arches, homes, the castle keep: `classic`,
+   *  the dark slate it always was, or `weathered` — river-grey, each facet its
+   *  own shade, silt settled on the tops — so stone in a lit room reads as
+   *  stone and not as a hole. */
+  stoneStyle: { type: 'enum', default: 'classic', options: ['classic', 'weathered'], ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   /** A follow-spot: a beam from the rig and a pool of moving caustics on the
    *  floor that track ONE fish across the scene like a performer on a stage,

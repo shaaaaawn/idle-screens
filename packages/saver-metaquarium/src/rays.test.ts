@@ -2,6 +2,8 @@ import { createRng } from '@idle-screens/core';
 import type { BufferAttribute, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { buildRays } from './tank';
+import { METAQUARIUM_PARAMS } from './manifest';
+import { PARAM_DOCS } from './guide';
 
 describe('light shafts (X122)', () => {
   it('each shaft breathes and sways on its own phase, where the room has always put it', () => {
@@ -21,5 +23,19 @@ describe('light shafts (X122)', () => {
       expect(m.rotation.y).toBeCloseTo(rng.next() * Math.PI, 9);
       expect(m.rotation.x).toBeCloseTo((rng.next() - 0.5) * 0.18, 9);
     }
+  });
+});
+
+describe('raySoftness', () => {
+  it('is off by default, steerable and documented', () => {
+    expect(METAQUARIUM_PARAMS.raySoftness).toMatchObject({ type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' });
+    expect(PARAM_DOCS.raySoftness).toMatch(/sheets/);
+  });
+
+  it('is a uniform on the shaft material, 0 until steered (no rebuild)', () => {
+    const { material } = buildRays(5, '#bfefff', 600, 0.6, createRng(1));
+    expect(material.uniforms.uSoft!.value).toBe(0);
+    expect(material.fragmentShader).toMatch(/if \(uSoft > 0\.0\)/);
+    expect(material.vertexShader).toMatch(/vN = mat3\(modelMatrix\) \* normal/);
   });
 });

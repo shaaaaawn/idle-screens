@@ -212,22 +212,35 @@ struct ChannelCategory: Decodable, Identifiable, Equatable {
     let title: String?
     let subtitle: String?
     let sort: Int?
-    /// Ids of the channels the catalog places on this shelf. The web home
-    /// page groups on this rather than on each channel's `categoryId`, so
-    /// the two surfaces agree even when one field lags the other.
+    /// Ids of the channels the catalog places on this shelf, in the order the
+    /// editor set (`categorySort`; the server sorts them). The web home page
+    /// groups on this rather than on each channel's `categoryId`, so the two
+    /// surfaces agree even when one field lags the other.
     let channelIds: [String]
+    /// The channel the editor put at the front of this shelf, if any.
+    let heroChannelId: String?
 
     var displayTitle: String { title ?? id }
 
-    private enum CodingKeys: String, CodingKey { case id, title, subtitle, sort, channels }
+    /// The shelf's running order: the hero first, then the editor's order.
+    /// A hero that is not on the shelf (unlisted since, or a typo in the
+    /// admin console) is ignored rather than shown from nowhere.
+    var curatedOrder: [String] {
+        guard let hero = heroChannelId, channelIds.contains(hero) else { return channelIds }
+        return [hero] + channelIds.filter { $0 != hero }
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, subtitle, sort, channels, heroChannelId }
     private struct Member: Decodable { let id: String? }
 
-    init(id: String, title: String?, subtitle: String?, sort: Int?, channelIds: [String] = []) {
+    init(id: String, title: String?, subtitle: String?, sort: Int?, channelIds: [String] = [],
+         heroChannelId: String? = nil) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.sort = sort
         self.channelIds = channelIds
+        self.heroChannelId = heroChannelId
     }
 
     init(from decoder: Decoder) throws {
@@ -238,6 +251,7 @@ struct ChannelCategory: Decodable, Identifiable, Equatable {
         sort = try? c.decodeIfPresent(Int.self, forKey: .sort)
         channelIds = ((try? c.decodeIfPresent([Member].self, forKey: .channels)) ?? [])?
             .compactMap(\.id) ?? []
+        heroChannelId = try? c.decodeIfPresent(String.self, forKey: .heroChannelId)
     }
 }
 

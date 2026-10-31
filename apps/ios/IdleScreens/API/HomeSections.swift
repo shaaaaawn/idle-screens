@@ -79,8 +79,18 @@ enum HomeSections {
 
         func take(_ id: String, _ title: String, _ subtitle: String?,
                   owns: Set<String> = [],
+                  order: [String]? = nil,
                   pick: (PublicChannel) -> Bool) {
-            let picked = sorted.filter { !taken.contains($0.id) && pick($0) }
+            var picked = sorted.filter { !taken.contains($0.id) && pick($0) }
+            if let order {
+                // A curated shelf reads in the editor's order, not by recency:
+                // otherwise whichever member an agent steered last leads it.
+                let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+                picked = picked.enumerated().sorted { a, b in
+                    let ra = rank[a.element.id] ?? Int.max, rb = rank[b.element.id] ?? Int.max
+                    return ra != rb ? ra < rb : a.offset < b.offset
+                }.map(\.element)
+            }
             guard !picked.isEmpty else { return }
             picked.forEach { taken.insert($0.id) }
             out.append(HomeSection(id: id, title: title,
@@ -96,9 +106,11 @@ enum HomeSections {
 
         // Curated shelves slot in after, so a category built in the admin
         // console appears here without a code change. Thin ones never render.
+        // Each leads with its hero, then follows the editor's order.
         for category in categories where category.channelIds.count >= minimumPerShelf {
             let ids = Set(category.channelIds)
-            take(category.id, category.displayTitle, category.subtitle) {
+            take(category.id, category.displayTitle, category.subtitle,
+                 order: category.curatedOrder) {
                 ids.contains($0.id)
             }
         }

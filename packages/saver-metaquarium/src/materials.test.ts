@@ -521,6 +521,39 @@ describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
   });
 });
 
+describe('SKIN- (a character\'s own coat: the dolphin)', () => {
+  const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
+  it('SKIN-#hex is that colour on every fish, lit like a coat: no glow of its own (PAINT- glows)', () => {
+    const dress = (seed: number, lit: boolean, neon = false, reflective = true): MeshLambertMaterial[] => {
+      const root = new Group(); const parts = ['SKIN-#1f6fd1', 'PAINT-#1f6fd1'].map(part); root.add(...parts);
+      applyNpcMaterials(root, createRng(seed), reflective, lit, neon);
+      return parts.map((p) => p.material as MeshLambertMaterial);
+    };
+    const [skin, paint] = dress(3, true), [skin2] = dress(7, true);
+    // Wet: satin, a little metal, the studio in it, where the tank is lit and polished; a coat's Lambert with metal off.
+    expect(skin!.type).toBe('MeshStandardMaterial');
+    expect((skin as unknown as MeshStandardMaterial).roughness).toBeGreaterThan(0.3);
+    expect((skin as unknown as MeshStandardMaterial).metalness).toBeLessThan(0.3);
+    expect(dress(3, true, false, false)[0]!.type).toBe('MeshLambertMaterial');
+    expect(skin!.color.getHex()).toBe(new Color('#1f6fd1').getHex());
+    expect(skin2!.color.getHex()).toBe(skin!.color.getHex());
+    expect(skin!.emissive.getHex()).toBe(0);
+    expect(paint!.emissive.getHex()).not.toBe(0);
+    expect(dress(3, false)[0]!.type).toBe('MeshBasicMaterial');
+    // Without baked occlusion it reads no vertex colours; with it (COLOR_0 → 'color'), it multiplies them in.
+    expect(skin!.vertexColors).toBe(false);
+    const shaded = part('SKIN-#1f6fd1');
+    shaded.geometry.setAttribute('color', new Float32BufferAttribute(new Array(shaded.geometry.getAttribute('position').count * 3).fill(0.8), 3));
+    const r2 = new Group(); r2.add(shaded);
+    applyNpcMaterials(r2, createRng(3), true, true);
+    expect((shaded.material as MeshLambertMaterial).vertexColors).toBe(true);
+    // Neon: near black with a breath of its own hue.
+    const [neon] = dress(3, true, true);
+    const hsl = { h: 0, s: 0, l: 0 }; neon!.color.getHSL(hsl);
+    expect(hsl.l).toBeLessThan(0.15);
+  });
+});
+
 describe('EYES-Sparkle (a babyfish\'s catchlights)', () => {
   it('a sparkle pupil is still a pupil, with one soft catchlight on the face that looks out of the head; a plain pupil is untouched', () => {
     // Two pupils either side of the head, as the babyfish's: x ±3..±5, y 3..5, z 11..13.

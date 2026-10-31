@@ -90,5 +90,47 @@ extension ChannelTokenFormatTests {
         let url = URL(string: "idlescreens://channel/lobby?token=isp_screenpair")!
         XCTAssertNil(ChannelTokenFormat.handoff(from: url),
                      "a screen pairing token grants nothing on a channel")
+        let inFragment = URL(string: "idlescreens://channel/lobby#token=isp_screenpair")!
+        XCTAssertNil(ChannelTokenFormat.handoff(from: inFragment),
+                     "nor does it in the fragment")
+    }
+
+    /// The fragment form — what the app writes now, and what idlescreens.com
+    /// requires for an editor or owner key — in both URL shapes.
+    func testHandoffReadsTheTokenFromTheFragment() {
+        let custom = ChannelTokenFormat.handoff(from: URL(string: "idlescreens://channel/lobby#token=isk_abc123")!)
+        XCTAssertEqual(custom?.channelId, "lobby")
+        XCTAssertEqual(custom?.token, "isk_abc123")
+
+        let web = ChannelTokenFormat.handoff(
+            from: URL(string: "https://idlescreens.com/channel/living-room/remote#token=isk_edit_9c1b")!)
+        XCTAssertEqual(web?.channelId, "living-room")
+        XCTAssertEqual(web?.token, "isk_edit_9c1b")
+
+        // Other fragment keys around it are ignored.
+        let mixed = ChannelTokenFormat.handoff(from: URL(string: "idlescreens://channel/lobby#add-to-ai&token=isk_abc123")!)
+        XCTAssertEqual(mixed?.token, "isk_abc123")
+    }
+
+    func testFragmentWinsOverQueryWhenBothArePresent() {
+        let url = URL(string: "idlescreens://channel/lobby?token=isk_old#token=isk_new")!
+        XCTAssertEqual(ChannelTokenFormat.handoff(from: url)?.token, "isk_new")
+    }
+
+    func testAFragmentWithoutATokenIsNotAGrant() {
+        XCTAssertNil(ChannelTokenFormat.handoff(from: URL(string: "https://idlescreens.com/channel/lobby#add-to-ai")!))
+        XCTAssertNil(ChannelTokenFormat.handoff(from: URL(string: "idlescreens://channel/lobby#token=")!))
+    }
+
+    /// The link the app hands out round-trips through its own parser, with the
+    /// token in the fragment and nothing in the query.
+    func testHandoffLinkRoundTrips() throws {
+        let link = ChannelTokenFormat.handoffLink(channelId: "living-room", token: "isk_edit_9c1b")
+        XCTAssertEqual(link, "idlescreens://channel/living-room#token=isk_edit_9c1b")
+        let url = try XCTUnwrap(URL(string: link))
+        XCTAssertNil(url.query)
+        let grant = try XCTUnwrap(ChannelTokenFormat.handoff(from: url))
+        XCTAssertEqual(grant.channelId, "living-room")
+        XCTAssertEqual(grant.token, "isk_edit_9c1b")
     }
 }

@@ -16,19 +16,17 @@ enum NativeSupport {
     enum Gap: String, Equatable, CaseIterable {
         /// An `idle-sequence` envelope: native draws only the first segment.
         case sequence
-        /// Keyframes on the scene's clock: native shows the base spec.
+        /// Keyframes on the scene's clock: a recorded scene is compiled once,
+        /// so native shows the base spec.
         case timeline
-        /// Multi-layer subjects moved/faded as one: native paints identity.
-        case groups
         /// A sequence's under-layer: native ignores it.
         case bed
-        /// A layer's paint-level transform: native draws it untransformed.
-        case layerTransform
-        /// A layer joined to a group.
-        case layerGroup
-        /// A layer at opacity other than 1 (0 hides it on the site, not here).
-        case layerOpacity
     }
+
+    // Paint groups, a layer's paint-level `transform`, `group` membership and
+    // `opacity` used to be gaps here too. The shared renderer has drawn them
+    // since the tvOS spec-parity work (#319, 2026-10-17; FORMAT.md marks them
+    // "Native: rendered"), so a scene that uses them stays native.
 
     /// Every gap in `spec`, in a stable order. Empty = native is faithful.
     static func gaps(in spec: JSONValue?) -> [Gap] {
@@ -38,14 +36,7 @@ enum NativeSupport {
             found.insert(.sequence)
         }
         if root["timeline"] != nil { found.insert(.timeline) }
-        if root["groups"] != nil { found.insert(.groups) }
         if root["bed"] != nil { found.insert(.bed) }
-        for layer in root["layers"].flatMap(\.array) ?? [] {
-            guard case .object(let l) = layer else { continue }
-            if l["transform"] != nil { found.insert(.layerTransform) }
-            if l["group"] != nil { found.insert(.layerGroup) }
-            if let opacity = l["opacity"].flatMap(\.number), opacity != 1 { found.insert(.layerOpacity) }
-        }
         return Gap.allCases.filter(found.contains)
     }
 

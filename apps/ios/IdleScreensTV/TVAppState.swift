@@ -329,9 +329,7 @@ final class TVAppState {
 
     /// File a viewer's report on a channel (see `ContentReport`).
     func reportChannel(_ channelId: String, reason: ContentReport.Reason) async throws {
-        try await mcp.reportChannel(channelId: channelId,
-                                    label: channels.first { $0.id == channelId }?.label,
-                                    reason: reason)
+        try await mcp.reportChannel(channelId: channelId, reason: reason)
     }
 
     func surf(_ step: Int) {

@@ -307,8 +307,7 @@ private struct OnNowRail: View {
                            channelLabel: target?.displayLabel ?? "",
                            report: { reason in
                                guard let target else { return }
-                               try await app.mcp.reportChannel(channelId: target.id,
-                                                               label: target.label, reason: reason)
+                               try await app.mcp.reportChannel(channelId: target.id, reason: reason)
                            },
                            hide: { if let target { app.hideChannel(target.id) } })
     }
@@ -585,8 +584,7 @@ private struct ChannelCard: View {
         }
         .reportChannelFlow(isPresented: $showReport, channelLabel: channel.displayLabel,
                            report: { reason in
-                               try await app.mcp.reportChannel(channelId: channel.id,
-                                                               label: channel.label, reason: reason)
+                               try await app.mcp.reportChannel(channelId: channel.id, reason: reason)
                            },
                            hide: { app.hideChannel(channel.id) })
     }

@@ -14,18 +14,17 @@ import { tide } from '@idle-screens/saver-tide';
 import { limelight } from '@idle-screens/saver-limelight';
 import { slipstream } from '@idle-screens/saver-slipstream';
 import { catwalk } from '@idle-screens/saver-catwalk';
+import { mountOverrideBadge, mqOverrides } from './url-overrides';
 import { createMetaquarium as createMetaquariumBase, FISH_CATALOG, NPC_CATALOG, RECIPES, VIGNETTE_CUES } from '@idle-screens/saver-metaquarium';
 
 /**
  * `?mq.<param>=<value>` layers onto EVERY metaquarium scene in the playground
  * (`?saver=metaquarium-world-geode-harbor&mq.water=1`): the way to see one
  * param across the shelves, and to shoot before/after pairs from a script.
- * Numbers parse as numbers; anything else stays a string.
+ * Numbers parse as numbers; anything else stays a string. While any are set
+ * the top bar says so and offers to clear them (url-overrides.ts).
  */
-const MQ_URL_PARAMS: Record<string, string | number> = Object.fromEntries(
-  [...new URLSearchParams(location.search)].filter(([k]) => k.startsWith('mq.'))
-    .map(([k, v]) => [k.slice(3), v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v]),
-);
+const MQ_URL_PARAMS: Record<string, string | number> = mqOverrides(location.search);
 const createMetaquarium: typeof createMetaquariumBase = (opts = {}) =>
   createMetaquariumBase(Object.keys(MQ_URL_PARAMS).length
     ? { ...opts, params: { ...(opts.params ?? {}), ...MQ_URL_PARAMS } as NonNullable<typeof opts.params> }
@@ -1072,6 +1071,7 @@ interface LiveConfig {
 
 function liveMode(): void {
   defineIdleScreen();
+  mountOverrideBadge(document.getElementById('tb-overrides'), location);
 
   const wanted = params.get('saver');
   const cfg: LiveConfig = {

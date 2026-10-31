@@ -77,6 +77,39 @@ final class HomeSectionsTests: XCTestCase {
         XCTAssertEqual(sections[0].subtitle, "Slow ones")
     }
 
+    func testCuratedShelfLeadsWithItsHeroThenTheEditorsOrder() {
+        // Recency would put "busy" first because an agent touched it last;
+        // the editor put the flagship at the front and the rest in an order.
+        let channels = [
+            channel("busy", steered: 9_000),
+            channel("b", steered: 1),
+            channel("flagship", steered: 2),
+            channel("c", steered: 5),
+        ]
+        let shelf = ChannelCategory(id: "screen-test", title: "Screen Test", subtitle: nil, sort: 0,
+                                    channelIds: ["b", "busy", "c", "flagship"], heroChannelId: "flagship")
+        let sections = HomeSections.build(channels: channels, categories: [shelf], now: now)
+        XCTAssertEqual(sections.first?.channels.map(\.id), ["flagship", "b", "busy", "c"])
+    }
+
+    func testAHeroOffTheShelfIsIgnored() {
+        let channels = (1...3).map { channel("c\($0)", steered: $0) }
+        let shelf = ChannelCategory(id: "moods", title: "Moods", subtitle: nil, sort: 0,
+                                    channelIds: ["c1", "c2", "c3"], heroChannelId: "elsewhere")
+        XCTAssertEqual(shelf.curatedOrder, ["c1", "c2", "c3"])
+        let sections = HomeSections.build(channels: channels, categories: [shelf], now: now)
+        XCTAssertEqual(sections.first?.channels.map(\.id), ["c1", "c2", "c3"])
+    }
+
+    func testCategoryDecodesItsHero() throws {
+        let json = #"{"id":"screen-test","title":"Screen Test","subtitle":null,"sort":2,"heroChannelId":"screen-test","channels":[{"id":"a"},{"id":"screen-test"},{"id":"b"}]}"#
+        let shelf = try JSONDecoder().decode(ChannelCategory.self, from: Data(json.utf8))
+        XCTAssertEqual(shelf.heroChannelId, "screen-test")
+        XCTAssertEqual(shelf.curatedOrder, ["screen-test", "a", "b"])
+        let bare = try JSONDecoder().decode(ChannelCategory.self, from: Data(#"{"id":"x"}"#.utf8))
+        XCTAssertNil(bare.heroChannelId)
+    }
+
     func testLatestWindowExcludesSeededAndStaleChannels() {
         let channels = [
             channel("seeded", created: 0, steered: 1),                 // demo channels

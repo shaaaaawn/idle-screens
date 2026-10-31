@@ -28,6 +28,7 @@ import {
 } from 'three';
 import type { CrystalRng, Emitter } from './crystals';
 import { painted } from './scenery-paint';
+import { weathered, type StoneStyle } from './stone';
 
 export type GeodeHabit = 'cottage' | 'hall' | 'tower';
 export const GEODE_HABITS: readonly GeodeHabit[] = ['cottage', 'hall', 'tower'];
@@ -47,7 +48,10 @@ export interface GeodeSpec {
   /** The home's crystal colour (hex) — its rind and its teeth. */
   tint: string;
   scale: number;
+  /** `stoneStyle` (stone.ts): `classic` (default) or `weathered`. */
+  stone?: StoneStyle;
 }
+
 
 export interface GeodeParts {
   /** Shaded stone and planks. */
@@ -191,10 +195,18 @@ export function buildGeode(spec: GeodeSpec, rng: CrystalRng): GeodeParts {
   // Re-shade the stone facets from their real normals (soup() only colours).
   {
     const g = stone[0]!;
-    const n = g.getAttribute('normal'), c = g.getAttribute('color');
+    const n = g.getAttribute('normal'), c = g.getAttribute('color'), pos = g.getAttribute('position');
+    const col = new Color(), facet = new Vector3();
     for (let i = 0; i < n.count; i += 1) {
       const k = 0.4 + 0.6 * Math.max(0, n.getX(i) * -0.45 + n.getY(i) * 0.78 + n.getZ(i) * 0.43);
       c.setXYZ(i, c.getX(i) * k * 1.5, c.getY(i) * k * 1.5, c.getZ(i) * k * 1.5);
+      if (spec.stone === 'weathered') {
+        // The facet's first corner names it: all three corners take the same jitter.
+        const f = i - (i % 3);
+        facet.set(pos.getX(f), pos.getY(f), pos.getZ(f));
+        weathered(col.setRGB(c.getX(i), c.getY(i), c.getZ(i)), n.getY(i), facet);
+        c.setXYZ(i, col.r, col.g, col.b);
+      }
     }
   }
   const glow = [soup(glowP, glowC, place)];

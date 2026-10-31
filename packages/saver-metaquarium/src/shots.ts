@@ -12,14 +12,17 @@
  *   top      high and steep, the floor laid out like a map
  *   surface  on the floor looking up at the underside of the water
  *   macro    close on one landmark (the crystal or rock nearest the front)
+ *   cast     the leads (the mix's first three: a vignette's a, b, c), wherever
+ *            they swim: aimed at their middle, as far back as their spread
+ *            needs (castPose, placed once the fish have moved)
  *
  * Pure: `shotPose` depends only on its inputs, so it is testable and a cut
  * lands identically on every screen. Kept inside the water — never above the
  * ceiling, never under the floor — the way the follow camera is.
  */
 
-export type ShotName = 'orbit' | 'hero' | 'front' | 'low' | 'top' | 'surface' | 'macro';
-export const SHOT_NAMES: readonly ShotName[] = ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro'];
+export type ShotName = 'orbit' | 'hero' | 'front' | 'low' | 'top' | 'surface' | 'macro' | 'cast';
+export const SHOT_NAMES: readonly ShotName[] = ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro', 'cast'];
 
 /** The default camera's lens and aim — what `orbit` has always been. */
 export const ORBIT_FOV = 55;
@@ -50,6 +53,8 @@ function framing(name: ShotName, i: ShotInput): Framing {
   const k = i.distance / 110; // the author's distance scales every framing
   const surfaceY = i.ceiling ?? 150;
   switch (name) {
+    // `cast` stands where `hero` does until the fish have moved this frame (castPose).
+    case 'cast':
     case 'hero': return { target: [0, 32, 0], elevation: 17, distance: 128 * k, azimuth: shotAzimuthOffset('hero'), fov: 45 };
     case 'front': return { target: [0, 36, 0], elevation: 3, distance: 150 * k, azimuth: 0, fov: 38 };
     case 'low': return { target: [0, 46, 0], elevation: -12, distance: 88 * k, azimuth: shotAzimuthOffset('low'), fov: 58 };
@@ -126,4 +131,109 @@ export function pickLandmark(
     if (d < bd) { bd = d; best = c; }
   }
   return best;
+}
+
+/** What `cast` needs besides the fish: the shot's angles, its scale, and the water's bounds. */
+export interface CastInput {
+  /** Degrees, `cameraAzimuth` plus any `autoRotate` so far. */
+  azimuth: number;
+  /** Degrees above the cast's middle (`cameraElevation`, at least 6). */
+  elevation: number;
+  /** `cameraDistance` / 110: the author's dial still scales the framing. */
+  scale: number;
+  ceiling: number | null;
+  floor: (x: number, z: number) => number;
+  /** How far from the tank's centre the camera may stand (horizontally). */
+  reach: number;
+}
+
+/** How many of the mix's first slots `cast` frames: a vignette's actors. */
+export const CAST_LEADS = 3;
+
+/** The cast shot's lens (degrees) and how much room it leaves round the cast. */
+export const CAST_FOV = 45;
+const CAST_ROOM = 1.15;
+
+/**
+ * Frame the leads: aim at their middle and stand back as far as their spread
+ * needs — the RMS distance from the middle, ×1.5, plus a body length, filling
+ * the lens with a little room. Mean and RMS move continuously as the fish
+ * swim, so the camera glides with them (no frame history: a frame is still a
+ * function of t); one fish wandering off widens the shot instead of
+ * snapping it. Kept inside the water like the other shots; null with no fish.
+ */
+export function castPose(points: readonly { x: number; y: number; z: number }[], body: number, i: CastInput, out: ShotPose): ShotPose | null {
+  const n = points.length;
+  if (!n) return null;
+  let cx = 0, cy = 0, cz = 0;
+  for (const p of points) { cx += p.x; cy += p.y; cz += p.z; }
+  cx /= n; cy /= n; cz /= n;
+  let ss = 0;
+  for (const p of points) ss += (p.x - cx) ** 2 + (p.y - cy) ** 2 + (p.z - cz) ** 2;
+  const radius = 1.5 * Math.sqrt(ss / n) + body;
+  const d = Math.max(45, Math.min(220, (radius / Math.tan(rad(CAST_FOV / 2))) * CAST_ROOM)) * i.scale;
+  // The aim stays in the water's middle band: never into the sand, never at the surface.
+  let ty = Math.max(cy, i.floor(cx, cz) + 8);
+  if (i.ceiling !== null) ty = Math.min(ty, i.ceiling - 10);
+  const az = rad(i.azimuth), el = rad(Math.max(6, i.elevation));
+  out.x = cx + Math.cos(el) * Math.sin(az) * d;
+  out.y = ty + Math.sin(el) * d;
+  out.z = cz + Math.cos(el) * Math.cos(az) * d;
+  // Never out past the tank: the horizon and the room's walls stand there.
+  const h = Math.hypot(out.x, out.z);
+  if (h > i.reach) { out.x *= i.reach / h; out.z *= i.reach / h; }
+  out.y = Math.max(out.y, i.floor(out.x, out.z) + 6);
+  if (i.ceiling !== null) out.y = Math.min(out.y, i.ceiling - 6);
+  out.tx = cx; out.ty = ty; out.tz = cz;
+  out.fov = CAST_FOV;
+  return out;
+}
+
+/** A step param's last change on a control track: what it was, what it is, and when (ms on the track's clock). */
+export interface StepChange { from: string; to: string; at: number }
+
+/**
+ * When `path` (a step param such as `shot`) last changed at `t` (ms), from
+ * what to what — the cut a `shotBlend` eases. Reads the deltas the way the
+ * track does: a step value holds from its own `t`. On a looping track the
+ * seam is a change too (from the cycle's last value to its first), from the
+ * second cycle on; the very first value, at mount, is not. Null when nothing
+ * changed (or changed to what it already was).
+ */
+export function lastStepChange(
+  track: { deltas: ReadonlyArray<{ t: number; path: string; value: unknown }>; loop?: boolean; duration?: number },
+  path: string, t: number,
+): StepChange | null {
+  const ds = track.deltas.filter((d) => d.path === path).slice().sort((a, b) => a.t - b.t);
+  if (!ds.length) return null;
+  const loop = !!track.loop && !!track.duration && track.duration > 0;
+  const w = loop ? t % track.duration! : t;
+  let i = -1;
+  for (let k = 0; k < ds.length; k++) if (ds[k]!.t <= w) i = k;
+  const cycle = t - w; // when this cycle began (0 off a loop)
+  let from: unknown, at: number;
+  if (i < 0) {
+    // Before this cycle's first key: the last change was the previous cycle's last key.
+    if (!loop || t < track.duration! || ds.length < 2) return null;
+    i = ds.length - 1;
+    from = ds[i - 1]!.value;
+    at = cycle - track.duration! + ds[i]!.t;
+  } else if (i > 0) {
+    from = ds[i - 1]!.value;
+    at = cycle + ds[i]!.t;
+  } else if (loop && t >= track.duration!) {
+    // The seam: this cycle's first key, from the last cycle's last.
+    from = ds[ds.length - 1]!.value;
+    at = cycle + ds[i]!.t;
+  } else return null;
+  const to = ds[i]!.value;
+  if (String(from) === String(to)) return null;
+  return { from: String(from), to: String(to), at };
+}
+
+/** How far into a `shotBlend` of `blend` seconds a camera is, `since` seconds after the cut: 0..1, eased (smootherstep). 1 when there is no blend. */
+export function shotBlendAt(since: number, blend: number): number {
+  if (!(blend > 0) || since >= blend) return 1;
+  const u = Math.max(0, since / blend);
+  return u * u * u * (u * (u * 6 - 15) + 10);
 }

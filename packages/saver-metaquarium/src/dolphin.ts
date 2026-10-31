@@ -31,7 +31,7 @@
  */
 import { AnimationMixer, Matrix4, Quaternion, Vector3, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { fishHash } from './swim';
-import type { Gesture } from './vignette';
+import type { Gesture, Vignette } from './vignette';
 
 export const DOLPHIN_MOMENTS = ['chatter', 'nod', 'shake', 'spin', 'flip', 'wave', 'bubble'] as const;
 export type DolphinMoment = (typeof DOLPHIN_MOMENTS)[number];
@@ -65,10 +65,26 @@ export interface DolphinRig {
   blowhole: Object3D | null;
   /** The body bone: the centre a flip or a roll turns the whole dolphin about (dolphinTurn). */
   pivot: Object3D | null;
+  /** The spine, nose to flukes (head, body, tail1, tail2, flukes): a banked turn's curl bends these. */
+  spine: Object3D[];
+  /** The spine as the mixer last set it: put back before each update, since the mixer only writes a bone
+   *  whose value CHANGED (PropertyMixer.apply) — a curl laid on after it would otherwise stay and pile up. */
+  spineBase: Quaternion[];
   mixer: AnimationMixer;
   actions: Record<DolphinClip, AnimationAction>;
   durations: Record<DolphinClip, number>;
 }
+
+/** The spine's bones, nose to flukes (breeds/rig/dolphin.py SPINE). */
+const SPINE_BONES = ['head', 'body', 'tail1', 'tail2', 'flukes'] as const;
+/** Which way about x bends each spine bone's far end toward the BELLY: the head points forward from the
+ *  neck, the rest back toward the flukes, so the same turn bends them opposite ways. (Once a shared sign:
+ *  a turn's curl bent the back, and a standing tail curled up behind it.) */
+const VENTRAL = [1, -1, -1, -1, -1] as const;
+/** How much of a turn's curl each spine bone takes. */
+const CURL_SHARE = [0.6, 0, 0.6, 1, 1] as const;
+/** Standing, how its curl shares out: the tail most, the head not (it nods on its own). */
+const UPRIGHT_SHARE = [0, 0.4, 0.8, 1, 0.8] as const;
 
 /** three drops the '.' from a bone's name ('eye.L' arrives as 'eyeL'). */
 const named = (root: Object3D, name: string): Object3D | undefined =>
@@ -99,7 +115,8 @@ export function rigDolphin(body: Object3D, clips: readonly AnimationClip[]): Dol
     actions[n] = a;
     durations[n] = clip.duration;
   }
-  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, pivot: named(body, 'body') ?? null, mixer, actions, durations };
+  const spine = SPINE_BONES.map((n) => named(body, n)).filter((b): b is Object3D => !!b);
+  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, pivot: named(body, 'body') ?? null, spine, spineBase: spine.map((b) => b.quaternion.clone()), mixer, actions, durations };
 }
 
 /** Swim-clip seconds per unit swum: a stroke (1 s of clip) every 25 units, about a body length. */
@@ -222,6 +239,12 @@ export interface DolphinInput {
   gesture?: { name: Gesture; at: number; weight: number } | null;
   /** A vignette's actor: the script says what it does, so no moments of its own. */
   actor?: boolean;
+  /** Its heading's change across one body length (radians, + to its left): how hard it is turning. */
+  turn?: number;
+  /** The leap under way (dolphinLeap), if any: which part, and how much of the body it has. */
+  leap?: { phase: LeapPhase; w: number } | null;
+  /** 0..1: how far it stands up for a character beat (dolphinUpright). */
+  upright?: number;
 }
 
 export interface DolphinState {
@@ -237,6 +260,10 @@ export interface DolphinState {
   into: number;
   /** The whole-body turn a flip (pitch, + head down) or a roll (+ about its nose) puts on it now, radians. */
   turn: { pitch: number; roll: number };
+  /** Its bank into a turn (the tank rolls it about its length by this, in place of a fish's lean), radians. */
+  bank: number;
+  /** 0..1: standing up (the tank pitches it nose-up by UPRIGHT.pitch and turns its front to whoever it plays to). */
+  upright: number;
 }
 
 /**
@@ -257,6 +284,192 @@ export function dolphinTurn(moment: DolphinMoment | null, clipT: number): { pitc
   return { pitch: 0, roll: 0 };
 }
 
+/**
+ * A dolphin's banked turn. Measured on dolphins (Maresh et al. 2004, Marine Mammal Science 20): the
+ * tightest turns are a ROLL of up to ~90° and then a VENTRAL flexion — it rolls its belly toward the
+ * turn's centre and bends round it, not sideways. A fish leans a little into every curve (heading.ts);
+ * a dolphin cruises nearly level (the tank's routes turn ~0.5 rad a body length half the time) and only
+ * a hard turn takes the roll and the curl, eased in. `turn` is the heading's change across a body
+ * length (+ to its left); `roll` turns it about its length (the tank's rotateZ), `curl` bends the spine.
+ */
+export const BANK = { from: 0.6, to: 0.95, lean: 0.25, deep: 1.05, curl: 0.16 } as const;
+export function dolphinBank(turn: number): { roll: number; curl: number } {
+  const a = Math.abs(turn), deep = smooth((a - BANK.from) / (BANK.to - BANK.from));
+  return { roll: Math.sign(turn) * (BANK.lean * Math.min(a, BANK.to) + BANK.deep * deep), curl: BANK.curl * deep };
+}
+
+/**
+ * A breach. Where the water has an open surface, now and then a dolphin runs up at it, leaves it in a
+ * ballistic arc and dives back (Au & Weihs 1980: the centre of mass flies a parabola, the body along its
+ * path). Closed form in t, from slots like its moments' (never over one). The drawn height is the route's
+ * or the leap's curve, whichever is HIGHER (a soft max): the curve climbs at the exit speed toward the
+ * surface, flies the parabola above it, and dives back at the same speed until it meets the route again.
+ * Along the route it runs ahead (the tank pushes it on, `dolphinLeapAhead`) and gives that back slowly
+ * after — slower than it cruises, so it never swims backwards.
+ */
+export type LeapPhase = 'run' | 'air' | 'dive';
+export const LEAP = {
+  /** Seconds climbing to the surface, in the air, and diving back. */
+  run: 2.2, air: 1.3, dive: 1.8,
+  /** The arc's height above the surface, in body lengths. */
+  height: 0.45,
+  /** Extra cruising per second while it runs and flies (the push along the route), and seconds to give it back.
+   *  The push sets the arc's angle (its rise against its run): with less it left the water near vertical. */
+  boost: 3, giveBack: 30,
+  /** The soft max's width (units): how smoothly it leaves its route for the curve. */
+  soft: 15,
+  /** Seconds between leaps, by temperament (and the first comes early, so a tank shows one). */
+  every: { playful: 40, chatty: 62, curious: 52, showoff: 36 } as Readonly<Record<DolphinTemper, number>>,
+} as const;
+const LEAP_LEN = LEAP.run + LEAP.air + LEAP.dive;
+
+/** Leap k's start (s): every so often, moved on to the first gap among its moments that it fits. */
+export function dolphinLeapStart(index: number, k: number): number {
+  const p = dolphinPersonality(index);
+  // Jittered by a tenth of the spacing either way, added (not scaled by k, which lets late leaps cross).
+  let at = 6 + 4 * fishHash(index, 1631) + LEAP.every[p.temper] * (k + 0.2 * (fishHash(index * 13 + k, 1633) - 0.5));
+  // The moments near it, in order: start after any it would overlap (a second's margin either side).
+  const k0 = Math.floor((at + fishHash(index, 1613) * p.period) / p.period) - 1;
+  for (let kk = k0; kk < k0 + 8; kk++) {
+    const sl = slotOf(index, kk), end = sl.start + MOMENT_LENGTH[sl.moment];
+    if (end + 1 <= at) continue;
+    if (sl.start - 1 >= at + LEAP_LEN) break;
+    at = end + 1;
+  }
+  return at;
+}
+
+/** The starts of the leaps begun in the last `back` seconds before `t` (latest first). */
+function leapsBefore(index: number, t: number, back: number): number[] {
+  const every = LEAP.every[dolphinPersonality(index).temper];
+  const k = Math.max(0, Math.floor((t - 6) / every));
+  const out: number[] = [];
+  for (let kk = k + 1; kk >= Math.max(0, k - 2); kk--) {
+    const start = dolphinLeapStart(index, kk);
+    if (start <= t && start >= t - back) out.push(start);
+  }
+  return out.sort((x, y) => y - x);
+}
+
+/** The leap in flight at `t` (from its run to the end of its dive): its start, seconds into it. */
+export function dolphinLeapAt(index: number, t: number): { start: number; into: number } | null {
+  const start = leapsBefore(index, t, LEAP_LEN + 0.5)[0];
+  return start === undefined ? null : { start, into: t - start };
+}
+
+/** ∫ of smoothstep(x / e) from 0 to x: a ramp's area, then 1 per second. */
+const rampArea = (x: number, e: number): number => {
+  if (x <= 0) return 0;
+  if (x >= e) return e / 2 + (x - e);
+  const c = x / e;
+  return e * (c * c * c - (c * c * c * c) / 2);
+};
+
+/**
+ * Seconds of cruising it is AHEAD of its route at `t` (the tank adds that much travel; 0 between leaps).
+ * Each leap pushes it on by `boost` from the start of its run to its re-entry (eased in and out
+ * over 0.6 s), then gives it all back over `giveBack` — at most ~0.45 of its cruising speed (two overlapping, ~0.9), so it slows
+ * after a breach but never swims backwards. Leaps' pushes add, so one that starts before the last has
+ * been given back never jumps.
+ */
+export function dolphinLeapAhead(index: number, t: number): number {
+  // From the run's start (a push that came late left it climbing near vertical: measured 80°).
+  const a = 0, b = LEAP.run + LEAP.air, e = 0.6;
+  const full = LEAP.boost * (b - a - e);
+  let ahead = 0;
+  for (const start of leapsBefore(index, t, LEAP_LEN + LEAP.giveBack + 1)) {
+    const u = t - start;
+    ahead += LEAP.boost * (rampArea(u - a, e) - rampArea(u - (b - e), e)) - full * smooth((u - b) / LEAP.giveBack);
+  }
+  return Math.max(0, ahead);
+}
+
+/**
+ * The leap's drawn height and pitch at `t`, given the surface, the route's height there, its body
+ * length and its cruising speed (units/s). Null between leaps. `pitch` is + nose up, from the drawn
+ * path: its rise over its run along the route, the push included.
+ */
+export function dolphinLeap(index: number, t: number, surface: number, routeY: number, L: number, pace: number):
+  { y: number; pitch: number; phase: LeapPhase; w: number; start: number; into: number } | null {
+  const l = dolphinLeapAt(index, t);
+  if (!l) return null;
+  const vy = (4 * LEAP.height * L) / LEAP.air, g = (2 * vy) / LEAP.air;
+  // The run ACCELERATES up: its climb builds from 0.4 of the exit speed to all of it at the surface (a
+  // straight line at the exit speed made the whole run a near-vertical rocket).
+  const acc = (0.6 * vy) / LEAP.run;
+  const curve = (u: number): number => {
+    if (u < LEAP.run) { const w = LEAP.run - u; return surface - vy * w + 0.5 * acc * w * w; }
+    if (u <= LEAP.run + LEAP.air) { const a = u - LEAP.run; return surface + vy * a - 0.5 * g * a * a; }
+    return surface - vy * (u - LEAP.run - LEAP.air);
+  };
+  // In and out over half a second at the window's ends, where the curve is far below anyway.
+  const fade = (u: number): number => smooth(u / 0.8) * (1 - smooth((u - LEAP_LEN) / 0.5));
+  const yAt = (u: number): number => {
+    const c = curve(u), d = c - routeY, k = LEAP.soft;
+    // smax(route, curve) = (route + curve + √((curve − route)² + k²)) / 2: the higher, a soft corner between.
+    return routeY + (fade(u) * (d + Math.sqrt(d * d + k * k))) / 2;
+  };
+  const h = 0.02, u = l.into;
+  const rise = (yAt(u + h) - yAt(u - h)) / (2 * h);
+  const ahead = (dolphinLeapAhead(index, t + h) - dolphinLeapAhead(index, t - h)) / (2 * h);
+  const run = Math.max(1e-3, pace * (1 + ahead));
+  const phase: LeapPhase = u < LEAP.run ? 'run' : u <= LEAP.run + LEAP.air ? 'air' : 'dive';
+  return { y: yAt(u), pitch: Math.atan2(rise, run), phase, w: fade(u), start: l.start, into: u };
+}
+
+/**
+ * Standing up. As a CHARACTER — talking, nodding, bowing, waving, blowing a bubble — a dolphin stands on its
+ * tail, as real ones do (a spy-hop, a tail-walk) and cartoon ones talk: nose up, its front to whoever it is
+ * playing to, its flukes sculling below (the hover stroke). As a DOLPHIN — a flip, a spin, a dance, going
+ * somewhere — it swims flat. It stands from the moment a character beat's gesture starts (once it has
+ * arrived), stays up across back-to-back character beats, and lies down before its next move, eased both
+ * ways. Pure in (vignette, actor, t).
+ */
+export const DOLPHIN_CHARACTER: ReadonlySet<Gesture> = new Set<Gesture>(['talk', 'nod', 'bow', 'shake', 'wiggle', 'peek', 'rest']);
+export const UPRIGHT = {
+  /** Nose-up pitch when standing, radians: a little short of vertical, leaning back as it talks. */
+  pitch: Math.PI / 2 - 0.22,
+  /** Seconds to stand up and to lie down. */
+  ease: 0.7,
+  /** Its head tipped toward its chest when it stands (radians): it talks to its audience, not the ceiling. */
+  nod: 0.5,
+  /** Its body curled forward when it stands (radians per spine bone, mostly the tail): it sits on its curled
+   *  tail rather than standing like a post — more as it talks, breathing a little on its own rhythm. */
+  curl: 0.16, curlTalk: 0.1, curlVary: 0.07,
+  /** How far off nose-on it turns its front to the viewer (radians): ~60°, so its near eye and its smile
+   *  read (three-quarters on, its pale chest filled the frame and its eyes, on the sides, were lost). */
+  offAxis: 1.05,
+} as const;
+export function dolphinUpright(v: Vignette, actor: number, tSec: number): number {
+  if (!v.duration || actor >= v.actors) return 0;
+  // Its standing spans in one loop of the script: from a character gesture's start, held while it stays where
+  // it stood (a comic listening to a heckle stays on its tail), until it moves or does a dolphin thing.
+  const spans: Array<[number, number]> = [];
+  let open = false;
+  for (const b of v.beats) {
+    const me = b.actors[actor];
+    if (!me) continue;
+    const character = !!me.gesture && DOLPHIN_CHARACTER.has(me.gesture);
+    if (character) {
+      const from = b.t0 + (me.moved ? 0.64 : 0.06) * b.dur, to = b.t0 + b.dur;
+      const last = spans[spans.length - 1];
+      if (last && (open && !me.moved || from - last[1] < 0.3)) last[1] = to; else spans.push([from, to]);
+      open = true;
+    } else if (open && !me.moved && !me.gesture) {
+      // Still where it stood, doing nothing new: it stays standing, watching (a heckle is not a bob).
+      spans[spans.length - 1]![1] = b.t0 + b.dur;
+    } else open = false;
+  }
+  const t = ((tSec % v.duration) + v.duration) % v.duration;
+  let up = 0;
+  // The loop before and after too, so a span that runs over the end eases across it.
+  for (const shift of [-v.duration, 0, v.duration]) for (const [a, b] of spans) {
+    const lo = a + shift, hi = b + shift;
+    up = Math.max(up, smooth((t - lo) / UPRIGHT.ease) * (1 - smooth((t - (hi - UPRIGHT.ease)) / UPRIGHT.ease)));
+  }
+  return up;
+}
+
 /** Sets the clips for `t`. `beat` is the distance it has swum (the tank's, or an actor's travel). */
 export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: number, inp: DolphinInput): DolphinState {
   const D = rig.durations;
@@ -273,9 +486,11 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   const mt = moment ? (once ? clamp(into, 0, D[moment]) : posMod(into, D[moment])) : 0;
 
   const cruise = smooth((inp.pace - 0.1) / 0.5);
+  // A leap takes the body: a burst up the run, the flukes still in the air, swimming down the dive.
+  const lw = inp.leap ? clamp(inp.leap.w, 0, 1) * (1 - mw) : 0;
   // Eased: the tank's flurry starts and stops with a corner, and a weight that follows it straight jerks.
-  const dart = smooth(inp.flurry * 1.4) * (1 - mw);
-  const stroke = (1 - mw) * (1 - dart);
+  const dart = smooth(inp.flurry * 1.4) * (1 - mw) * (1 - lw);
+  const stroke = (1 - mw) * (1 - dart) * (1 - lw);
   // Coasting: long glides between bouts of strokes, after the catch-up.
   const GP = 9 + 5 * fishHash(index, 1619);
   const glideShare = { playful: 0.3, chatty: 0.35, curious: 0.45, showoff: 0.25 }[p.temper];
@@ -287,6 +502,10 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   weights.glide = stroke * cruise * gl;
   weights.hover = stroke * (1 - cruise);
   weights.burst = dart;
+  if (inp.leap && lw > 0) {
+    const n = inp.leap.phase === 'run' ? 'burst' : inp.leap.phase === 'air' ? 'glide' : 'swim';
+    weights[n] += lw;
+  }
   if (moment) weights[moment] = mw;
   // A blink over the clips that leave the eyes alone (the moments squint and blink on their own).
   const bl = dolphinBlink(index, t);
@@ -306,7 +525,28 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
     a.time = times[n];
     a.setEffectiveWeight(weights[n]);
   }
+  rig.spine.forEach((b, i) => b.quaternion.copy(rig.spineBase[i]!));
   rig.mixer.update(0);
+  rig.spine.forEach((b, i) => rig.spineBase[i]!.copy(b.quaternion));
+
+  // A hard turn: the roll (the tank's) and the curl, round the turn's centre (dolphinBank); not while a
+  // moment, a breach or the friendly face-turn has the body. After the mixer, which rewrites every spine
+  // bone each frame (the stroke clips key them all), so the curl never accumulates.
+  const friendly = moment && FRIENDLY.has(moment) && !g ? mw : 0;
+  const free = (1 - mw) * (1 - lw) * (1 - friendly);
+  const bk = dolphinBank(inp.turn ?? 0);
+  const curl = bk.curl * free * Math.sign(inp.turn ?? 0);
+  if (Math.abs(curl) > 1e-5) rig.spine.forEach((b, i) => b.rotateX(curl * CURL_SHARE[i]! * VENTRAL[i]!));
+  // Standing, its head tips toward its chest (toward the belly, the curl's way for the head), and its body
+  // curls forward from the middle down, as it sits on its tail: deeper while it talks, never quite still.
+  const up = clamp(inp.upright ?? 0, 0, 1);
+  if (up > 1e-4 && rig.spine[0]) {
+    rig.spine[0].rotateX(UPRIGHT.nod * up * VENTRAL[0]);
+    const talking = moment === 'chatter' ? mw : 0;
+    const breathe = 0.5 + 0.5 * Math.sin(t * 0.9 + index * 1.7);
+    const c = up * (UPRIGHT.curl + UPRIGHT.curlTalk * talking + UPRIGHT.curlVary * breathe);
+    UPRIGHT_SHARE.forEach((sh, i) => { if (sh && rig.spine[i]) rig.spine[i]!.rotateX(c * sh * VENTRAL[i]!); });
+  }
 
   // Its own bubble (a vignette's `peek` too): let go at the puff.
   let bubble: DolphinState['bubble'] = null;
@@ -314,11 +554,11 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
     const start = t - mt;
     bubble = { key: `dolphin:${index}:${start.toFixed(2)}`, t: start + BUBBLE_AT };
   }
-  const face = moment && FRIENDLY.has(moment) && !g ? mw : 0;
+  const face = friendly;
   const doing: DolphinDoing = moment && mw > 0.3 ? moment : dart > 0.3 ? 'burst' : cruise > 0.5 ? (gl > 0.5 ? 'glide' : 'swim') : 'hover';
   // The turn plays whenever the moment does, whatever its weight: it is the whole body, not a pose to blend.
   const turn = moment && mw > 0 ? dolphinTurn(moment, mt) : { pitch: 0, roll: 0 };
-  return { doing, temper: p.temper, weights, face, bubble, into: moment ? mt : 0, turn };
+  return { doing, temper: p.temper, weights, face, bubble, into: moment ? mt : 0, turn, bank: bk.roll * free, upright: clamp(inp.upright ?? 0, 0, 1) };
 }
 
 // ---------------------------------------------------------------------------

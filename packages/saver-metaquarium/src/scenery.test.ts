@@ -367,3 +367,25 @@ describe('the town square', () => {
     expect(Math.hypot(bare.marks.fountain!.x, bare.marks.fountain!.z)).toBeLessThan(80);
   });
 });
+
+describe('scenery footprints (sceneryShadows)', () => {
+  it('lists what stands on the floor — rocks and homes — with a foot, a radius and a height', () => {
+    const sc = build({ ...off, rocks: 1, homes: 2 });
+    expect(sc.footprints.length).toBeGreaterThan(2);
+    for (const f of sc.footprints) {
+      expect(f.r).toBeGreaterThan(0);
+      expect(Number.isFinite(f.x + f.y + f.z + f.h)).toBe(true);
+    }
+    // A copy: shadows may read it, nothing outside can move the obstacles the clearance uses.
+    const before = sc.clearance(sc.footprints[0]!.x, sc.footprints[0]!.z);
+    (sc.footprints[0] as { h: number }).h = 999;
+    expect(sc.clearance(sc.footprints[0]!.x, sc.footprints[0]!.z)).toBe(before);
+  });
+
+  it('is off by default and documented', async () => {
+    const { METAQUARIUM_PARAMS } = await import('./manifest');
+    const { PARAM_DOCS } = await import('./guide');
+    expect(METAQUARIUM_PARAMS.sceneryShadows).toMatchObject({ type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' });
+    expect(PARAM_DOCS.sceneryShadows).toMatch(/floats/);
+  });
+});
