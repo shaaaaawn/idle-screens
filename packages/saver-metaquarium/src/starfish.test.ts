@@ -438,6 +438,11 @@ describe('a choreographed starfish (choreo.ts)', () => {
     expect(out.doing).toBe('hold');
     expect(weight(rig, 'standing')).toBe(1);
   });
+  it('a dancer the sheet leaves out keeps the dance mode\'s routine', () => {
+    const rig = rigged();
+    const out = starfishFrame(rig, input(5, 0, { dance: { mode: 'aerobics', beats: 3, x: 0, z: 0, yaw: 0 } }), blank());
+    expect(out.doing).not.toBe('hold');
+  });
   it('a partner move danced solo cycles over its own beats', () => {
     const rig = rigged();
     starfishFrame(rig, input(5, 0, dance('8:dip', 6)), blank());

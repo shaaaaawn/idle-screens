@@ -3639,7 +3639,7 @@ class TankInstance implements SaverInstance {
             scale: starRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
             ...(this.danceSpots.has(f.index) ? { dance: {
-              mode: (this.choreo.sheet?.lines.size ? 'choreo' : this.str('starfishDance')) as StarfishDanceMode, beats: this.danceBeats(tSec),
+              mode: (this.choreo.sheet?.lines.size && this.str('starfishDance') === 'off' ? 'choreo' : this.str('starfishDance')) as StarfishDanceMode, beats: this.danceBeats(tSec),
               x: this.danceSpots.get(f.index)![0], z: this.danceSpots.get(f.index)![1], yaw: this.danceYaw,
               ...this.partnerOf(f.index),
               ...this.choreoOf(f.index),
