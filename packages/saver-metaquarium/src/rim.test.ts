@@ -21,7 +21,9 @@ describe('fishRim', () => {
     expect(patchFishRim(coat)).toBe(false);
     const s = compile(coat, { uniforms: {}, vertexShader: ShaderLib.lambert.vertexShader, fragmentShader: ShaderLib.lambert.fragmentShader });
     expect(s.uniforms.uMqRim).toBe(FISH_RIM);
-    expect(s.vertexShader).toMatch(/vMqRimN = normalMatrix \* \(dot\(aMqRimN, aMqRimN\) > 0\.0 \? aMqRimN : objectNormal\)/);
+    expect(s.vertexShader).toMatch(/dot\(aMqRimN, aMqRimN\) > 0\.0 \? aMqRimN : objectNormal/);
+    expect(s.vertexShader).toMatch(/mqRn = mat3\(instanceMatrix\) \* mqRn/);
+    expect(s.vertexShader).toMatch(/vMqRimN = normalMatrix \* mqRn/);
     expect(s.fragmentShader).toMatch(/outgoingLight \+= uMqRim\.rgb/);
     // A flat (unlit) coat has no light to add to: left as it was.
     const flat = new MeshBasicMaterial();

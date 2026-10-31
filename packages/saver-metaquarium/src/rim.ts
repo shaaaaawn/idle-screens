@@ -38,7 +38,12 @@ const VERT_PARS = /* glsl */ `
 `;
 const VERT = /* glsl */ `#include <beginnormal_vertex>
   // A mesh without the envelope (one added after the patch) falls back to its own normal.
-  vMqRimN = normalMatrix * (dot(aMqRimN, aMqRimN) > 0.0 ? aMqRimN : objectNormal);`;
+  vec3 mqRn = dot(aMqRimN, aMqRimN) > 0.0 ? aMqRimN : objectNormal;
+  #ifdef USE_INSTANCING
+    // An instanced shoal turns each fish by its own matrix, which normalMatrix knows nothing of.
+    mqRn = mat3(instanceMatrix) * mqRn;
+  #endif
+  vMqRimN = normalMatrix * mqRn;`;
 
 const PARS = /* glsl */ `
   uniform vec4 uMqRim;
