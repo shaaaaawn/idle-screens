@@ -241,6 +241,10 @@ export const METAQUARIUM_PARAMS = {
    *  of floating in front of the floor. 0 is none (floor walkers always
    *  have theirs). */
   fishShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A soft shadow pooled under everything that stands on the floor — rocks,
+   *  homes, the castle, pyramids, wild geodes, lamps — so it stands on the
+   *  sand instead of floating over it. 0 is none. */
+  sceneryShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** A creature that comes too close to the camera dissolves (an ordered
    *  dither by depth) instead of being cut by the lens: at 1 it is whole
    *  beyond about a fish and a half and gone inside about half that. 0 is off. */

@@ -940,6 +940,8 @@ class TankInstance implements SaverInstance {
   private rockCrystals: CrystalField | null = null;
   /** Under each crab, a soft shadow on the ground it stands on (made when the first crab lands). */
   private walkShadows: ContactShadows | null = null;
+  /** The scenery's shadows (`sceneryShadows`): built once per scenery, inside its group, so they go with it. */
+  private sceneryShadows: { mesh: ContactShadows; for: Scenery } | null = null;
   /** The swimmers' shadows (`fishShadows`), made the first frame it is on. */
   private swimShadows: SwimShadows | null = null;
   private swimShadowN = 0;
@@ -2764,6 +2766,7 @@ class TankInstance implements SaverInstance {
     this.reconcile();
     this.updateCaustics(tSec);
     this.updateFishLight();
+    this.updateSceneryShadows();
     this.updateFishRim();
     this.updateNearFade();
 
@@ -4198,6 +4201,40 @@ class TankInstance implements SaverInstance {
     });
     for (const f of this.fish) if (f) patch(f.group);
     if (this.shoal) patch(this.shoal.mesh);
+  }
+
+  /**
+   * `sceneryShadows`: a soft contact shadow under everything that stands on
+   * the floor (scenery.footprints), laid on the slope it stands on. Built the
+   * first frame the param is on for this scenery, as one instanced draw inside
+   * the scenery's group (a rebuilt world disposes it); after that only its
+   * darkness moves.
+   */
+  private updateSceneryShadows(): void {
+    const amount = this.num('sceneryShadows');
+    const sc = this.scenery;
+    if (!sc || (amount <= 0 && this.sceneryShadows?.for !== sc)) return;
+    if (this.sceneryShadows?.for !== sc) {
+      const feet = sc.footprints.filter((f) => f.h >= 2 && f.r >= 1);
+      if (!feet.length) return;
+      const shadows = new ContactShadows(feet.length, 1);
+      shadows.mesh.name = 'scenery-shadows';
+      const ground = this.terrainAt, n = new Vector3(), tilt = new Quaternion();
+      feet.forEach((f, i) => {
+        const gy = ground ? ground(f.x, f.z) : f.y, e = Math.max(2, f.r * 0.5);
+        if (ground) n.set(ground(f.x - e, f.z) - ground(f.x + e, f.z), 2 * e, ground(f.x, f.z - e) - ground(f.x, f.z + e)).normalize();
+        else n.copy(Y_AXIS);
+        tilt.setFromUnitVectors(Y_AXIS, n);
+        // Wider than the foot: a soft pool the object stands in, the way light from above leaves one.
+        shadows.set(i, f.x, gy + 0.3, f.z, tilt, f.r * 2.1, f.r * 2.1);
+      });
+      shadows.commit(feet.length);
+      sc.group.add(shadows.mesh);
+      this.sceneryShadows = { mesh: shadows, for: sc };
+    }
+    const mat = this.sceneryShadows.mesh.mesh.material as MeshBasicMaterial;
+    mat.opacity = 0.4 * Math.max(0, Math.min(1, amount));
+    this.sceneryShadows.mesh.mesh.visible = amount > 0;
   }
 
   // ---- render ----
