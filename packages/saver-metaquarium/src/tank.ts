@@ -93,6 +93,7 @@ import { angelFrame, rigAngel, type AngelRig } from './angel';
 import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
+import { dressDolphin, parseDolphinCast, PERSONAS, type DolphinPersonaId } from './dolphin-comics';
 import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLeap, dolphinUpright, LEAP, UPRIGHT, dolphinLeapAhead, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
@@ -760,6 +761,8 @@ interface Fish {
   index: number;
   /** Template URL this fish spawned from — reconcile's diff key. */
   url: string;
+  /** A dolphin's persona (dolphin-comics.ts), part of the diff key: a recast dolphin is re-dressed. */
+  cast?: DolphinPersonaId;
   group: Group;
   plan: SwimPlan;
   body: Object3D | null;
@@ -1102,6 +1105,8 @@ class TankInstance implements SaverInstance {
   };
   /** Per-slot `*size` from the mix (1 when the token has none). */
   private wantSizes: number[] = [];
+  /** Each slot's dolphin persona (`dolphinCast`, by the dolphins' order in the mix); undefined for any other fish. */
+  private wantCasts: Array<DolphinPersonaId | undefined> = [];
   /** The body length (units) of the fish each spot follows, for its shadow. */
   private readonly spotLen = [FISH_LENGTH, FISH_LENGTH, FISH_LENGTH];
   /** Ground-plane centres of the room's light shafts — what `lightSeek`
@@ -2125,7 +2130,7 @@ class TankInstance implements SaverInstance {
    *  size × its token's `*size` × its own seeded spread (`sizeVariance`) ×
    *  `fishSize`. Everything that spaces fish in body lengths reads this. */
   private fishSizeAt(i: number): number {
-    return breedSize(this.wantBreeds[i]) * (this.wantSizes[i] ?? 1)
+    return breedSize(this.wantBreeds[i]) * (this.wantSizes[i] ?? 1) * PERSONAS[this.wantCasts[i] ?? 'classic'].size
       * fishSizeMul(i, this.num('sizeVariance')) * this.num('fishSize');
   }
 
@@ -2438,7 +2443,8 @@ class TankInstance implements SaverInstance {
     const mixStr = this.str('fishMix').trim();
     const url = this.fishUrlParam();
     const n = Math.min(Math.max(1, Math.round(this.num('fishCount'))), cap);
-    const inputKey = `${mixStr}\u0000${url}\u0000${n}\u0000${cap}`;
+    const castStr = this.str('dolphinCast').trim();
+    const inputKey = `${mixStr}\u0000${url}\u0000${n}\u0000${cap}\u0000${castStr}`;
     if (inputKey === this.wantInputKey) return;
     this.wantInputKey = inputKey;
 
@@ -2476,6 +2482,10 @@ class TankInstance implements SaverInstance {
     this.wantStyles = this.mixMode ? styles : [];
     this.wantBreeds = this.mixMode ? breeds : [];
     this.wantSizes = this.mixMode ? sizes : [];
+    // The cast, handed to the dolphins in the order they come in the mix.
+    const cast = parseDolphinCast(castStr);
+    let nth = 0;
+    this.wantCasts = this.wantBreeds.map((b) => (b === 'dolphin' ? cast[nth++] ?? 'classic' : undefined));
     this.wantKey = (this.mixMode ? 'mix:' : 'one:') + want.join('|');
     if (this.mixMode) this.ctxSaver.host.dataset.mqMix = mixStr;
     else delete this.ctxSaver.host.dataset.mqMix;
@@ -2484,7 +2494,7 @@ class TankInstance implements SaverInstance {
     for (let i = 0; i < Math.max(this.fish.length, want.length); i++) {
       const f = this.fish[i];
       const wantUrl = want[i];
-      if (f && (wantUrl === undefined || f.url !== wantUrl)) {
+      if (f && (wantUrl === undefined || f.url !== wantUrl || f.cast !== this.wantCasts[i])) {
         f.mixer?.stopAllAction();
         this.scene.remove(f.group);
         disposeOwned(f.group);
@@ -2674,6 +2684,8 @@ class TankInstance implements SaverInstance {
       // `fishLighting` defaults to 'lit'. Derive the same value directly.
       applyNpcMaterials(body, this.ctxSaver.rng.fork(0xc0a7 + index), this.str('fishMetal') !== 'off',
         this.str('fishLighting') !== 'flat' && !this.thumbnail, this.str('fishLook') === 'neon');
+      // A comic dolphin's own look (dolphin-comics.ts): its skin, finish, shirt, props on its bones.
+      if (dolphin && this.wantCasts[index]) dressDolphin(body, PERSONAS[this.wantCasts[index]!], (n) => body.getObjectByName(n) ?? undefined);
       tagFishMaterials(body);
       // A screen face is measured once its display material is on (screen.ts).
       if (hacker || dot) screen = rigScreen(body, fishHash(index, 917));
@@ -2734,6 +2746,7 @@ class TankInstance implements SaverInstance {
     this.fish[index] = {
       index,
       url,
+      ...(this.wantCasts[index] ? { cast: this.wantCasts[index] } : {}),
       baseYaw: tpl && !crab && !starfish && !octopus && !snail && !dot ? tpl.yaw : 0,
       group,
       plan,
@@ -3684,6 +3697,7 @@ class TankInstance implements SaverInstance {
           pace: dPace, flurry: act ? 0 : mnv.flurry + flurryBoost, actor: !!act,
           turn: act ? 0 : pose.turn ?? 0, leap: dLeap ? { phase: dLeap.phase, w: dLeap.w } : null,
           upright: act && this.vignette ? dolphinUpright(this.vignette, f.index, tSec) : 0,
+          act: PERSONAS[f.cast ?? 'classic'].act,
           gesture: act?.gesture && ownMoves?.(act.gesture.name) ? { name: act.gesture.name, at: act.gesture.at, weight: act.gesture.weight } : null,
         });
       }

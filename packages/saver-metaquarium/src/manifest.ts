@@ -426,6 +426,10 @@ export const METAQUARIUM_PARAMS = {
    *  fountain home1…, or centre left right front back), facing the front; an LED board
    *  scrolls a long line. Empty = none. */
   signs: { type: 'string', default: '', ease: 'step' },
+  /** EXPERIMENTAL. The dolphins' cast — comic personas, in the order the dolphins come in fishMix:
+   *  `showman, drifter, bigguy` (dolphin-comics.ts). Each its own look (skin, finish, shirt, prop) and
+   *  act (tempo, size of gesture, slouch, lean, lids). Unknown names, and dolphins past the list: classic. */
+  dolphinCast: { type: 'string', default: '', ease: 'step' },
   /** How unstable the lit signs' power is (neon and LED boards): 0 steady; higher, more
    *  hum, stutters, a dead row or tube, a slipped row, now and then a reboot. Each sign
    *  has its own supply — most steady, some dodgy. Flash-safe at any setting. */
