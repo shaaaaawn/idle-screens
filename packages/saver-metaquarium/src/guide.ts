@@ -272,7 +272,7 @@ export const RECIPES: readonly Recipe[] = [
       cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
-    id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a coral reef: tangs that look back at you, blowfish that puff up and flirt, an octopus that changes colour and inks, a crab on the floor. A slow orbit.',
+    id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a reef: tangs that look back, blowfish that puff and flirt, an octopus that changes colour and inks, a crab. A slow orbit.',
     params: { ...ALIVE, environment: 'reef', fishMix: 'dori:3,blowfish:2,octopus:1,crab:1', floraDensity: 0.6, marineSnow: 0.3, finish: 0.5, swimSpeed: 0.7,
       signs: 'plank@left:"Mind the crabs", ring@right:Lifeguard',
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
@@ -282,7 +282,7 @@ export const RECIPES: readonly Recipe[] = [
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
   },
   {
-    id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they stop to graze, stretch, look at you, or hide in their shells, a few baby fish overhead.',
+    id: 'snail-garden', label: 'Snail garden', what: 'Five snails glide a planted floor, low and close: they graze, stretch, look at you or hide in their shells; baby fish overhead.',
     params: { ...ALIVE, environment: 'lagoon', fishMix: 'snail:5,babyfish:4', floraDensity: 0.7, marineSnow: 0.2, finish: 0.5, swimSpeed: 0.6,
       cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
   },
@@ -300,7 +300,7 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast framed close wherever it swims, in soft shafts, each fish over its shadow. The polished look.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'reef', fishMix: 'seaturtle:1@patrol, blowfish:1, octopus:1@bottom, dori:5@school, crab:1', floraDensity: 0.45, marineSnow: 0.3,
-      swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.5, fishAmbient: 0.5, caustics: 0.6, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
+      swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.5, fishAmbient: 0.5, caustics: 0.6, depthOfField: 0.4, ambientOcclusion: 0.8, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
   },
   {
     id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish under jellyfish lanterns, a shark sliding through, every outline rimmed in light.',
@@ -309,11 +309,11 @@ export const RECIPES: readonly Recipe[] = [
       shot: 'cast', cameraElevation: 8, autoRotate: 0.4 },
   },
   {
-    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes and go home again, seen high through a tilt-shift lens: a model village.',
+    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes, seen high through a tilt-shift lens: a model village.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', floorKind: 'flat', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
       fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 8s: a >centre, b >centre @a | 6s: a @b talk, b @a nod | 8s: c >centre, a @c, b @c | 9s: a b c circle centre | 8s: a >home1in, b >home2in, c >home3in',
-      fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, tiltShift: 0.55, shot: 'orbit', cameraDistance: 125, cameraElevation: 32, autoRotate: 0.5 },
+      fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, ambientOcclusion: 0.8, tiltShift: 0.55, shot: 'orbit', cameraDistance: 125, cameraElevation: 32, autoRotate: 0.5 },
   },
 ];
 
