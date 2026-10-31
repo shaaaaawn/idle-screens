@@ -46,9 +46,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
-  tiltShift: 'Tilt-shift, 0–1: sharp through the middle, soft above and below; a high village wide reads as a model. Mid/high tiers.',
+  tiltShift: 'Tilt-shift, 0–1: sharp through the middle, soft above and below, like a model. Mid/high tiers.',
   depthOfField: 'Depth of field, 0–1: the subject sharp (followed fish, `cast` leads), the rest soft. High tier.',
-  ambientOcclusion: 'Ambient occlusion, 0–1: crevices and contact points darken, so voxels read solid. High tier.',
+  ambientOcclusion: 'Ambient occlusion, 0–1: crevices darken. High tier.',
   highlights: 'Bright light rolls off instead of clipping, 0–1: a fish in a shaft stays a fish. Bright rooms want it. Mid/high tiers.',
   fishUrl: 'The single model used when `fishMix` is empty: ipfs://, https://assets.idlescreens.com/, or a URL on the page\'s own origin. Any other host is refused and the default fish swims.',
   fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace (swimSpeed does not hurry them): crab (climbs rocks, forages, pinches, waves), starfish (walks upright too; dances with `starfishDance`), snail (very slow; hides in its shell). `dot` (experimental): Dot the courier, a box on legs with a screen face; `dolphin` (experimental) chatters, flips, blows bubbles, breaches where there is open surface. Both act out vignette gestures. Overrides fishCount/fishUrl.',
