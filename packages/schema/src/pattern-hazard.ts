@@ -397,13 +397,19 @@ function scanRaster(r: Raster): StripeRun[] {
       }
     }
     const median = (xs: number[]): number => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1]! : 0);
+    // Each patch's medians, sorted once: the patch is complete by now, and
+    // sorting it again for each of its runs made the scan quadratic in patch size.
+    const medians = new Map<number, { period: number; slant: number }>();
     for (const run of flat) {
-      const sp = span.get(find(at.get(run)!))!;
+      const root = find(at.get(run)!);
+      const sp = span.get(root)!;
       if (sp.hi - sp.lo + 1 < PATTERN_MIN_EXTENT * sp.across) continue;
+      let med = medians.get(root);
+      if (!med) medians.set(root, (med = { period: median(sp.periods), slant: median(sp.slants) }));
       // The pitch square to the stripes: the period along the line, foreshortened by their slant.
       const [along, step] = run.axis === 'x' ? [r.cellX, r.cellY] : [r.cellY, r.cellX];
-      const slant = median(sp.slants) * along;
-      run.pitch = median(sp.periods) * along * (step / Math.hypot(slant, step));
+      const slant = med.slant * along;
+      run.pitch = med.period * along * (step / Math.hypot(slant, step));
       if (run.pitch <= PATTERN_MAX_PITCH) kept.push(run);
     }
   }
