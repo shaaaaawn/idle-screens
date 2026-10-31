@@ -389,6 +389,21 @@ describe('dolphin: banked turns and breaches', () => {
 
   it('in a hard turn it rolls its belly to the turn and bends round it: both ends nearer the centre than its middle', async () => {
     const { g, rig } = await loadRig();
+    // First, in its own frame (no roll): the curl is VENTRAL — the flukes bend toward the belly (down).
+    const flukesY = (turn: number): number => {
+      dolphinFrame(rig, 50, 0, 0, { pace: 1, flurry: 0, turn, actor: true });
+      g.scene.updateMatrixWorld(true);
+      let lo = Infinity, y = 0;
+      const p3 = new Vector3();
+      g.scene.traverse((o) => {
+        const m = o as SkinnedMesh;
+        if (!m.isSkinnedMesh) return;
+        const p = m.geometry.getAttribute('position');
+        for (let i = 0; i < p.count; i++) { m.getVertexPosition(i, p3).applyMatrix4(m.matrixWorld); if (p3.z < lo) { lo = p3.z; y = p3.y; } }
+      });
+      return y;
+    };
+    expect(flukesY(0.95)).toBeLessThan(flukesY(0) - 2);
     const holder = new Group(); holder.add(g.scene);
     // Turning to its left (+): the centre is off its left side, +x in its own frame (nose +z).
     const s = dolphinFrame(rig, 50, 0, 0, { pace: 1, flurry: 0, turn: 0.95, actor: true });
@@ -506,7 +521,37 @@ describe('dolphin: standing up as a character', () => {
       return y;
     };
     // In its own frame the belly is down: the nose sits lower standing than not (before the tank pitches it up).
-    // The head's sign is CURL_SHARE's, so this also holds a hard turn's curl to bending the head belly-ward.
+    // The head's belly-ward sign is VENTRAL[0], which a hard turn's curl shares.
     expect(noseY(1)).toBeLessThan(noseY(0) - UPRIGHT.nod * 3);
+  });
+});
+
+describe('dolphin: standing curled, not a post', () => {
+  it('standing, its tail curls toward its belly — more while it talks, and it breathes', async () => {
+    const b = Buffer.from((await BUNDLED_BREEDS.dolphin!()).default, 'base64');
+    const g = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+    const rig = rigDolphin(g.scene, g.animations)!;
+    const tailY = (inp: Parameters<typeof dolphinFrame>[4], t = 30): number => {
+      dolphinFrame(rig, t, 0, 0, inp);
+      g.scene.updateMatrixWorld(true);
+      let best = Infinity, y = 0;
+      const v3 = new Vector3();
+      g.scene.traverse((o) => {
+        const m = o as SkinnedMesh;
+        if (!m.isSkinnedMesh) return;
+        const p = m.geometry.getAttribute('position');
+        for (let i = 0; i < p.count; i++) { m.getVertexPosition(i, v3).applyMatrix4(m.matrixWorld); if (v3.z < best) { best = v3.z; y = v3.y; } }
+      });
+      return y;
+    };
+    const lying = tailY({ pace: 0, flurry: 0, actor: true, upright: 0 });
+    const standing = tailY({ pace: 0, flurry: 0, actor: true, upright: 1 });
+    // The belly is down in its own frame: a tail curled belly-ward sits lower.
+    expect(standing).toBeLessThan(lying - 3);
+    const talking = tailY({ pace: 0, flurry: 0, actor: true, upright: 1, gesture: { name: 'talk', at: 1.2, weight: 1 } });
+    expect(talking).toBeLessThan(standing);
+    // Never a fixed pose: it moves with its breath.
+    const ys = [0, 1, 2, 3].map((k) => tailY({ pace: 0, flurry: 0, actor: true, upright: 1 }, 30 + k * 1.5));
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.5);
   });
 });

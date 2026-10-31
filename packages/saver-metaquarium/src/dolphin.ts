@@ -77,8 +77,14 @@ export interface DolphinRig {
 
 /** The spine's bones, nose to flukes (breeds/rig/dolphin.py SPINE). */
 const SPINE_BONES = ['head', 'body', 'tail1', 'tail2', 'flukes'] as const;
-/** How much of a curl each spine bone takes (sign: + bends that bone's far end toward the belly). */
+/** Which way about x bends each spine bone's far end toward the BELLY: the head points forward from the
+ *  neck, the rest back toward the flukes, so the same turn bends them opposite ways. (Once a shared sign:
+ *  a turn's curl bent the back, and a standing tail curled up behind it.) */
+const VENTRAL = [1, -1, -1, -1, -1] as const;
+/** How much of a turn's curl each spine bone takes. */
 const CURL_SHARE = [0.6, 0, 0.6, 1, 1] as const;
+/** Standing, how its curl shares out: the tail most, the head not (it nods on its own). */
+const UPRIGHT_SHARE = [0, 0.4, 0.8, 1, 0.8] as const;
 
 /** three drops the '.' from a bone's name ('eye.L' arrives as 'eyeL'). */
 const named = (root: Object3D, name: string): Object3D | undefined =>
@@ -427,6 +433,9 @@ export const UPRIGHT = {
   ease: 0.7,
   /** Its head tipped toward its chest when it stands (radians): it talks to its audience, not the ceiling. */
   nod: 0.5,
+  /** Its body curled forward when it stands (radians per spine bone, mostly the tail): it sits on its curled
+   *  tail rather than standing like a post — more as it talks, breathing a little on its own rhythm. */
+  curl: 0.16, curlTalk: 0.1, curlVary: 0.07,
   /** How far off nose-on it turns its front to the viewer (radians): ~60°, so its near eye and its smile
    *  read (three-quarters on, its pale chest filled the frame and its eyes, on the sides, were lost). */
   offAxis: 1.05,
@@ -527,10 +536,17 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   const free = (1 - mw) * (1 - lw) * (1 - friendly);
   const bk = dolphinBank(inp.turn ?? 0);
   const curl = bk.curl * free * Math.sign(inp.turn ?? 0);
-  if (Math.abs(curl) > 1e-5) rig.spine.forEach((b, i) => b.rotateX(curl * CURL_SHARE[i]!));
-  // Standing, its head tips toward its chest (toward the belly, the curl's way for the head).
+  if (Math.abs(curl) > 1e-5) rig.spine.forEach((b, i) => b.rotateX(curl * CURL_SHARE[i]! * VENTRAL[i]!));
+  // Standing, its head tips toward its chest (toward the belly, the curl's way for the head), and its body
+  // curls forward from the middle down, as it sits on its tail: deeper while it talks, never quite still.
   const up = clamp(inp.upright ?? 0, 0, 1);
-  if (up > 1e-4 && rig.spine[0]) rig.spine[0].rotateX(UPRIGHT.nod * up * Math.sign(CURL_SHARE[0]));
+  if (up > 1e-4 && rig.spine[0]) {
+    rig.spine[0].rotateX(UPRIGHT.nod * up * VENTRAL[0]);
+    const talking = moment === 'chatter' ? mw : 0;
+    const breathe = 0.5 + 0.5 * Math.sin(t * 0.9 + index * 1.7);
+    const c = up * (UPRIGHT.curl + UPRIGHT.curlTalk * talking + UPRIGHT.curlVary * breathe);
+    UPRIGHT_SHARE.forEach((sh, i) => { if (sh && rig.spine[i]) rig.spine[i]!.rotateX(c * sh * VENTRAL[i]!); });
+  }
 
   // Its own bubble (a vignette's `peek` too): let go at the puff.
   let bubble: DolphinState['bubble'] = null;
