@@ -128,7 +128,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['dance', ['starfishDance', 'danceTempo']],
     ['snails', ['snailShell']],
     // The renderer's look: on by default, listed so it can be turned off.
-    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient']],
+    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient', 'fishRim']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek', 'fishAvoid']],
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
