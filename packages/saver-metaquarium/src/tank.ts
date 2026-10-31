@@ -4076,6 +4076,9 @@ class TankInstance implements SaverInstance {
 
       const breathe = 1 + Math.sin(tSec * 2.1 + f.index) * 0.008;
       f.group.scale.setScalar(f.baseScale * breathe * size);
+      // a choreographed starfish's crouch: squash its height, keep its volume (starfish.ts choreoFrame)
+      const sq = star?.squash ?? 1;
+      if (sq !== 1) { f.group.scale.y *= sq; f.group.scale.x /= Math.sqrt(sq); f.group.scale.z /= Math.sqrt(sq); }
       if (f.glow && f.body && f.group.visible) glowN = this.glowFish(f, glowN, fishGlow, glowPulse, tSec);
 
       // The swim wave (MQ: Amano study). Rigged on the first frame that asks

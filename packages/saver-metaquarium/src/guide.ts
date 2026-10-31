@@ -78,7 +78,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   snailShell: 'Snail shells: `banded`, `pearl` (iridescent), `gold`, `glow` (a spiral breathing light; best at night); `mix` (default), each its own. Lit fish only. frame.state.fish[i].shell says which.',
   starfishDance: 'Starfish dance: `aerobics` (a class in unison), `freestyle` (a move each per eight counts), `duet` (couples), `off`. Cast a few: `starfish:7`.',
   danceTempo: 'Dance BPM; glides on the beat.',
-  choreography: 'Starfish dance cues on the beat (see grammar); faces `cameraAzimuth`.',
+  choreography: 'Starfish dance cues, on the beat (see grammar).',
   fishLook: '`neon` dresses the bundled creatures for blacklight: near-black coats, eyes (and a crab\'s mouth) glowing a neon of their own. Best in a dark room with `finish`. Default `natural`.',
   fishRim: 'A thin edge of the water\'s light round each fish, 0–1 (lit mode): dark fish on dark water. 0.6–1 in dark rooms.',
   fishShadows: 'Soft shadows under the swimmers, 0–1: dark near the sand, faint high up.',
@@ -187,7 +187,7 @@ geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian 
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
-choreography  [a|*:] <beats>:<move> [>to] [@face] [~turn] [^leap], …|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
+choreography  [a|*:] <beats>:<move> [>to @face ~turn ^leap /lean %crouch *groove],…|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs

@@ -396,12 +396,33 @@ describe('a choreographed starfish (choreo.ts)', () => {
     expect(weight(rig, 'jacks')).toBe(1);
     expect(rig.actions.jacks.time).toBeCloseTo((1.5 / 4) * DUR.jacks!, 9);
   });
-  it('hands one cue over to the next across half a beat, from the last one\'s end pose', () => {
+  it('moves into the next cue over the end of this one, so its pose is whole on its first beat', () => {
     const rig = rigged();
-    starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise', 4.1)), blank());
+    starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise', 3.9)), blank());
     expect(weight(rig, 'rise')).toBeGreaterThan(0);
     expect(weight(rig, 'idle')).toBeGreaterThan(0);
     expect(weight(rig, 'rise') + weight(rig, 'idle')).toBeCloseTo(1, 9);
+    expect(rig.actions.rise.time).toBe(0); // the next cue's opening pose
+    starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise', 4)), blank());
+    expect(weight(rig, 'rise')).toBe(1); // on the beat: all of it
+    expect(weight(rig, 'idle')).toBe(0);
+  });
+  it('leans about its feet and crouches; a leap crouches into its take-off and squashes as it lands', () => {
+    const rig = rigged();
+    const lean = starfishFrame(rig, input(5, 0, dance('4:hold /20', 2)), blank());
+    const tilt = new Vector3(0, 1, 0).applyQuaternion(lean.quaternion);
+    expect(tilt.z).toBeCloseTo(Math.sin((20 * Math.PI) / 180), 6); // toward where it faces (yaw 0: +z)
+    expect(starfishFrame(rig, input(5, 0, dance('4:hold %0.7', 2)), blank()).squash).toBeCloseTo(0.7, 9);
+    const sheet = '4:hold, 2:jacks ^1, 4:hold';
+    expect(starfishFrame(rig, input(5, 0, dance(sheet, 3.95)), blank()).squash).toBeLessThan(0.9); // crouching to go
+    expect(starfishFrame(rig, input(5, 0, dance(sheet, 5)), blank()).squash).toBeGreaterThan(1); // stretched in the air
+    expect(starfishFrame(rig, input(5, 0, dance(sheet, 6)), blank()).squash).toBeCloseTo(0.84, 6); // landed
+    expect(starfishFrame(rig, input(5, 0, dance(sheet, 8)), blank()).squash).toBeCloseTo(1, 9); // back up
+  });
+  it('a starfish living its own life is never squashed', () => {
+    const rig = rigged();
+    const out = blank(); out.squash = 0.5;
+    expect(starfishFrame(rig, input(5, 0), out).squash).toBe(1);
   });
   it('lying sits on its disc; standing, on its feet; rising, between — and the glow follows', () => {
     const rig = rigged();

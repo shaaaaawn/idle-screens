@@ -19,7 +19,16 @@
  *                  `@deg` | `@mark` | `@cam` | `@room` face that way over the
  *                  cue's first beat (degrees clockwise from the room);
  *                  `~deg` turn that far over the cue (360 a spin; it adds up);
- *                  `^h` leap: an arc h body-lengths high, landing as the cue ends.
+ *                  `^h` leap: an arc h body-lengths high, landing as the cue ends;
+ *                  `/deg` lean (+ forward); `%s` crouch (a height scale: `%0.7`
+ *                  bends low, `%1.15` stretches tall); `*a` groove: a dip of a
+ *                  (0.06 is a nod) into every beat, lowest exactly on it — the
+ *                  pulse a move without its own hits (reach, twist, sway) needs.
+ *   ON THE BEAT: what a cue IS — its clip, its posture, facing, lean and
+ *   crouch — has fully arrived at the cue's first beat: the dancer moves into
+ *   it over the end of the cue before (half a beat at most). What a cue DOES
+ *   — travel, turns, a leap's arc — runs through it and lands as it ends. A
+ *   leap crouches into its take-off and squashes as it lands.
  *   Each dancer's line loops over its own length; give the lines the same
  *   number of beats and end where you began, and the class stays together.
  */
@@ -46,6 +55,11 @@ export interface ChoreoCue {
   turn: number;
   /** Leap height, body lengths. */
   lift: number;
+  /** Lean, degrees (+ forward, toward where it faces), and crouch (a height scale, 1 = standing tall), held through the cue. */
+  lean?: number;
+  squash?: number;
+  /** Groove: a dip of this depth (0.02–0.3 of its height) into every beat, lowest exactly on the beat. */
+  groove?: number;
 }
 export interface ChoreoLine { cues: ChoreoCue[]; beats: number }
 export interface ChoreoSheet { lines: Map<number | '*', ChoreoLine>; problems: string[] }
@@ -74,8 +88,8 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
       if (!known.has(m[2]!)) { problems.push(`"${raw}": no move "${m[2]}" (moves: ${moves.join(' ')})`); continue; }
       const cue: ChoreoCue = { b0, beats: Math.min(beats, 512), move: m[2]!, turn: 0, lift: 0 };
       for (const tok of (m[3] ?? '').replace(/^[,\s]+/, '').split(/\s+/).filter(Boolean)) {
-        const mod = /^([>@~^])(.+)$/.exec(tok);
-        if (!mod) { problems.push(`"${raw}": "${tok}" is not >to, @face, ~turn or ^leap`); continue; }
+        const mod = /^([>@~^/%*])(.+)$/.exec(tok);
+        if (!mod) { problems.push(`"${raw}": "${tok}" is not >to, @face, ~turn, ^leap, /lean, %crouch or *groove`); continue; }
         const [, op, arg] = mod as unknown as [string, string, string];
         if (op === '>') {
           const mark = CHOREO_MARKS[arg];
@@ -88,6 +102,15 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
           if (arg in named) cue.face = named[arg]!;
           else if (Number.isFinite(Number(arg))) cue.face = Number(arg);
           else problems.push(`"${raw}": face "${arg}" — degrees, cam, room, left, right or back`);
+        } else if (op === '/') {
+          if (Number.isFinite(Number(arg))) cue.lean = clamp(Number(arg), -60, 60);
+          else problems.push(`"${raw}": lean "${arg}" is not degrees`);
+        } else if (op === '%') {
+          if (Number.isFinite(Number(arg)) && Number(arg) > 0) cue.squash = clamp(Number(arg), 0.4, 1.5);
+          else problems.push(`"${raw}": crouch "${arg}" is not a height scale`);
+        } else if (op === '*') {
+          if (Number.isFinite(Number(arg)) && Number(arg) > 0) cue.groove = clamp(Number(arg), 0.02, 0.3);
+          else problems.push(`"${raw}": groove "${arg}" is not a depth`);
         } else if (op === '~') {
           if (Number.isFinite(Number(arg))) cue.turn = clamp(Number(arg), -1440, 1440);
           else problems.push(`"${raw}": turn "${arg}" is not degrees`);
@@ -109,15 +132,18 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
 export interface ChoreoPose {
   /** The cue it is on, how many beats into it, and how far through (0..1). */
   cue: ChoreoCue; beat: number; u: number;
-  /** The cue before (looping round), for the handover. */
-  prev: ChoreoCue;
+  /** The cue after (looping round) and how far the dancer has moved into it (0..1): it arrives on that cue's beat. */
+  next: ChoreoCue; ahead: number;
   /** Where it is: an offset from its spot in spacings, or a blend toward the class's centre (`centre` 0..1 of the way). */
   side: number; depth: number; centre: number;
   /** Where it faces (degrees from the room) and how far it has turned in all, and whether `cam` is asked of the face. */
   face: number; faceCam: number; turn: number;
-  /** Height above the floor, body lengths. */
-  lift: number;
+  /** Height above the floor, body lengths; lean in degrees (+ forward); crouch as a height scale. */
+  lift: number; lean: number; squash: number;
 }
+
+/** Beats over which a dancer moves into the next cue, ending exactly on its first beat. */
+export const CHOREO_HANDOVER = 0.5;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const smooth = (u: number): number => { const c = clamp(u, 0, 1); return c * c * (3 - 2 * c); };
@@ -140,28 +166,44 @@ export function choreoAt(line: ChoreoLine, beats: number): ChoreoPose {
   const n = line.cues.length;
   let i = 0;
   while (i < n - 1 && b >= line.cues[i]!.b0 + line.cues[i]!.beats) i++;
-  const cue = line.cues[i]!, prev = line.cues[(i + n - 1) % n]!;
+  const cue = line.cues[i]!, next = line.cues[(i + 1) % n]!, prev = line.cues[(i + n - 1) % n]!;
   // every lap starts at the dancer's own spot, facing the room: a sheet that travels and never comes home starts
   // where it should, and one meant to loop shows its seam (end where you began) instead of hiding an offset
   let side = 0, depth = 0, centre = 0, face = 0, faceCam = 0, turn = 0;
   const end = (c: ChoreoCue): void => {
     if (c.to === 'centre') centre = 1;
     else if (c.to) { side = c.to[0]; depth = c.to[1]; centre = 0; }
-    if (c.face === 'cam') faceCam = 1; else if (c.face !== undefined) { face = c.face; faceCam = 0; }
     turn += c.turn;
   };
-  for (let k = 0; k < i; k++) end(line.cues[k]!);
+  const facing = (c: ChoreoCue): void => { if (c.face === 'cam') faceCam = 1; else if (c.face !== undefined) { face = c.face; faceCam = 0; } };
+  for (let k = 0; k < i; k++) { end(line.cues[k]!); facing(line.cues[k]!); }
+  facing(cue); // a cue's facing has arrived by its first beat
   const beat = b - cue.b0, u = clamp(beat / cue.beats, 0, 1);
-  // this cue's own glides
+  // what this cue does runs through it and lands at its end: travel, turns, the leap's arc
   const s = smooth(u);
   if (cue.to === 'centre') centre += (1 - centre) * s;
   else if (cue.to) { side += (cue.to[0] - side) * s; depth += (cue.to[1] - depth) * s; centre *= 1 - s; }
-  const fu = smooth(Math.min(1, beat / Math.min(1, cue.beats)));
-  if (cue.face === 'cam') faceCam += (1 - faceCam) * fu;
-  else if (cue.face !== undefined) { face += angleTo(face, cue.face) * fu; faceCam *= 1 - fu; }
   turn += cue.turn * s;
   const lift = cue.lift > 0 ? cue.lift * Math.sin(Math.PI * u) : 0;
-  return { cue, beat, u, prev, side, depth, centre, face, faceCam, turn, lift };
+  // what the next cue is arrives on its first beat: the dancer moves into it over the end of this one
+  const last = i === n - 1;
+  const h = Math.min(CHOREO_HANDOVER, cue.beats / 2, next.beats / 2);
+  const ahead = smooth((beat - (cue.beats - h)) / h);
+  if (ahead > 0) {
+    if (next.face === 'cam') faceCam += (1 - faceCam) * ahead;
+    else if (next.face !== undefined && !last) { face += angleTo(face, next.face) * ahead; faceCam *= 1 - ahead; }
+    else if (last) { face += angleTo(face, next.face === undefined ? 0 : next.face as number) * ahead; faceCam *= 1 - ahead; }
+  }
+  const lean = (cue.lean ?? 0) + ((next.lean ?? 0) - (cue.lean ?? 0)) * ahead;
+  let squash = (cue.squash ?? 1) + ((next.squash ?? 1) - (cue.squash ?? 1)) * ahead;
+  // a leap: crouch into the take-off, stretch in the air, squash on landing and come back up
+  if (next.lift > 0) squash *= 1 - 0.16 * ahead;
+  if (cue.lift > 0) squash *= u < 0.15 ? 0.84 + 0.26 * smooth(u / 0.15) : 1 + 0.1 * Math.sin(Math.PI * u) - 0.16 * smooth((u - 0.85) / 0.15);
+  if (prev.lift > 0 && n > 1) squash *= 0.84 + 0.16 * smooth(beat / Math.min(0.75, cue.beats));
+  // the groove: lowest on every beat of the dance clock (a cosine, so its turning point — the hit — is the beat itself)
+  const groove = cue.groove ?? 0;
+  if (groove > 0 && cue.lift === 0) squash *= 1 - groove * (1 + Math.cos(2 * Math.PI * posMod(beats, 1))) / 2;
+  return { cue, beat, u, next, ahead, side, depth, centre, face, faceCam, turn, lift, lean, squash };
 }
 
 /** The short way round from a to b, degrees. */
