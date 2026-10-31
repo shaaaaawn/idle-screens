@@ -58,6 +58,8 @@ const BOX = /* glsl */ `
 const COMPOSITE = /* glsl */ `
   uniform sampler2D tScene; uniform sampler2D tBloom; uniform sampler2D tTiltQ; uniform sampler2D tTiltE;
   uniform float uAmount; uniform float uBloom; uniform vec2 uRes; uniform float uHighlights; uniform float uTilt;
+  uniform sampler2D tDepth; uniform float uDof; uniform float uFocus; uniform float uNear; uniform float uFar;
+  #include <packing>
   varying vec2 vUv;
   ${SHOULDER_GLSL}
   float mqLuma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -69,8 +71,18 @@ const COMPOSITE = /* glsl */ `
     // Tilt-shift: in focus through a band across the middle, softer above and
     // below it — a quarter-size blur, then an eighth — the way a lens tilted
     // against a model village sees it. Before the bloom and the grade.
-    if (uTilt > 0.0) {
+    if (uTilt > 0.0 || uDof > 0.0) {
       float b = smoothstep(0.08, 0.44, abs(vUv.y - 0.5)) * uTilt;
+      // Depth of field: soft with distance from the focus — a little in front,
+      // more behind (a lens's near field is narrower) — from the frame's own depth.
+      if (uDof > 0.0) {
+        float vz = -perspectiveDepthToViewZ(texture2D(tDepth, vUv).x, uNear, uFar);
+        float off = vz - uFocus;
+        // A band in focus round the subject (a cast is never all at one distance), then soft:
+        // full by 1.2 x the focus distance behind, sooner in front (a lens's near field is narrower).
+        float coc = off > 0.0 ? smoothstep(0.18, 1.2, off / uFocus) : smoothstep(0.15, 0.75, -off / uFocus);
+        b = max(b, coc * uDof);
+      }
       vec3 soft = mix(texture2D(tTiltQ, vUv).rgb, texture2D(tTiltE, vUv).rgb, smoothstep(0.45, 1.0, b));
       g = mix(g, soft, smoothstep(0.0, 0.55, b));
     }
@@ -103,6 +115,11 @@ export class FinishPass {
   private readonly tiltE: WebGLRenderTarget;
   /** `tiltShift`, 0..1: set by the tank each frame. 0 skips the chain. */
   tilt = 0;
+  /** `depthOfField`, 0..1, and where it focuses (view distance) with the camera's near and far: set by the tank. Needs a depth (renderFrom with a depth texture). */
+  dof = 0;
+  focus = 100;
+  near = 1;
+  far = 2000;
   private readonly quarter: WebGLRenderTarget;
   private readonly eighth: WebGLRenderTarget;
   private readonly quad: Mesh;
@@ -125,6 +142,7 @@ export class FinishPass {
         tScene: { value: this.frame }, tBloom: { value: this.half.texture },
         uAmount: { value: 0 }, uBloom: { value: 0 }, uRes: { value: new Vector2(1, 1) }, uHighlights: { value: 0 },
         tTiltQ: { value: this.tiltQ.texture }, tTiltE: { value: this.tiltE.texture }, uTilt: { value: 0 },
+        tDepth: { value: null }, uDof: { value: 0 }, uFocus: { value: 100 }, uNear: { value: 1 }, uFar: { value: 2000 },
       },
       vertexShader: VERT, fragmentShader: COMPOSITE, depthTest: false, depthWrite: false, toneMapped: false,
     });
@@ -181,13 +199,20 @@ export class FinishPass {
       this.pass(renderer, raw, this.quarter, this.half, 0, true);
     }
     const tilt = Math.max(0, Math.min(1, this.tilt));
-    if (tilt > 0) {
+    const depth = hdr?.depthTexture ?? null;
+    const dof = depth ? Math.max(0, Math.min(1, this.dof)) : 0;
+    if (tilt > 0 || dof > 0) {
       this.pass(renderer, raw, src, this.tiltH, 0, false);
       this.pass(renderer, raw, this.tiltH, this.tiltQ, 0, false);
       this.pass(renderer, raw, this.tiltQ, this.tiltE, 0, false);
     }
     const u = this.composite.uniforms;
     u.uTilt!.value = tilt;
+    u.uDof!.value = dof;
+    u.tDepth!.value = depth;
+    u.uFocus!.value = Math.max(1, this.focus);
+    u.uNear!.value = this.near;
+    u.uFar!.value = this.far;
     u.uAmount!.value = amount;
     u.uBloom!.value = bloom;
     u.uHighlights!.value = highlights;

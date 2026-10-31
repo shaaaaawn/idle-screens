@@ -21,7 +21,7 @@
  */
 
 import {
-  Camera, HalfFloatType, LinearFilter, Mesh, NoBlending, OrthographicCamera, PlaneGeometry, SRGBColorSpace,
+  Camera, DepthTexture, HalfFloatType, UnsignedIntType, LinearFilter, Mesh, NoBlending, OrthographicCamera, PlaneGeometry, SRGBColorSpace,
   Scene, ShaderMaterial, Vector2, WebGLRenderTarget, type Object3D, type WebGLRenderer,
 } from 'three';
 
@@ -100,6 +100,8 @@ export class HighlightPass {
   private readonly cam: Camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly resolve: ShaderMaterial;
   private readonly size = new Vector2();
+  /** Keep the frame's depth too (`depthOfField` reads it): set by the tank; a change remakes the buffer. */
+  withDepth = false;
 
   /** `samples`: MSAA samples for the buffer (0 where the canvas itself is not antialiased). */
   constructor(private readonly samples: number) {
@@ -126,9 +128,11 @@ export class HighlightPass {
   draw(renderer: WebGLRenderer, raw: (s: Object3D, c: Camera) => void, scene: Object3D, camera: Camera): WebGLRenderTarget {
     renderer.getDrawingBufferSize(this.size);
     const w = Math.max(1, Math.floor(this.size.x)), h = Math.max(1, Math.floor(this.size.y));
+    if (this.target && !!this.target.depthTexture !== this.withDepth) this.release();
     if (!this.target) {
       this.target = displaySpace(new WebGLRenderTarget(w, h, {
         type: HalfFloatType, minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true, stencilBuffer: false, samples: this.samples,
+        ...(this.withDepth ? { depthTexture: new DepthTexture(w, h, UnsignedIntType) } : {}),
       }));
     } else if (this.target.width !== w || this.target.height !== h) {
       // The pixel governor rescales the canvas on the fly.
@@ -142,6 +146,7 @@ export class HighlightPass {
 
   /** Free the buffer (about 58 MB at the high tier) while the param is 0; the next frame remakes it. */
   release(): void {
+    this.target?.depthTexture?.dispose();
     this.target?.dispose();
     this.target = null;
   }

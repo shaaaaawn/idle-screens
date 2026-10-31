@@ -117,3 +117,25 @@ describe('highlights render path (a stand-in renderer)', () => {
     hl.dispose(); fin.dispose();
   });
 });
+
+describe('the buffer keeps its depth for depth of field', () => {
+  const fake = () => {
+    let target: unknown = null;
+    return {
+      autoClear: true, capabilities: { isWebGL2: true }, extensions: { has: () => true },
+      getDrawingBufferSize: (v: { set: (x: number, y: number) => void }) => { v.set(320, 180); return v; },
+      getRenderTarget: () => target, setRenderTarget: (t: unknown) => { target = t; }, clear: () => {},
+    };
+  };
+  it('adds a depth texture when asked, and drops it again (the buffer is remade either way)', () => {
+    const r = fake(), p = new HighlightPass(0), raw = () => {};
+    expect(p.draw(r as never, raw as never, { children: [] } as never, {} as never).depthTexture).toBeFalsy();
+    p.withDepth = true;
+    const d = p.draw(r as never, raw as never, { children: [] } as never, {} as never);
+    expect(d.depthTexture).toBeTruthy();
+    expect([d.depthTexture!.image.width, d.depthTexture!.image.height]).toEqual([320, 180]);
+    p.withDepth = false;
+    expect(p.draw(r as never, raw as never, { children: [] } as never, {} as never).depthTexture).toBeFalsy();
+    p.dispose();
+  });
+});

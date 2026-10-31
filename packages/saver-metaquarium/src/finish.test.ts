@@ -91,3 +91,32 @@ describe('tilt-shift (in the finish)', () => {
     p.dispose();
   });
 });
+
+describe('depth of field (in the finish)', () => {
+  const fake = () => {
+    let target: unknown = null;
+    return {
+      autoClear: true,
+      getDrawingBufferSize: (v: { set: (x: number, y: number) => void }) => { v.set(640, 360); return v; },
+      getRenderTarget: () => target, setRenderTarget: (t: unknown) => { target = t; },
+      copyFramebufferToTexture: () => {}, clear: () => {},
+    };
+  };
+  it('is off by default and documented', () => {
+    expect(METAQUARIUM_PARAMS.depthOfField).toMatchObject({ type: 'number', default: 0, min: 0, max: 1 });
+    expect(PARAM_DOCS.depthOfField).toMatch(/subject/);
+  });
+  it('blurs only with a depth to read: a frame with one gets the blur chain, one without does not', () => {
+    const draws: string[] = [];
+    const raw = (s: { children: unknown[] }) => { draws.push(s.children.length ? 'quad' : 'scene'); };
+    const p = new FinishPass({ bloom: false });
+    p.dof = 1;
+    const plain = { texture: {}, depthTexture: null, width: 640, height: 360 };
+    p.renderFrom(fake() as never, raw as never, plain as never, 0.5, 0);
+    const without = draws.length;
+    draws.length = 0;
+    p.renderFrom(fake() as never, raw as never, { ...plain, depthTexture: {} } as never, 0.5, 0);
+    expect(draws.length).toBe(without + 3);
+    p.dispose();
+  });
+});
