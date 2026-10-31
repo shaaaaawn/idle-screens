@@ -126,6 +126,11 @@ export const METAQUARIUM_PARAMS = {
    *  melt, faint filaments run down them, their feet fade into the floor.
    *  0 is the classic flat cone. */
   raySoftness: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The seabed's detail: sand the current has combed into ripples, broad
+   *  patches of silt and grit, a fine grain — and the floor's far edge faded
+   *  into the fog, so no rim shows against the background. 0 is the plain
+   *  floor. */
+  floorDetail: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Caustics: the net of light a rippled surface throws on the floor, rocks,
    *  plants and fish — sharp near the surface, broad and dim deep down,
    *  brightest on faces that look up. 0 compiles the stock programs. */
