@@ -1028,6 +1028,8 @@ class TankInstance implements SaverInstance {
   private readonly waveScratch: WaveState = { phase: 0, amp: 0, bend: 0 };
   /** The scripted scene the first fish of the cast are playing, if any. */
   private vignette: Vignette | null = null;
+  /** The marks the vignette plays on (the open stage's and the world's, or the room's), for a spot on a mark. */
+  private vignetteMarks: Marks = OPEN_MARKS;
   private vignetteKey = '';
   private warnedVignette = '';
   /** Actors told to `ink` that have none, warned once per script. */
@@ -1939,12 +1941,13 @@ class TankInstance implements SaverInstance {
     if (key === this.vignetteKey) return;
     this.vignetteKey = key;
     this.vignette = null;
-    if (!script) return;
     const base: Marks = indoors ? INTERIOR_MARKS : OPEN_MARKS;
     // Indoors the marks scale with the room, which is built no smaller than ROOM_MIN_SCALE (interior.ts).
     const k = indoors ? roomScale(scale) : 1;
     // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
     const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { ...m, x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
+    this.vignetteMarks = marks;
+    if (!script) return;
     const parsed = parseVignette(script, marks, audience);
     if (parsed.problems.length && script !== this.warnedVignette) {
       this.warnedVignette = script;
@@ -3047,6 +3050,14 @@ class TankInstance implements SaverInstance {
     const swimWave = this.num('swimWave');
     this.buildSpotRig();
     this.spotSeen.fill(false);
+    // A spot standing on a mark (`@mic`) lights whoever steps on it: it is where the mark is, always.
+    for (let si = 0; si < this.spotRig.length; si++) {
+      const name = this.spotRig[si]!.mark;
+      const m = name ? this.vignetteMarks[name] : undefined;
+      if (!m) continue;
+      this.spotAt[si]!.set(m.x, m.y, m.z); this.spotSeen[si] = true; this.spotLen[si] = 0;
+      this.spotHead[si]!.set(0, 0, 1);
+    }
     const followSlot = Math.round(this.num('cameraFollow'));
     // `followDistance` is quoted for a minted fish: the camera stands as many
     // of THIS fish's lengths back, so a shark is framed like a shark.
@@ -3833,7 +3844,7 @@ class TankInstance implements SaverInstance {
         octopusInkCue(f.rig.octopus, oState, tSec, f.index, inkCue.at, inkCue.weight, `${f.index}:cue:${beatAt}`);
       } else if (inkCue && !this.warnedInk.has(`${f.index}|${this.vignetteKey}`)) {
         this.warnedInk.add(`${f.index}|${this.vignetteKey}`);
-        console.warn(`[metaquarium] vignette: "${'abc'[f.index]} ink" ignored — only an octopus has ink (slot ${f.index} is a ${this.wantBreeds[f.index] ?? 'fish'})`);
+        console.warn(`[metaquarium] vignette: "${'abcd'[f.index]} ink" ignored — only an octopus has ink (slot ${f.index} is a ${this.wantBreeds[f.index] ?? 'fish'})`);
       }
       if (oState && f.rig?.octopus) {
         f.group.updateMatrixWorld(true);

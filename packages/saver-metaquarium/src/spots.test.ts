@@ -3,6 +3,12 @@ import { MAX_SPOTS, parseSpotCues, parseSpotRig, SPOT_FADE, spotLevels } from '.
 import { OPEN_MARKS, parseVignette, VIGNETTE_CUES, VIGNETTES } from './vignette';
 
 describe('spot rig', () => {
+  it('a spot can stand on a mark instead of a fish: `@mic` lights whoever steps up', () => {
+    const { spots, problems } = parseSpotRig('@mic/#ffc890*26, 0, @mic, @Mic');
+    expect(spots[0]).toEqual({ slot: -1, mark: 'mic', color: '#ffc890', radius: 26 });
+    expect(spots[1]).toEqual({ slot: 0, color: '#ff8ad0', radius: 28 });
+    expect(problems).toEqual(['mark mic is already spotted — "@mic" dropped', '"@Mic" is not slot[/color][*radius] or @mark[/color][*radius]']);
+  });
   it('parses slot/color*radius, defaults the rest, and stops at three', () => {
     const { spots, problems } = parseSpotRig('4/#ff3f9e*26, 1, 2/#7fdcff, 3, nonsense');
     expect(spots).toHaveLength(MAX_SPOTS);
@@ -13,7 +19,7 @@ describe('spot rig', () => {
     expect(spots[2]).toEqual({ slot: 2, color: '#7fdcff', radius: 28 });
     expect(problems).toEqual([
       'more than 3 spots — "3" dropped',
-      '"nonsense" is not slot[/color][*radius]',
+      '"nonsense" is not slot[/color][*radius] or @mark[/color][*radius]',
     ]);
     expect(parseSpotRig('').spots).toEqual([]);
     expect(parseSpotRig('0').spots[0]).toEqual({ slot: 0, color: '#fff2cf', radius: 28 }); // the first is warm white

@@ -208,7 +208,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
   // ---- stage --------------------------------------------------------------
   const stage: string[] = [];
   const rig = parseSpotRig(str('spotRig')).spots;
-  if (rig.length) stage.push(`${rig.length} spotlight${rig.length === 1 ? '' : 's'} on ${rig.map((s) => slotName(s.slot)).join(', ')}`);
+  if (rig.length) stage.push(`${rig.length} spotlight${rig.length === 1 ? '' : 's'} on ${rig.map((s) => s.mark ? `the ${s.mark} mark` : slotName(s.slot)).join(', ')}`);
   else if (num('followSpot') >= 0) stage.push(`follow-spot on ${slotName(num('followSpot'))}`);
   if (has('spotCues') && (rig.length || num('followSpot') >= 0)) {
     const sheet = parseSpotCues(str('spotCues'), Math.max(1, rig.length));

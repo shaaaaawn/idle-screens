@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildStageSet, CLUB } from './club';
+import { dolphinUpright } from './dolphin';
 import { CROWD, crowdSeat, OPEN_MARKS, parseVignette, poseOf, VIGNETTES, type Vignette } from './vignette';
 
-/** The open mic as the recipe casts it: three comics (a b c), then eleven in the house. */
-const AUDIENCE = Array.from({ length: 11 }, (_, i) => 3 + i);
+/** The open mic as the recipe casts it: three comics (a b c) and the host (d), then eleven in the house. */
+const AUDIENCE = Array.from({ length: 11 }, (_, i) => 4 + i);
 const show = (): Vignette => parseVignette(VIGNETTES.openmic!, OPEN_MARKS, AUDIENCE);
 const beatAt = (v: Vignette, i: number): { t0: number; dur: number } => v.beats[i]!;
 /** The first beat whose actors include `gesture`, from beat `from` on. */
@@ -12,9 +13,10 @@ const doing = (v: Vignette, t: number): string[] => AUDIENCE.map((s) => poseOf(v
 
 describe('the audience', () => {
   it('seats the @audience slots the script does not name, front row first, out in front of the stage', () => {
-    const v = parseVignette(VIGNETTES.openmic!, OPEN_MARKS, [1, ...AUDIENCE]);
-    // Slot 1 is b, a comic: the script's, not a seat.
+    const v = parseVignette(VIGNETTES.openmic!, OPEN_MARKS, [1, 3, ...AUDIENCE]);
+    // Slot 1 is b, a comic, and 3 is d, the host: the script's, not seats.
     expect(v.seats.has(1)).toBe(false);
+    expect(v.seats.has(3)).toBe(false);
     expect([...v.seats.keys()]).toEqual(AUDIENCE);
     expect([...v.seats.values()]).toEqual(AUDIENCE.map((_, i) => i));
     const seats = AUDIENCE.map((_, i) => crowdSeat(v, i));
@@ -39,9 +41,9 @@ describe('the audience', () => {
     expect(poseOf(show(), 40, 10)).toBeNull();
   });
 
-  it('watches whoever holds the stage: the comic at the mic, then the next one', () => {
+  it('watches whoever holds the stage: the host, the comic at the mic, then the next one', () => {
     const v = show();
-    for (const comic of [0, 1, 2]) {
+    for (const comic of [3, 0, 1, 2]) {
       const b = v.beats.findIndex((beat) => beat.actors[comic]!.gesture === 'talk');
       const t = beatAt(v, b).t0 + beatAt(v, b).dur * 0.5;
       const at = poseOf(v, comic, t)!;
@@ -101,10 +103,40 @@ describe('the audience', () => {
 });
 
 describe('the open mic', () => {
-  it('each comic takes the mic itself — a solo mark — not a place round it', () => {
+  it('the host brings each comic on: at the mic before each set, talking, then off to the wing', () => {
+    const v = show();
+    const mic = OPEN_MARKS.mic!;
+    const atMic = (a: number, t: number): boolean => { const p = poseOf(v, a, t)!; return Math.hypot(p.x - mic.x, p.z - mic.z) < 0.01; };
+    for (const comic of [0, 1, 2]) {
+      const set = v.beats.findIndex((beat) => beat.actors[comic]!.gesture === 'talk');
+      // In the beats before the comic's first bit, the host had the mic and talked.
+      const intro = v.beats.slice(0, set).map((b, i) => i).filter((i) => v.beats[i]!.actors[3]!.gesture === 'talk').pop()!;
+      expect(intro).toBeGreaterThanOrEqual(0);
+      expect(atMic(3, beatAt(v, intro).t0 + 1)).toBe(true);
+      // While the comic is on, the host is not.
+      expect(atMic(3, beatAt(v, set).t0 + 1)).toBe(false);
+    }
+  });
+
+  it('the comics waiting in the wings watch whoever has the mic — and stand to do it', () => {
     const v = show();
     const mic = OPEN_MARKS.mic!;
     for (const comic of [0, 1, 2]) {
+      const set = v.beats.findIndex((beat) => beat.actors[comic]!.gesture === 'talk');
+      const t = beatAt(v, set).t0 + beatAt(v, set).dur * 0.5;
+      for (const other of [0, 1, 2, 3].filter((a) => a !== comic)) {
+        const p = poseOf(v, other, t)!;
+        const tx = mic.x - p.x, tz = mic.z - p.z;
+        expect((p.fx * tx + p.fz * tz) / (Math.hypot(p.fx, p.fz) * Math.hypot(tx, tz)), `${'abcd'[other]} during ${'abc'[comic]}'s set`).toBeGreaterThan(0.95);
+        expect(dolphinUpright(v, other, t), `${'abcd'[other]} standing`).toBeGreaterThan(0.9);
+      }
+    }
+  });
+
+  it('each comic (and the host) takes the mic itself — a solo mark — not a place round it', () => {
+    const v = show();
+    const mic = OPEN_MARKS.mic!;
+    for (const comic of [3, 0, 1, 2]) {
       const b = v.beats.findIndex((beat) => beat.actors[comic]!.gesture === 'talk');
       const at = poseOf(v, comic, beatAt(v, b).t0 + 1)!;
       expect(Math.hypot(at.x - mic.x, at.z - mic.z)).toBeLessThan(0.01);
@@ -113,7 +145,7 @@ describe('the open mic', () => {
 
   it('loops seamlessly: everyone ends where they began', () => {
     const v = show();
-    for (const a of [0, 1, 2]) {
+    for (const a of [0, 1, 2, 3]) {
       const p0 = poseOf(v, a, 0.01)!, p1 = poseOf(v, a, v.duration - 0.01)!;
       expect(Math.hypot(p0.x - p1.x, p0.z - p1.z)).toBeLessThan(0.5);
     }
