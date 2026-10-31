@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { actorTravel } from './dot';
 import { DANCES, GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseAcross, poseOf, resolveVignette, snapBetween, VIGNETTES } from './vignette';
 
-/** duet and trio are written for the open stage; the rest for the geode room. */
-const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
+/** duet, trio and openmic are written for the open stage; the rest for the geode room. */
+const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' || name === 'openmic' ? OPEN_MARKS : INTERIOR_MARKS);
 const tea = (): ReturnType<typeof parseVignette> => parseVignette(VIGNETTES.tea!, INTERIOR_MARKS);
 const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 

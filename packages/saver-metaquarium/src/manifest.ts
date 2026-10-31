@@ -434,6 +434,9 @@ export const METAQUARIUM_PARAMS = {
    *  fountain home1…, or centre left right front back), facing the front; an LED board
    *  scrolls a long line. Empty = none. */
   signs: { type: 'string', default: '', ease: 'step' },
+  /** The open-mic set (club.ts): `club` is a brick back wall, a mic on a stand at the `mic` mark and a
+   *  stool; `mic` the stand alone. The `openmic` vignette is written for it, with an `@audience` out front. */
+  stageSet: { type: 'enum', default: 'none', options: ['none', 'club', 'mic'], ease: 'step' },
   /** EXPERIMENTAL. The dolphins' cast — comic personas, in the order the dolphins come in fishMix:
    *  `showman, drifter, bigguy` (dolphin-comics.ts). Each its own look (skin, finish, shirt, prop) and
    *  act (tempo, size of gesture, slouch, lean, lids). Unknown names, and dolphins past the list: classic. */
