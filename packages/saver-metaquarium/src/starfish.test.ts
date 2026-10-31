@@ -11,6 +11,7 @@ import {
   STARFISH_STAND_BLOOM, starfishCycle, starfishFrame, starfishGait, starfishIdle, starfishMoment, starfishSpot,
   starfishStart, starfishStopAt, type StarfishClip, type StarfishDoing, type StarfishInput, type StarfishOutput, type StarfishRig,
 } from './starfish';
+import { parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
 
 const PLAN = compileSwimPlan(createRng(3).fork(1), { radius: 120, yMin: 15, yMax: 72 });
 const DUR: Record<string, number> = {
@@ -382,5 +383,64 @@ describe('starfish: the partner dance', () => {
     expect(F.focusZ).toBeCloseTo(0.3 * 16.2, 9);
     expect(weight(rig, 'lift_fly')).toBe(1);
     expect(rig.actions.lift_fly.time).toBeCloseTo((8 / 16) * DUR.lift_fly!, 9);
+  });
+});
+
+describe('a choreographed starfish (choreo.ts)', () => {
+  const line = (sheet: string) => parseChoreography(sheet, STARFISH_MOVE_NAMES).lines.get('*')!;
+  const dance = (sheet: string, beats: number, extra = {}) => ({ dance: { mode: 'choreo' as const, beats, x: 0, z: 0, yaw: 0, line: line(sheet), gap: 10, ...extra } });
+  it('plays the cue\'s clip, and reports the cue as what it is doing', () => {
+    const rig = rigged();
+    const out = starfishFrame(rig, input(5, 0, dance('4:march, 4:jacks', 5.5)), blank());
+    expect(out.doing).toBe('jacks');
+    expect(weight(rig, 'jacks')).toBe(1);
+    expect(rig.actions.jacks.time).toBeCloseTo((1.5 / 4) * DUR.jacks!, 9);
+  });
+  it('hands one cue over to the next across half a beat, from the last one\'s end pose', () => {
+    const rig = rigged();
+    starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise', 4.1)), blank());
+    expect(weight(rig, 'rise')).toBeGreaterThan(0);
+    expect(weight(rig, 'idle')).toBeGreaterThan(0);
+    expect(weight(rig, 'rise') + weight(rig, 'idle')).toBeCloseTo(1, 9);
+  });
+  it('lying sits on its disc; standing, on its feet; rising, between — and the glow follows', () => {
+    const rig = rigged();
+    const lying = starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise, 4:hold', 2)), blank());
+    expect([lying.x, lying.z]).toEqual([0, 0]);
+    expect(lying.bloom).toBe(STARFISH_BLOOM);
+    const up = starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise, 4:hold', 10)), blank());
+    expect(up.z).toBeCloseTo(-FEET * 0.375, 9);
+    expect(up.bloom).toBe(STARFISH_DANCE_BLOOM);
+    expect(rig.actions.rise.time).toBe(0);
+    const sit = starfishFrame(rig, input(5, 0, dance('4:sit', 2)), blank());
+    expect(rig.actions.rise.time).toBeGreaterThan(0);
+    expect(sit.bloom).toBeGreaterThan(STARFISH_BLOOM);
+  });
+  it('travels in spacings along the class\'s own axes, and to its centre', () => {
+    const rig = rigged();
+    const right = starfishFrame(rig, input(5, 0, dance('4:lie >right', 4 - 1e-9)), blank());
+    expect(right.focusX).toBeCloseTo(20, 6); // two spacings across (yaw 0: side is +x)
+    const centre = starfishFrame(rig, input(5, 0, dance('4:lie >centre', 4 - 1e-9, { x: 6, z: 2, cx: 0, cz: 0 })), blank());
+    expect([centre.focusX, centre.focusZ].map((v) => +v.toFixed(6))).toEqual([0, 0]);
+  });
+  it('turns, faces the camera and leaps', () => {
+    const rig = rigged();
+    const half = starfishFrame(rig, input(5, 0, dance('4:spin ~360', 2)), blank());
+    expect(half.fz).toBeCloseTo(-1, 6);
+    const cam = starfishFrame(rig, input(5, 0, { ...dance('2:hold @cam', 1.5), camX: 100, camZ: 0 }), blank());
+    expect(cam.fx).toBeCloseTo(1, 6);
+    const air = starfishFrame(rig, input(5, 0, dance('2:jacks ^1', 1)), blank());
+    expect(air.y).toBeGreaterThan(3);
+  });
+  it('a dancer the sheet leaves out of a choreographed class stands and waits', () => {
+    const rig = rigged();
+    const out = starfishFrame(rig, input(5, 0, { dance: { mode: 'choreo', beats: 3, x: 0, z: 0, yaw: 0 } }), blank());
+    expect(out.doing).toBe('hold');
+    expect(weight(rig, 'standing')).toBe(1);
+  });
+  it('a partner move danced solo cycles over its own beats', () => {
+    const rig = rigged();
+    starfishFrame(rig, input(5, 0, dance('8:dip', 6)), blank());
+    expect(rig.actions.dip_follow.time).toBeCloseTo((6 / 8) * DUR.dip_follow!, 9);
   });
 });

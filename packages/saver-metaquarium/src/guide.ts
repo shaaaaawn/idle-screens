@@ -26,6 +26,7 @@ import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
+import { CHOREO_MARKS, parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
 import { BREED_GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
 type Value = string | number | boolean;
@@ -35,7 +36,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraAzimuth: 'Orbit bearing in degrees. 0 looks at the village from the front.',
   cameraElevation: 'Degrees above the floor. 8–15 is eye level with the fish; 40+ looks down on a castle.',
   cameraDistance: 'Distance from the tank centre. 80 is a close-up, 170–220 a village, 300+ a landmark.',
-  shot: 'A framing: `orbit` (default), `hero` (three-quarter), `front` (level, long lens), `low` (looking up), `top` (a map), `surface` (the underside), `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
+  shot: 'A framing: `orbit`, `hero` (three-quarter), `front` (level, long lens), `low`, `top` (a map), `surface`, `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
   cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera, whose params are ignored while following. With `followSpot` on the slot, a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
@@ -51,7 +52,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   ambientOcclusion: 'Ambient occlusion, 0–1: crevices darken. High tier.',
   highlights: 'Bright light rolls off instead of clipping, 0–1: a fish in a shaft stays a fish. Bright rooms want it. Mid/high tiers.',
   fishUrl: 'The single model used when `fishMix` is empty: ipfs://, https://assets.idlescreens.com/, or a URL on the page\'s own origin. Any other host is refused and the default fish swims.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace: crab, starfish (dances with `starfishDance`), snail. `dot` (a courier box on legs) and `dolphin` (chatters, flips, breaches; stands on its tail to act) play vignette gestures. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, seahorse:3, shark:1@patrol`. Minted breeds plus bundled: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace: crab, starfish (dances: `starfishDance`, `choreography`), snail. `dot` (a box on legs), `dolphin` (flips, breaches) play vignette gestures. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel. Only the page\'s own origin or the shipped copy is used.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -75,8 +76,9 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
   snailShell: 'Snail shells: `banded`, `pearl` (iridescent), `gold`, `glow` (a spiral breathing light; best at night); `mix` (default), each its own. Lit fish only. frame.state.fish[i].shell says which.',
-  starfishDance: 'Starfish dance: `aerobics`, a class in unison facing the camera; `freestyle`, each its own move every eight counts; `duet`, couples face to face (with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`); `off` (default). Cast a few (`starfish:7`), `shot: front`, `autoRotate: 0`, a bright room.',
-  danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
+  starfishDance: 'Starfish dance: `aerobics` (a class in unison), `freestyle` (a move each per eight counts), `duet` (couples), `off`. Cast a few: `starfish:7`.',
+  danceTempo: 'Dance BPM; glides on the beat.',
+  choreography: 'Starfish dance cues on the beat (see grammar); faces `cameraAzimuth`.',
   fishLook: '`neon` dresses the bundled creatures for blacklight: near-black coats, eyes (and a crab\'s mouth) glowing a neon of their own. Best in a dark room with `finish`. Default `natural`.',
   fishRim: 'A thin edge of the water\'s light round each fish, 0–1 (lit mode): dark fish on dark water. 0.6–1 in dark rooms.',
   fishShadows: 'Soft shadows on the ground under the swimmers, 0–1: dark near the sand, faint high up.',
@@ -157,7 +159,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   spotColor: 'Colour of the single `followSpot`.',
   spotShadow: 'The spotted fish\'s shadow in its pool. 0 none, 1 true size.',
   spotRig: 'Up to three spots: `slot[/color][*radius]` follows a fish, `@mark` stands on a mark (`@mic` lights whoever steps up). They are a, b, c in order. Overrides followSpot.',
-  spotCues: 'A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` (`-` = blackout). Spots cross-fade at each cue.',
+  spotCues: 'Looping cues for the rig: `8s:a, 12s:a+b, 4s:-` (`-` blackout, cues ≥ 2 s). Spots cross-fade.',
   vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio·openmic on the open stage) or a script of beats. A floor creature cast as an actor stays on the floor. Grammar below.',
 };
 
@@ -184,6 +186,7 @@ geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian 
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
+choreography  [a|*:] <beats>:<move> [>to] [@face] [~turn] [^leap], …|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
@@ -353,6 +356,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
   if (str('floorCover')) push('floorCover', parseFloorCover(str('floorCover')).problems);
   if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
+  if (str('choreography')) push('choreography', parseChoreography(str('choreography'), STARFISH_MOVE_NAMES).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
@@ -485,7 +489,9 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   if (dance !== 'off' && !starfishSwims) {  // no fishMix = one minted fish, never a starfish
     out.push({ path: 'starfishDance', also: ['fishMix'], message: 'no starfish in the cast to dance — add e.g. starfish:7 (slots past the cap never swim)' });
   }
-  if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  const choreographed = !!str('choreography').trim();
+  if (set('danceTempo') && dance === 'off' && !choreographed) out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  if (choreographed && !starfishSwims) out.push({ path: 'choreography', also: ['fishMix'], message: 'no starfish in the cast to dance it — add e.g. starfish:5' });
   // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
   if (follow < 0) {
     for (const k of ['followDistance', 'followAngle', 'followAvoid']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
