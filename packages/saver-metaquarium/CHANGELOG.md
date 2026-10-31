@@ -1,5 +1,19 @@
 # @idle-screens/saver-metaquarium
 
+## 0.21.0
+
+### Minor Changes
+
+- bd3de2b: `voxelAO` (0–1, default 0): the plants' cubes darken where they meet each other and the sand, the corner shading every voxel renderer has, so a coral reads as solid instead of as flat cut-outs. It is baked once, the first frame it is on, and applied to the vertex colour, so unlike the screen-space passes it holds on every tier, the basic one included.
+  
+  Inside a geode room, a lining crystal whose nearest point comes within a few units of the lens now dissolves whole. Bedtime's dollhouse camera had one of the long "great points" filling a third of the frame, flat purple, the whole piece long. The wall seen from anywhere else is unchanged.
+
+### Patch Changes
+
+- bf7d946: Comic dolphins (experimental): `dolphinCast` gives the dolphins in a mix their own characters, in order — `showman` (a navy suit, a white shirt-front, a red tie; quick and big), `drifter` (sandy and matte, a red trucker cap, heavy lids; slow, slouched, leaning), `bigguy` (big, slate grey, a dark tee; small deadpan gestures). Each is still a dolphin: its skin and finish recoloured, a shirt tinted into its chest, a prop riding a bone, and an act (tempo, size of gesture, slouch, lean, lids) its frames read. Stage types, never anyone's likeness.
+- 25102fb: Open mic gets a host, and the comics waiting their turn watch. A vignette can now name four actors (`a`–`d`). The `openmic` script has the host (d) bring each comic to the mic and send them off. The two comics waiting stand in the wings facing whoever has the mic and nod along when the room laughs, and after a goodnight the company bows from where it stands. A spot can stand on a mark instead of following a fish (`spotRig: @mic/#ffc890*26`): whoever steps up is lit. A new `host` persona in `dolphinCast` is the classic dolphin in a black bow tie. The audience now watches whoever is talking, else whoever is at the middle of the stage, so nods in the wings no longer turn the room.
+- 758ad4a: Open mic: a comedy club for the comic dolphins. `stageSet: club` builds a brick back wall (washed warm where the spot spills), a mic on a stand at the new solo `mic` mark and a bar stool; `mic` is the stand alone. A new swim style, `@audience`, seats fish out front in raked rows facing the stage: they watch whoever holds it, laugh as every `talk` beat ends (heads back, a bubble out of each, a few only chuckling) and applaud every `bow`, all pure in t. The `openmic` vignette has three comics take the mic in turn, with its cue sheet, and the `open-mic` recipe puts it together. The Drifter now wears a flannel and is tanned deeper, so a cream chest under the spot no longer reads as a white dolphin.
+
 ## 0.20.0
 
 ### Minor Changes

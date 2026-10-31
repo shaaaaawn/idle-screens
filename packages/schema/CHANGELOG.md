@@ -1,5 +1,46 @@
 # @idle-screens/schema
 
+## 3.17.0
+
+### Minor Changes
+
+- 8ff9e87: `patternHazardReport(spec, opts?)`: a publish-time photosensitivity check for regular spatial patterns, after ITU-R BT.1702-3 Annex 1. It draws the scene with the analytic perception raster at 216 cells on the short side and scans every row and column for stripes. A scene fails when more than five light-dark pairs of regular stripes, with a flash-level swing (0.1 relative luminance, darker side under 0.8), cover more than 40 % of the frame while still, or more than 25 % while they spin, rock, orbit, pulse or are keyed. One-way flow is judged as still, and fails once its stripes cross a point more than 3 times a second over 25 % of the frame. The check needs no timeline and covers `spin` and motion on its own. It returns the measured area, pitch, contrast and flicker, plus a `message` naming what would pass. Like `timelineFlashReport`, it is not part of `validateSpec` or `compileSaver`. Also exported: `patternSampleTimes`, `layerPatternMotion` and the `PATTERN_*` thresholds.
+  
+  `luminanceGrid`, on a grid with more cells on either axis than a `field` background's render raster (96 cells on the short side, the long side by aspect), now reads that raster nearest-neighbour, as the canvas paints it, instead of sampling the field per grid cell. Coarser grids, including every default, are unchanged.
+  
+  FORMAT.md's safety invariants now separate what the format guarantees by construction from what is checked at publish and what nothing checks. The validator exports its WCAG flash constants (`FLASH_SWING_THRESHOLD`, `FLASH_DARK_MAX`, `FLASH_MAX_PER_SECOND`), and the pattern check reuses them.
+
+### Patch Changes
+
+- 44bbd52: Advisories stop flagging established idioms, and a few messages and docs get more exact. Nothing the validator accepts or refuses changes, and no pixel changes.
+  
+  - `role: "atmosphere"` text is left out of `text-overlap`, `layout-text-overlap` and the validator's `list-length-mismatch` warning (X807).
+  - `low-contrast-layer` and `text-legibility` judge a mark on a path drawing against the drawing: static, unblended path parts, area-weighted (X783).
+  - `uniform-motion` compares an orbit's on-screen speed, angular speed × radius (X739).
+  - `dense-scene` and `full-coherence` read the declared `count`, so a small preview and a 4K screen agree (X771).
+  - `text-overlap` checks a pair over the piece: at the sample instant and every key boundary of a timeline that keys the text, a box counts only while it shows (opacity in force, effective scale > 2 %, a begun reveal, on screen), and only pairs visible together are reported. A sequence segment is never sampled past its end. `text-heavy` counts text as static only when no key touches it (X759, X776).
+  - New informational advisory `life-runs-once`: a layer's `life` under a looping timeline plays once from mount and never replays (X808).
+  - `morph-structural-mismatch` (validator and advisory) and `wrap-morph-inactive` name the fields that differ, e.g. `layers[2].layout.type: grid → list` (X810). New exports `structuralDifferences` and `describeStructuralDifferences`; `structuralSignature` is byte-identical.
+  - FORMAT.md: how ghosting composites (a translucent sprite builds to a/(1−g(1−a))), `life` runs on scene time from mount, and the field raster's real resolution (X805, X808, X760).
+- a329698: Repair a `size` misplaced inside an emoji/text sprite, and flag giant glyphs (F24)
+  
+  - `validateSpec` moves `sprite.size` on an emoji or text sprite up to the
+    layer when the layer has no `size` of its own, with a `misplaced-property`
+    warning: "'size' belongs on the layer, not inside sprite — move it up one
+    level". Before, the field was ignored and the layer fell back to the default
+    size. If `layer.size` is also set, the layer's value wins and the warning
+    says `sprite.size` is ignored. On other sprite kinds (which never read
+    `layer.size`) `sprite.size` stays an `unknown-property`, and the message now
+    names the field that sizes that kind (`radius`, `width`, `length`,
+    `fontSize`). The JSON Schema still rejects `sprite.size`.
+  - New `giant-entity` advisory in `adviseSpec`: an emoji/text layer whose
+    glyphs render taller than the viewport's min dimension, the usual sign of
+    px numbers in a viewport-unit spec.
+  - FORMAT.md: `size` is documented as a layer field next to `count`, with an
+    emoji example, and the runtime repairs and `giant-entity` are described.
+- Updated dependencies [8ff9e87]
+  - @idle-screens/validator@0.1.2
+
 ## 3.16.1
 
 ### Patch Changes
