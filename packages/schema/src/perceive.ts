@@ -772,18 +772,14 @@ export function luminanceGrid(
       let centerY = p.y;
       let halfX = sz / 2;
       let halfY = s.kind === 'rect' ? ((e.size2 ?? sz) * (e.size > 0 ? sz / e.size : 1)) / 2 : sz / 2;
-      if (s.kind === 'text') {
-        const box = textBox(s, e, p, fontScaleFor(spec, w, h), scale);
-        centerX = box.cx;
-        centerY = box.cy;
-        halfX = box.halfX;
-        halfY = box.halfY;
-      } else if (s.kind === 'textBlock') {
-        const box = textBlockBox(s, e, p, w, h);
-        centerX = box.cx;
-        centerY = box.cy;
-        halfX = box.halfX;
-        halfY = box.halfY;
+      if (s.kind === 'text' || s.kind === 'textBlock') {
+        const box = s.kind === 'text' ? textBox(s, e, p, fontScaleFor(spec, w, h), scale) : textBlockBox(s, e, p, w, h);
+        // The renderer scales the glyphs about the (already mapped) anchor (X834).
+        const k = layer.transform || layer.group !== undefined ? paintSize(spec, layer) : 1;
+        centerX = p.x + (box.cx - p.x) * k;
+        centerY = p.y + (box.cy - p.y) * k;
+        halfX = box.halfX * k;
+        halfY = box.halfY * k;
       } else if (s.kind === 'bar') {
         const len = sz * barFraction(s, e.barIndex ?? 0);
         if (len <= 0) continue;
@@ -1160,7 +1156,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     if (layer.sprite.kind === 'textBlock') {
       const s = layer.sprite;
       const unitScale = Math.min(scene.w, scene.h);
-      const sizePx = s.fontSize * unitScale;
+      const sizePx = s.fontSize * unitScale * paintSize(spec, layer);
       const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [textBlockText(s)], count: entities.length, sizePx: Math.round(sizePx) };
       if (s.reveal) info.revealed = Math.round(textBlockRevealFraction(s, scene.w, scene.h, t) * 100) / 100;
       out.push(info);
@@ -1168,7 +1164,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     }
     if (layer.sprite.kind !== 'text') return;
     const s = layer.sprite;
-    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h));
+    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h)) * paintSize(spec, layer);
     out.push({ layerIndex, key: layer.key, strings: [...s.strings], count: entities.length, sizePx: Math.round(sizePx) });
   });
   return out;

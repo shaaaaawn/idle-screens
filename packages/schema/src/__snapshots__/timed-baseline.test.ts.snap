@@ -2218,9 +2218,9 @@ exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snap
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1080x1920 t=8000 1`] = `
 {
   "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠇⠇⠇⠇⠇⠇⡯⣯⣯⣯⣯⣯⡯⡇⠇⠇⠇⠇⠇⠇
+⠇⠇⠇⠇⠇⠇⡧⣯⣯⣯⣯⣯⡯⡇⠇⠇⠇⠇⠇⠇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
-  "coverage": 0.4667,
+  "coverage": 0.4625,
 }
 `;
 
@@ -2244,7 +2244,7 @@ exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snap
 
 exports[`timed-scenes baseline > timed-sunrise.json: perception matches the snapshot on both aspects > 1920x1080 t=8000 1`] = `
 {
-  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⡤⡤⡤⡄⠀⠀⠀⠀⠀⠀⠀⠀
+  "braille": "⠀⠀⠀⠀⠀⠀⠀⠀⠤⡤⡤⡄⠀⠀⠀⠀⠀⠀⠀⠀
 ⠅⠅⠅⠅⠅⠅⡇⡇⣇⣧⣧⡇⡇⡇⡅⠅⠅⠅⠅⠅
 ⠁⠁⠁⠁⠁⠁⠁⠁⠉⠉⠉⠁⠁⠁⠁⠁⠁⠁⠁⠁",
   "coverage": 0.4667,
