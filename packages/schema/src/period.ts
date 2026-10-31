@@ -28,9 +28,21 @@ export interface ScenePeriod {
   period: number | null;
   /** One line per part that sets or breaks the period, e.g. `layers[2] pulse: 4000 ms`. */
   parts: string[];
+  /** What drives each of `parts`, index for index: `pulse`, `grow`, `rock`, `spin`, `path`, `orbit`, `emit`, `cycle`, `caret`, `background`, `timeline`. */
+  kinds: PeriodKind[];
   /** Why it is null (empty otherwise). */
   reasons: string[];
 }
+
+export type PeriodKind = 'timeline' | 'background' | 'pulse' | 'grow' | 'rock' | 'emit' | 'spin' | 'cycle' | 'caret' | 'path' | 'orbit';
+
+/**
+ * Periodic parts that run on scene time and change smoothly, so a looping
+ * timeline's wrap never makes them jump: they carry on through it. A lap
+ * that does not divide their period still loops seamlessly on screen — only
+ * an exact export of one lap would differ (F145, X725, X823).
+ */
+export const SEAMLESS_PERIOD_KINDS: ReadonlySet<PeriodKind> = new Set(['spin', 'rock', 'pulse', 'grow']);
 
 /** Spec-path leaves that set how fast or how often something repeats (a key on one makes the period itself time-varying). */
 const PERIOD_LEAF = /(^|\.)(period|rate|every|duration|spin|speed|blink|drift)$/;
@@ -53,17 +65,21 @@ function toRatio(ms: number): [number, number] | null {
 const range = (r: number | [number, number] | undefined): number | null =>
   r === undefined ? null : typeof r === 'number' ? r : r[0] === r[1] ? r[0] : NaN;
 
-/** The repeat period of `spec` — see the module comment. */
-export function scenePeriod(spec: SaverSpec): ScenePeriod {
+/**
+ * The repeat period of `spec` — see the module comment. `skip` leaves out the
+ * periodic parts of those kinds, as if they were static (the loop-seam
+ * advisory passes `SEAMLESS_PERIOD_KINDS`).
+ */
+export function scenePeriod(spec: SaverSpec, skip?: ReadonlySet<PeriodKind>): ScenePeriod {
   // Each part's period as an exact ratio num/den ms, so a part that repeats
   // between whole milliseconds (`spin: 7` → 360000/7) still combines exactly.
-  const parts: Array<[string, number, number]> = [];
+  const parts: Array<[string, number, number, PeriodKind]> = [];
   const reasons: string[] = [];
-  const add = (label: string, ms: number): void => {
-    if (!(ms > 0) || !Number.isFinite(ms)) return;
+  const add = (label: string, ms: number, kind: PeriodKind): void => {
+    if (!(ms > 0) || !Number.isFinite(ms) || skip?.has(kind)) return;
     const ratio = toRatio(ms);
     if (!ratio) reasons.push(`${label} repeats every ${Number(ms.toFixed(3))} ms, which has no exact ratio to combine`);
-    else parts.push([label, ratio[0], ratio[1]]);
+    else parts.push([label, ratio[0], ratio[1], kind]);
   };
 
   const tl = spec.timeline;
@@ -72,7 +88,7 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     // its cycle for as long as it glides, so one lap is no longer one cycle.
     const keyed = tl.keys.filter((k) => PERIOD_LEAF.test(String(k.path)));
     if (keyed.length > 0) reasons.push(`timeline keys animate ${[...new Set(keyed.map((k) => String(k.path)))].join(', ')}, which sets the scene's own period`);
-    if (tl.loop && (tl.duration ?? 0) > 0) add('timeline', tl.duration!);
+    if (tl.loop && (tl.duration ?? 0) > 0) add('timeline', tl.duration!, 'timeline');
     else reasons.push('timeline does not loop (it plays once, then holds)');
   }
   const bg = spec.background;
@@ -84,7 +100,7 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     // drift is sampled continuously.
     const { period } = bg.drift;
     const r = bg.type === 'field' ? toRatio(period) : null;
-    add('background drift', r ? (r[0] / gcd(r[0], FIELD_BUCKET_MS)) * FIELD_BUCKET_MS : period);
+    add('background drift', r ? (r[0] / gcd(r[0], FIELD_BUCKET_MS)) * FIELD_BUCKET_MS : period, 'background');
   }
   if (spec.finish?.animate && ((spec.finish.grain ?? 0) > 0 || (spec.finish.dither ?? 0) > 0)) reasons.push('finish.animate steps the grain without repeating');
 
@@ -99,33 +115,33 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
     // small), and this period is viewport-independent, so any stagger counts.
     const staggered = (life?.stagger ?? 0) > 0;
     if (life && (life.exit !== undefined || (life.enter !== undefined && ((life.enter ?? 0) > 0 || (life.fade ?? 1000) > 0 || staggered)))) reasons.push(`${at} life builds in or out once`);
-    if (layer.pulse && layer.pulse.amp !== 0) add(`${at} pulse`, layer.pulse.period / rate);
-    if (layer.grow) add(`${at} grow`, layer.grow.period / rate);
-    if (layer.rock) add(`${at} rock`, layer.rock.period / rate);
-    if (layer.emit) add(`${at} emit`, layer.emit.every);
+    if (layer.pulse && layer.pulse.amp !== 0) add(`${at} pulse`, layer.pulse.period / rate, 'pulse');
+    if (layer.grow) add(`${at} grow`, layer.grow.period / rate, 'grow');
+    if (layer.rock) add(`${at} rock`, layer.rock.period / rate, 'rock');
+    if (layer.emit) add(`${at} emit`, layer.emit.every, 'emit');
     const spin = range(layer.spin);
     // A drawing that is n-fold symmetric about its pivot looks the same every 360°/n
     // of spin (X709); a circle or ring never shows its spin at all.
     const fold = spin !== null && spin !== 0 ? spinSymmetry(layer.sprite) : 1;
     if (spin !== null && fold !== Infinity) {
       if (Number.isNaN(spin)) reasons.push(`${at} spin range gives each entity its own speed`);
-      else if (spin !== 0) add(`${at} spin${fold > 1 ? ` (${fold}-fold)` : ''}`, 360000 / Math.abs(spin) / fold);
+      else if (spin !== 0) add(`${at} spin${fold > 1 ? ` (${fold}-fold)` : ''}`, 360000 / Math.abs(spin) / fold, 'spin');
     }
     const sp = layer.sprite;
-    if ((sp.kind === 'emoji' || sp.kind === 'text') && sp.cycle && spriteVariants(sp) > 1) add(`${at} cycle`, (sp.cycle.period * spriteVariants(sp)) / rate);
+    if ((sp.kind === 'emoji' || sp.kind === 'text') && sp.cycle && spriteVariants(sp) > 1) add(`${at} cycle`, (sp.cycle.period * spriteVariants(sp)) / rate, 'cycle');
     if (sp.kind === 'textBlock' && sp.reveal) {
       if ((sp.reveal.speed ?? 0) > 0) reasons.push(`${at} reveal types itself once`);
       if (sp.reveal.caret) {
         const hz = Math.min(3, sp.reveal.caret === true ? 1.2 : sp.reveal.caret.blink ?? 1.2);
-        if (hz > 0) add(`${at} caret`, 1000 / hz);
+        if (hz > 0) add(`${at} caret`, 1000 / hz, 'caret');
       }
     }
     const m = layer.motion;
-    if (m.type === 'path') add(`${at} path`, m.duration);
+    if (m.type === 'path') add(`${at} path`, m.duration, 'path');
     else if (m.type === 'orbit') {
       const s = range(m.speed);
       if (s === null || Number.isNaN(s)) reasons.push(`${at} orbit speed range gives each entity its own lap`);
-      else if (s !== 0) add(`${at} orbit`, 360000 / Math.abs(s));
+      else if (s !== 0) add(`${at} orbit`, 360000 / Math.abs(s), 'orbit');
     } else if (m.type !== 'static') {
       if (m.type === 'drift' && m.ease?.type === 'settle' && !layer.emit) reasons.push(`${at} drift settles once`);
       else reasons.push(`${at} ${m.type} motion travels at seeded per-entity speeds`);
@@ -133,20 +149,29 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
   });
 
   const labelled = parts.map(([l, n, d]) => `${l}: ${Number((n / d).toFixed(3))} ms`);
-  if (reasons.length > 0) return { period: null, parts: labelled, reasons };
-  if (parts.length === 0) return { period: 0, parts: labelled, reasons };
-  // The common period of n₁/d₁, n₂/d₂ … (each reduced) is lcm(nᵢ) / gcd(dᵢ).
+  const kinds = parts.map(([, , , k]) => k);
+  if (reasons.length > 0) return { period: null, parts: labelled, kinds, reasons };
+  const combined = combinePeriods(parts);
+  return { ...combined, parts: labelled, kinds };
+}
+
+/**
+ * The common period of parts given as reduced ratios n/d ms: lcm(nᵢ) / gcd(dᵢ).
+ * 0 for no parts; null (with the reason) past an hour or off whole milliseconds.
+ */
+function combinePeriods(parts: ReadonlyArray<readonly [string, number, number, ...unknown[]]>): { period: number | null; reasons: string[] } {
+  if (parts.length === 0) return { period: 0, reasons: [] };
   let num = 1;
   let den = 0;
   for (const [, n, d] of parts) {
     num = (num / gcd(num, n)) * n;
     den = gcd(den, d);
     if (num / den > MAX_SCENE_PERIOD) {
-      return { period: null, parts: labelled, reasons: [`its parts share no cycle shorter than ${MAX_SCENE_PERIOD / 60000} min`] };
+      return { period: null, reasons: [`its parts share no cycle shorter than ${MAX_SCENE_PERIOD / 60000} min`] };
     }
   }
-  if (num % den !== 0) return { period: null, parts: labelled, reasons: [`its parts repeat together every ${Number((num / den).toFixed(3))} ms, not a whole number of milliseconds`] };
-  return { period: num / den, parts: labelled, reasons };
+  if (num % den !== 0) return { period: null, reasons: [`its parts repeat together every ${Number((num / den).toFixed(3))} ms, not a whole number of milliseconds`] };
+  return { period: num / den, reasons: [] };
 }
 
 /**
@@ -154,8 +179,8 @@ export function scenePeriod(spec: SaverSpec): ScenePeriod {
  * looping timeline's lap has to be a multiple of for one lap to loop
  * seamlessly.
  */
-export function periodWithoutTimeline(spec: SaverSpec): ScenePeriod {
-  return scenePeriod(withoutTimeline(spec));
+export function periodWithoutTimeline(spec: SaverSpec, skip?: ReadonlySet<PeriodKind>): ScenePeriod {
+  return scenePeriod(withoutTimeline(spec), skip);
 }
 
 /** Largest n tried for a drawing's rotational symmetry. */

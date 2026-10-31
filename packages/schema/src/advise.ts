@@ -9,7 +9,7 @@ import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
 import { resolveTimelineAt, timelineTracks } from './timeline';
 import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
-import { periodWithoutTimeline } from './period';
+import { SEAMLESS_PERIOD_KINDS, periodWithoutTimeline } from './period';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
 
 /**
@@ -416,17 +416,26 @@ export function adviseSpec(
   // lap, one lap cannot come round to its own first frame — and the fix is
   // one number. A scene whose other motion never repeats (drifting stars) is
   // not judged: that is ambient by design, and the wall does not need a seam.
+  // Nor are spin, rock, pulse and grow (F145, X725, X823): they run on scene
+  // time and change smoothly, so nothing jumps when the timeline wraps, and
+  // "make the lap a multiple of 1800000 ms" was advice no piece could take.
+  // Only the parts left after them have to fit the lap. Keyed paths need no
+  // check of their own: under `loop` a path enters each lap from its last
+  // key's value, so it is continuous at the wrap unless a key cuts there on
+  // purpose (`t: 0, dur: 0`) or a glide overruns the lap, which the
+  // validator already warns about (`timeline-glide-overruns-lap`).
   if (authored.timeline?.loop && (authored.timeline.duration ?? 0) > 0) {
     const lap = Math.round(authored.timeline.duration!);
     const rest = periodWithoutTimeline(authored);
-    if (rest.period !== null && rest.period > 0 && lap % rest.period !== 0) {
+    const seam = rest.period !== null && rest.period > 0 && lap % rest.period !== 0 ? periodWithoutTimeline(authored, SEAMLESS_PERIOD_KINDS) : null;
+    if (seam && seam.period !== null && seam.period > 0 && lap % seam.period !== 0) {
       let a = lap;
-      let b = rest.period;
+      let b = seam.period;
       while (b) [a, b] = [b, a % b];
       warnings.push({
         path: 'timeline.duration',
         code: 'loop-seam',
-        message: `the timeline loops every ${lap} ms but the rest of the scene repeats every ${rest.period} ms (${rest.parts.join(', ')}), so the whole scene only repeats every ${(lap / a) * rest.period} ms — make the lap a multiple of ${rest.period} ms for one lap to loop`,
+        message: `the timeline loops every ${lap} ms but ${seam.parts.join(', ')} repeat${seam.parts.length === 1 ? 's' : ''} every ${seam.period} ms, so the scene only comes round to its first frame every ${(lap / a) * seam.period} ms — make the lap a multiple of ${seam.period} ms for one lap to loop`,
       });
     }
   }

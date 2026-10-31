@@ -4,7 +4,7 @@ import { validateSpec } from './validate';
 import { luminanceGrid } from './perceive';
 import { createRng } from '@idle-screens/core';
 import { buildEntities, lifeAlphaAt, lifeStaggerAt, rotationAt, textBlockText } from './simulate';
-import { scenePeriod } from './period';
+import { periodWithoutTimeline, scenePeriod } from './period';
 import { adviseSequence, adviseSpec } from './advise';
 import { validateSequence } from './validate';
 import { wipeMask } from './compile';
@@ -367,23 +367,27 @@ describe('scenePeriod and the loop-seam advisory', () => {
     const spinner = (sprite: LayerSpec['sprite'], spin: number, lap?: number): SaverSpec =>
       scene([{ key: 'spokes', count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, spin, opacity: 1, sprite }], lap ? { timeline: { loop: true, duration: lap, keys: [{ t: 0, path: 'spokes.opacity', value: 1, dur: 0 }] } } : {});
     const seams = (s: SaverSpec): boolean => adviseSpec(s, { width: 960, height: 540 }).some((w) => w.code === 'loop-seam');
+    /** The lap does not hold a whole number of the rest of the scene's repeats (what an exact one-lap export needs). */
+    const offLap = (s: SaverSpec): boolean => s.timeline!.duration! % periodWithoutTimeline(s).period! !== 0;
 
     it('repeats 18 identical spokes every 20° of spin: spin 16 → 1250 ms', () => {
       const r = scenePeriod(spinner(polygon({ path: spokes(18).join(' ') }), 16));
       expect(r.period).toBe(1250);
       expect(r.parts).toEqual(['layers[0] (spokes) spin (18-fold): 1250 ms']);
       // A lap of 5 s holds four repeats; a full turn (22.5 s) does not divide it.
-      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 16, 5000))).toBe(false);
+      expect(offLap(spinner(polygon({ path: spokes(18).join(' ') }), 16, 5000))).toBe(false);
       // Spin 25 on the reported 36 s lap: 800 ms repeats fit 45 times, though a full turn (14.4 s) does not.
-      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 25, 36000))).toBe(false);
-      // At spin 16 a 36 s lap is 28.8 repeats, so it still seams — 16° of turn left over.
-      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 16, 36000))).toBe(true);
+      expect(offLap(spinner(polygon({ path: spokes(18).join(' ') }), 25, 36000))).toBe(false);
+      // At spin 16 a 36 s lap is 28.8 repeats — 16° of turn left over.
+      expect(offLap(spinner(polygon({ path: spokes(18).join(' ') }), 16, 36000))).toBe(true);
+      // But spin carries on through the wrap, so nothing jumps there: no loop-seam (F145).
+      expect(seams(spinner(polygon({ path: spokes(18).join(' ') }), 16, 36000))).toBe(false);
     });
 
     it('still warns for a drawing that is not symmetric', () => {
       const r = scenePeriod(spinner(polygon({ path: spokes(18, 3).join(' ') }), 16));
       expect(r.period).toBe(22500);
-      expect(seams(spinner(polygon({ path: spokes(18, 3).join(' ') }), 16, 5000))).toBe(true);
+      expect(offLap(spinner(polygon({ path: spokes(18, 3).join(' ') }), 16, 5000))).toBe(true);
       // A triangle facet that is not equilateral has no symmetry either.
       expect(scenePeriod(spinner(polygon({ points: [[0, -1], [0.5, 0.5], [-0.9, 0.4]] }), 16)).period).toBe(22500);
     });
@@ -422,13 +426,45 @@ describe('scenePeriod and the loop-seam advisory', () => {
     });
   });
 
-  it('fires only when a looping timeline does not fit the rest of the scene', () => {
-    const codes = (s: SaverSpec): string[] => adviseSpec(s, { width: 960, height: 540 }).map((w) => w.code);
+  describe('loop-seam fires only for parts that do not run through the wrap (F145, X725, X823)', () => {
+    const vp = { width: 960, height: 540 };
+    const codes = (s: SaverSpec): string[] => adviseSpec(s, vp).map((w) => w.code);
+    const seam = (s: SaverSpec) => adviseSpec(s, vp).find((w) => w.code === 'loop-seam');
     const tl = (duration: number): SaverSpec['timeline'] => ({ loop: true, duration, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] });
-    const base = (duration?: number): SaverSpec => scene([{ ...pulsing(4000), key: 'p', opacity: 1 }], duration ? { timeline: tl(duration) } : {});
-    expect(codes(base())).not.toContain('loop-seam');
-    expect(codes(base(8000))).not.toContain('loop-seam');
-    expect(codes(base(6000))).toContain('loop-seam');
+    /** A 4 s path lap: an entity travelling a route, which a lap off its period cuts mid-route. */
+    const route = (duration = 4000): LayerSpec => ({ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#ffffff' }, motion: { type: 'path', duration, points: [[0.2, 0.5], [0.8, 0.5]] } } as LayerSpec);
+    const withRoute = (lap?: number, extra: LayerSpec[] = []): SaverSpec => scene([{ ...line(), key: 'p', opacity: 1 }, route(), ...extra], lap ? { timeline: tl(lap) } : {});
+
+    it('raises it for a path lap the timeline does not fit', () => {
+      expect(codes(withRoute())).not.toContain('loop-seam');
+      expect(codes(withRoute(8000))).not.toContain('loop-seam');
+      expect(seam(withRoute(6000))?.message).toBe('the timeline loops every 6000 ms but layers[1] path: 4000 ms repeats every 4000 ms, so the scene only comes round to its first frame every 12000 ms — make the lap a multiple of 4000 ms for one lap to loop');
+    });
+
+    it('stays silent when the only periods that disagree are pulse, rock, spin or grow (was: loop-seam)', () => {
+      // Pulse 4000 ms on a 6000 ms lap: before F145 this raised loop-seam.
+      const pulsed = scene([{ ...pulsing(4000), key: 'p', opacity: 1 }], { timeline: tl(6000) });
+      expect(periodWithoutTimeline(pulsed).period).toBe(4000);
+      expect(codes(pulsed)).not.toContain('loop-seam');
+      // X725: an 1800 ms rock under a 30 s lap.
+      expect(codes(scene([{ ...line(), key: 'p', opacity: 1, rock: { amp: 5, period: 1800 } }], { timeline: tl(30000) }))).not.toContain('loop-seam');
+      // X823-style: a spin whose full turn is half an hour.
+      const shard = { kind: 'polygon', radius: [0.05, 0.05], color: '#ffffff', points: [[0, -1], [0.5, 0.5], [-0.9, 0.4]] } as LayerSpec['sprite'];
+      const slowSpin = scene([{ ...line(), key: 'p', opacity: 1 }, { count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, spin: 0.2, sprite: shard }], { timeline: tl(30000) });
+      expect(periodWithoutTimeline(slowSpin).period).toBe(1800000);
+      expect(codes(slowSpin)).not.toContain('loop-seam');
+      expect(codes(scene([{ ...line(), key: 'p', opacity: 1, grow: { amp: 0.1, period: 7000 } }], { timeline: tl(30000) }))).not.toContain('loop-seam');
+    });
+
+    it('names only the parts that have to fit, so its fix can be taken', () => {
+      // A 4 s route plus a 7 s pulse: the whole scene repeats every 28 s, but only the route has to fit.
+      const mixed = withRoute(6000, [{ ...pulsing(7000) }]);
+      expect(periodWithoutTimeline(mixed).period).toBe(28000);
+      const m = seam(mixed)?.message ?? '';
+      expect(m).toContain('make the lap a multiple of 4000 ms');
+      expect(m).not.toContain('pulse');
+      expect(codes(withRoute(8000, [{ ...pulsing(7000) }]))).not.toContain('loop-seam');
+    });
   });
 });
 

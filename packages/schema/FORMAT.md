@@ -394,7 +394,8 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
     `"evenodd"` are SVG's own rules — use them for pasted SVG, for overlap
     patterns (a rosette of overlapping circles wants `evenodd`), and when a
     same-colour shape sits inside another on purpose (`auto` would cut it).
-  - **`gradient`** replaces the flat colour of the fill:
+  - **`gradient`** replaces the flat colour of the fill (the sprite still
+    needs a `color` or `colors`; a gradient does not stand in for it):
     `{ "type": "linear", "from": [0, -1], "to": [0, 1], "stops": [{ "at": 0, "color": "#2c6a3a" }, { "at": 1, "color": "#7ab070", "opacity": 0.6 }] }`
     or `{ "type": "radial", "center": [0, 0], "radius": 1, "focus": [-0.3, -0.4], "stops": [...] }`
     (2..8 stops, `at` 0..1 non-decreasing, optional per-stop `opacity`).
@@ -424,7 +425,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
     (1..256), drawn back to front, each with its own `path`, `color`
     (default: the entity's colour, so `colors` palettes still pick per
     entity), `fillRule`, `fill`, `gradient`, `stroke` and `opacity`. With
-    `parts`, put that paint on the parts, never on the sprite. One layer
+    `parts`, put that paint on the parts, never on the sprite. The sprite
+    still needs its own `color` (or a `colors` palette): parts without a
+    colour inherit it, and it is required even when every part sets one. One layer
     holds a whole illustration, and a counted layer reuses it: a balloon with
     gores, shading, ropes and basket × 7 drifting entities, all parts moving
     as one.
@@ -1143,7 +1146,13 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   `loop-seam` fires when a scene declares a looping timeline and the rest
   of the scene repeats too, but on a period the lap does not divide — so
   one lap can never come round to its own first frame (it names the period
-  to make the lap a multiple of). A scene whose other motion never repeats
+  to make the lap a multiple of). `spin`, `rock`, `pulse` and `grow` are left
+  out of that period: they run on scene time and change smoothly, so nothing
+  jumps at the wrap, and a lap off their period still loops seamlessly on
+  screen (only an exact one-lap export would differ). Keyed paths are
+  continuous at the wrap by construction — each lap enters from the last
+  key's value — unless a key cuts there on purpose (`t: 0, dur: 0`) or a
+  glide overruns the lap (`timeline-glide-overruns-lap` warns). A scene whose other motion never repeats
   (drifting stars, wandering motes) is not judged: that is ambient by
   design. `scenePeriod(spec)` is the analysis behind it — the least common
   multiple of every periodic part (pulse, grow, rock, spin, cycle, orbit,

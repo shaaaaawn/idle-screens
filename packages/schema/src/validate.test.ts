@@ -505,6 +505,8 @@ describe("validateSpec — text role (#59, plan 1e)", () => {
 
 describe('validateSpec — onboarding messages (cold-start papercuts, 2026-09-25)', () => {
   const msg = (spec: unknown, path: string): string | undefined => validateSpec(spec).errors.find((e) => e.path === path)?.message;
+  /** The message without the received-value hint (F142), for the checks that are about the wording before it. */
+  const unit = (spec: unknown, path: string): string | undefined => msg(spec, path)?.split(' — got ')[0];
   const one = (sprite: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
     schemaVersion: 1, id: 'o', label: 'O',
     layers: [{ count: 3, sprite, motion: { type: 'drift', speed: [0.01, 0.02] }, ...extra }],
@@ -512,38 +514,38 @@ describe('validateSpec — onboarding messages (cold-start papercuts, 2026-09-25
 
   it('range messages name viewport fractions under the default units, px only under units: "px"', () => {
     const vp = one({ kind: 'circle', radius: [0, 0.01], color: '#ffffff' });
-    expect(msg(vp, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
+    expect(unit(vp, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
     const px = { ...vp, units: 'px' };
-    expect(msg(px, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px');
+    expect(unit(px, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px');
     // every range-of-size site goes through the same helper
-    expect(msg(one({ kind: 'streak', length: 3, color: '#ffffff' }), 'layers[0].sprite.length')).not.toMatch(/px/);
-    expect(msg(one({ kind: 'rect', width: 3, color: '#ffffff' }), 'layers[0].sprite.width')).not.toMatch(/px/);
-    expect(msg(one({ kind: 'polygon', radius: 3, color: '#ffffff' }), 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height) (circumradius)');
-    expect(msg({ ...one({ kind: 'polygon', radius: 3, color: '#ffffff' }), units: 'px' }, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px (circumradius)');
-    expect(msg(one({ kind: 'stroke', length: 3, points: [[0, 0], [1, 1]], color: '#ffffff' }), 'layers[0].sprite.length')).toMatch(/fractions of min\(width, height\) \(the mark's bounding size\)$/);
-    expect(msg(one({ kind: 'emoji', glyphs: ['x'] }, { size: [-1, 1] }), 'layers[0].size')).not.toMatch(/px/);
+    expect(unit(one({ kind: 'streak', length: 3, color: '#ffffff' }), 'layers[0].sprite.length')).not.toMatch(/px/);
+    expect(unit(one({ kind: 'rect', width: 3, color: '#ffffff' }), 'layers[0].sprite.width')).not.toMatch(/px/);
+    expect(unit(one({ kind: 'polygon', radius: 3, color: '#ffffff' }), 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height) (circumradius)');
+    expect(unit({ ...one({ kind: 'polygon', radius: 3, color: '#ffffff' }), units: 'px' }, 'layers[0].sprite.radius')).toBe('must be a [min,max] range of positive px (circumradius)');
+    expect(unit(one({ kind: 'stroke', length: 3, points: [[0, 0], [1, 1]], color: '#ffffff' }), 'layers[0].sprite.length')).toMatch(/fractions of min\(width, height\) \(the mark's bounding size\)$/);
+    expect(unit(one({ kind: 'emoji', glyphs: ['x'] }, { size: [-1, 1] }), 'layers[0].size')).not.toMatch(/px/);
     const orbit = { schemaVersion: 1, id: 'o', label: 'O', layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, motion: { type: 'orbit', speed: [10, 20], radius: 0.1 } }] };
-    expect(msg(orbit, 'layers[0].motion.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
+    expect(unit(orbit, 'layers[0].motion.radius')).toBe('must be a [min,max] range of positive fractions of min(width, height)');
   });
 
   it('a [min,max] range on a scalar-only size says so instead of "must be > 0"', () => {
     const range = 'must be a single number > 0, not a [min,max] range';
-    expect(msg(one({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: [0.003, 0.006] }), 'layers[0].sprite.width')).toBe(range);
-    expect(msg(one({ kind: 'ring', radius: [0.01, 0.02], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
-    expect(msg(one({ kind: 'stroke', length: [0.01, 0.02], points: [[0, 0], [1, 1]], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
+    expect(unit(one({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: [0.003, 0.006] }), 'layers[0].sprite.width')).toBe(range);
+    expect(unit(one({ kind: 'ring', radius: [0.01, 0.02], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
+    expect(unit(one({ kind: 'stroke', length: [0.01, 0.02], points: [[0, 0], [1, 1]], color: '#ffffff', width: [1, 2] }), 'layers[0].sprite.width')).toBe(range);
     const bar = one({ kind: 'bar', values: [1, 2, 3], length: [0.1, 0.2], thickness: [0.01, 0.02], max: [1, 2], color: '#ffffff' });
-    expect(msg(bar, 'layers[0].sprite.length')).toBe(range);
-    expect(msg(bar, 'layers[0].sprite.thickness')).toBe(range);
-    expect(msg(bar, 'layers[0].sprite.max')).toBe(range);
-    expect(msg(one({ kind: 'text', strings: ['a'], maxWidth: [1, 2] }), 'layers[0].sprite.maxWidth')).toBe(range);
+    expect(unit(bar, 'layers[0].sprite.length')).toBe(range);
+    expect(unit(bar, 'layers[0].sprite.thickness')).toBe(range);
+    expect(unit(bar, 'layers[0].sprite.max')).toBe(range);
+    expect(unit(one({ kind: 'text', strings: ['a'], maxWidth: [1, 2] }), 'layers[0].sprite.maxWidth')).toBe(range);
     const links = one({ kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }, { links: { k: 2, maxDist: [0.1, 0.2], width: [1, 2] } });
-    expect(msg(links, 'layers[0].links.maxDist')).toBe(range);
-    expect(msg(links, 'layers[0].links.width')).toBe(range);
+    expect(unit(links, 'layers[0].links.maxDist')).toBe(range);
+    expect(unit(links, 'layers[0].links.width')).toBe(range);
     const band = { ...one({ kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' }), background: { type: 'gradient', stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#111111' }], band: { color: '#222222', height: [0.1, 0.2] } } };
-    expect(msg(band, 'background.band.height')).toBe(range);
+    expect(unit(band, 'background.band.height')).toBe(range);
     const tb = { schemaVersion: 1, id: 'o', label: 'O', layers: [{ count: 1, sprite: { kind: 'textBlock', text: 'hi', maxWidth: [0.3, 0.5], fontSize: [0.03, 0.04] }, motion: { type: 'static' }, position: { x: 0.2, y: 0.2 } }] };
-    expect(msg(tb, 'layers[0].sprite.maxWidth')).toBe('must be a single number (viewport fraction), not a [min,max] range');
-    expect(msg(tb, 'layers[0].sprite.fontSize')).toBe('must be a single number (viewport fraction), not a [min,max] range');
+    expect(unit(tb, 'layers[0].sprite.maxWidth')).toBe('must be a single number (viewport fraction), not a [min,max] range');
+    expect(unit(tb, 'layers[0].sprite.fontSize')).toBe('must be a single number (viewport fraction), not a [min,max] range');
   });
 
   it('a non-positive scalar keeps its original message', () => {
@@ -565,5 +567,118 @@ describe('ignoredPropertyPaths', () => {
     expect(ignoredPropertyPaths(spec).sort()).toEqual(['background.angle', 'layers.0.motion.wobble', 'layers.0.sprite.blend']);
     expect(JSON.stringify(spec)).toBe(before); // validateSpec would have written sprite.color
     expect(ignoredPropertyPaths(null)).toEqual([]);
+  });
+});
+
+describe('validateSpec — Screen Test cold-read messages (F141, F142, F148)', () => {
+  const spec = (sprite: Record<string, unknown>, extra: Record<string, unknown> = {}, top: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 1, id: 's', label: 'S', ...top,
+    layers: [{ count: 3, sprite, motion: { type: 'drift', speed: [0.01, 0.02] }, ...extra }],
+  });
+  const msg = (s: unknown, path: string): string | undefined => validateSpec(s).errors.find((e) => e.path === path)?.message;
+  const unknown = (s: unknown): string[] => (validateSpec(s).warnings ?? []).filter((w) => w.code === 'unknown-property').map((w) => w.path);
+  const circle = { kind: 'circle', radius: [0.01, 0.02], color: '#ffffff' };
+  const leaf = 'M 0 -1 L 1 0 L 0 1 L -1 0 Z';
+
+  describe('F142: the error echoes the value and the fix', () => {
+    it('a scalar where a range belongs (was: "must be a [min,max] range of positive …" alone)', () => {
+      expect(msg(spec({ kind: 'circle', radius: 0.018, color: '#ffffff' }), 'layers[0].sprite.radius'))
+        .toBe('must be a [min,max] range of positive fractions of min(width, height) — got 0.018; write [0.018, 0.018]');
+      expect(msg(spec({ kind: 'polygon', radius: 0.02, color: '#ffffff' }), 'layers[0].sprite.radius')).toMatch(/\(circumradius\) — got 0\.02; write \[0\.02, 0\.02\]$/);
+      expect(msg(spec({ kind: 'rect', width: 0.055, aspect: 0.22, color: '#ffffff' }), 'layers[0].sprite.width')).toMatch(/ — got 0\.055; write \[0\.055, 0\.055\]$/);
+      expect(msg(spec({ kind: 'rect', width: [0.05, 0.06], aspect: 0.22, color: '#ffffff' }), 'layers[0].sprite.aspect'))
+        .toBe('must be a [min,max] range of positive height/width ratios — got 0.22; write [0.22, 0.22]');
+      expect(msg(spec({ kind: 'stroke', length: 0.1, points: [[0, 0], [1, 1]], color: '#ffffff' }), 'layers[0].sprite.length')).toMatch(/ — got 0\.1; write \[0\.1, 0\.1\]$/);
+      expect(msg({ ...spec(circle), layers: [{ count: 3, sprite: circle, motion: { type: 'drift', speed: 0.02 } }] }, 'layers[0].motion.speed'))
+        .toBe('must be a [min,max] range — got 0.02; write [0.02, 0.02]');
+      expect(msg(spec(circle, { alpha: 0.6 }), 'layers[0].alpha')).toBe('must be a [min,max] range within 0..1 — got 0.6; write [0.6, 0.6]');
+      expect(msg(spec(circle, { size: 2 }), 'layers[0].size')).toMatch(/ — got 2; write \[2, 2\]$/);
+    });
+
+    it('does not suggest [v, v] when v itself is out of bounds', () => {
+      expect(msg(spec(circle, { alpha: 1.4 }), 'layers[0].alpha')).toBe('must be a [min,max] range within 0..1 — got 1.4; a range is two numbers, [min, max]');
+      expect(msg(spec({ kind: 'circle', radius: 0, color: '#ffffff' }), 'layers[0].sprite.radius')).toMatch(/ — got 0; a range is two numbers, \[min, max\]$/);
+    });
+
+    it('region.x / region.y written as {min, max} (was: "must be a [min,max] range within 0..1")', () => {
+      expect(msg(spec(circle, { region: { x: { min: 0.2, max: 0.8 } } }), 'layers[0].region.x'))
+        .toBe('must be a [min,max] range within 0..1 — got {min, max}; write [0.2, 0.8]');
+    });
+
+    it('a reversed range names the order', () => {
+      expect(msg(spec({ kind: 'circle', radius: [0.02, 0.01], color: '#ffffff' }), 'layers[0].sprite.radius')).toMatch(/ — got \[0\.02, 0\.01\]; the smaller number comes first: write \[0\.01, 0\.02\]$/);
+    });
+
+    it('a range where one number belongs (was: "must be a single number > 0, not a [min,max] range")', () => {
+      expect(msg(spec({ kind: 'streak', length: [0.01, 0.02], width: [0.0012, 0.002], color: '#ffffff' }), 'layers[0].sprite.width'))
+        .toBe("must be a single number > 0, not a [min,max] range — got [0.0012, 0.002]; a streak's `width` is one number");
+      expect(msg(spec({ kind: 'stroke', length: [0.01, 0.02], points: [[0, 0], [1, 1]], width: [1, 2], color: '#ffffff' }), 'layers[0].sprite.width')).toMatch(/a stroke's `width` is one number$/);
+      // A path stroke's width had no range branch: "must be > 0 and <= 0.5 …" alone.
+      expect(msg(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, stroke: { color: '#000000', width: [0.01, 0.02] } }), 'layers[0].sprite.stroke.width'))
+        .toMatch(/^must be > 0 and <= 0\.5 .* — got \[0\.01, 0\.02\]; `stroke\.width` is one number$/);
+      expect(msg(spec(circle, { pulse: { amp: [0.1, 0.2], period: 4000 } }), 'layers[0].pulse.amp')).toMatch(/ — got \[0\.1, 0\.2\]; `pulse\.amp` is one number$/);
+    });
+
+    it('leaves pair-shaped and well-formed messages alone, and coerces nothing', () => {
+      // `origin` takes a pair: no "one number" hint.
+      expect(msg(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, origin: [3, 3] }), 'layers[0].sprite.origin')).not.toMatch(/one number/);
+      expect(msg(spec({ kind: 'streak', length: [0.01, 0.02], color: '#ffffff', width: 0 }), 'layers[0].sprite.width')).toBe('must be > 0');
+      const scalar = spec({ kind: 'circle', radius: 0.018, color: '#ffffff' });
+      expect(validateSpec(scalar).valid).toBe(false);
+      expect(((scalar.layers as Array<Record<string, Record<string, unknown>>>)[0]!.sprite!).radius).toBe(0.018);
+    });
+
+    it('a keyed value is hinted once, by the applied scene', () => {
+      const s = spec(circle, { key: 'dots', alpha: [0.5, 0.5] }, { timeline: { keys: [{ t: 0, path: 'dots.alpha', value: 0.7 }] } });
+      const m = validateSpec(s).errors[0]?.message ?? '';
+      expect(m).toContain('got 0.7; write [0.7, 0.7]');
+      expect(m.split(' — got ').length).toBe(2);
+    });
+  });
+
+  describe('F141: a missing colour is reported as missing', () => {
+    it('a polygon whose parts carry the paint (was: "must be a hex colour like #0a3a52")', () => {
+      const parts = spec({ kind: 'polygon', radius: [0.1, 0.1], parts: [{ path: leaf, color: '#ff0000' }] });
+      expect(msg(parts, 'layers[0].sprite.color')).toBe('`color` is required (or a `colors` palette); parts without their own colour inherit it, and a gradient or stroke does not stand in for it');
+      const gradient = spec({ kind: 'polygon', radius: [0.1, 0.1], path: leaf, gradient: { type: 'linear', from: [0, -1], to: [0, 1], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] } });
+      expect(msg(gradient, 'layers[0].sprite.color')).toMatch(/^`color` is required \(or a `colors` palette\)/);
+    });
+
+    it('other sprites and strokes, and a `colors` palette still stands in for it', () => {
+      expect(msg(spec({ kind: 'circle', radius: [0.01, 0.02] }), 'layers[0].sprite.color')).toBe('`color` is required (or a `colors` palette)');
+      expect(msg(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, stroke: { width: 0.01 } }), 'layers[0].sprite.stroke.color'))
+        .toBe('`color` is required on a stroke (a hex colour like #0a3a52); a stroke does not inherit the entity colour');
+      expect(validateSpec(spec({ kind: 'polygon', radius: [0.1, 0.1], colors: ['#ff0000'], parts: [{ path: leaf }] })).valid).toBe(true);
+    });
+
+    it('keeps the format error for a present but malformed colour', () => {
+      expect(msg(spec({ kind: 'circle', radius: [0.01, 0.02], color: 'red' }), 'layers[0].sprite.color')).toBe('must be a hex colour like #0a3a52');
+      expect(msg(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, stroke: { color: 'black', width: 0.01 } }), 'layers[0].sprite.stroke.color')).toBe('must be a hex colour like #0a3a52');
+    });
+  });
+
+  describe('F148 (X761): unknown keys inside nested paint objects warn', () => {
+    const grad = { type: 'linear', from: [0, -1], to: [0, 1], stops: [{ at: 0, color: '#000000' }, { at: 1, color: '#ffffff' }] };
+    it('sprite and part strokes, path gradients and their stops (were silent)', () => {
+      const s = spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', parts: [
+        { path: leaf, stroke: { color: '#000000', width: 0.01, dash: [2, 2] } },
+        { path: leaf, gradient: { ...grad, angle: 30, stops: [{ at: 0, color: '#000000', offset: 1 }, { at: 1, color: '#ffffff' }] } },
+      ] });
+      expect(unknown(s)).toEqual(['layers[0].sprite.parts[0].stroke.dash', 'layers[0].sprite.parts[1].gradient.angle', 'layers[0].sprite.parts[1].gradient.stops[0].offset']);
+      expect(validateSpec(s).valid).toBe(true);
+      expect(unknown(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, stroke: { color: '#000000', width: 0.01, dash: [2, 2] } }))).toEqual(['layers[0].sprite.stroke.dash']);
+      // A radial gradient has no `from`: the renderer never reads it.
+      expect(unknown(spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, gradient: { type: 'radial', center: [0, 0], radius: 1, from: [0, 0], stops: grad.stops } }))).toEqual(['layers[0].sprite.gradient.from']);
+    });
+
+    it('background stops, band and drift', () => {
+      const bg = { type: 'gradient', stops: [{ at: 0, color: '#000000', opacity: 0.5 }, { at: 1, color: '#111111' }], band: { color: '#222222', height: 0.1, blur: 2 }, drift: { period: 20000, speed: 1 } };
+      expect(unknown(spec(circle, {}, { background: bg }))).toEqual(['background.stops[0].opacity', 'background.drift.speed', 'background.band.blur']);
+    });
+
+    it('known keys stay quiet', () => {
+      const s = spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, gradient: { ...grad, units: 'part', stops: [{ at: 0, color: '#000000', opacity: 0.4 }, { at: 1, color: '#ffffff' }] }, stroke: { color: '#000000', width: 0.01, opacity: 0.5, join: 'round', cap: 'round', draw: { end: 0.5 } } });
+      expect(unknown(s)).toEqual([]);
+    });
   });
 });

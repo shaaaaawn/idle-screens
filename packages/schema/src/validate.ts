@@ -139,6 +139,16 @@ const KNOWN_BG_SOLID = new Set(['type', 'color']);
 const KNOWN_BG_GRADIENT = new Set(['type', 'stops', 'band', 'drift']);
 const KNOWN_BG_FIELD = new Set(['type', 'scale', 'octaves', 'warp', 'quantize', 'bands', 'drift', 'seed']);
 const KNOWN_FIELD_DRIFT = new Set(['period', 'amount']);
+const KNOWN_BG_STOP = new Set(['at', 'color']);
+const KNOWN_BAND = new Set(['color', 'height']);
+const KNOWN_BG_DRIFT = new Set(['period', 'amount']);
+/** Nested paint objects (X761): unknown keys here passed silently while `stroke.draw.zzz` warned. */
+const KNOWN_PATH_STROKE = new Set(['color', 'width', 'opacity', 'join', 'cap', 'draw']);
+const KNOWN_PATH_GRADIENT = {
+  linear: new Set(['type', 'from', 'to', 'stops', 'units']),
+  radial: new Set(['type', 'center', 'radius', 'focus', 'stops', 'units']),
+} as const;
+const KNOWN_PATH_STOP = new Set(['at', 'color', 'opacity']);
 
 // Layer-level properties that models commonly misplace inside sprite
 const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate', 'rock']);
@@ -182,6 +192,74 @@ function rangeMsg(spec: unknown, note?: string): string {
 function positiveScalar(v: unknown, path: string, err: (p: string, m: string) => void, msg = 'must be > 0'): void {
   if (Array.isArray(v)) err(path, 'must be a single number > 0, not a [min,max] range');
   else if (!isNum(v) || v <= 0) err(path, msg);
+}
+
+/** The value at a validator error path (`layers[0].sprite.parts[2].stroke.width`), or undefined. */
+function valueAtPath(root: unknown, path: string): unknown {
+  let v: unknown = root;
+  for (const seg of path.match(/[^.[\]]+/g) ?? []) {
+    if (Array.isArray(v) && /^\d+$/.test(seg)) v = v[Number(seg)];
+    else if (isObj(v)) v = v[seg];
+    else return undefined;
+  }
+  return v;
+}
+
+/** A received value, short enough for one error line. */
+function echo(v: unknown): string {
+  if (isNum(v)) return String(v);
+  if (Array.isArray(v) && v.length <= 4 && v.every(isNum)) return `[${v.join(', ')}]`;
+  const s = JSON.stringify(v) ?? String(v);
+  return s.length > 48 ? `${s.slice(0, 45)}…` : s;
+}
+
+/** A message for a field that takes a [min,max] range ("must be a [min,max] range …"). */
+const RANGE_WANTED = /^must be a \[min,max\] range/;
+/**
+ * A message for a field that takes one number: the scalar-only messages
+ * ("…, not a [min,max] range"), and plain bounds ("must be > 0", "must be
+ * 0..1", "must be a number of ms") with no bracket notation in them, which
+ * would mean the field takes a pair or a range.
+ */
+const SCALAR_ONLY = /not a \[min,max\] range/;
+const SCALAR_BOUND = /^must be (?:>|an? (?:positive |single |finite |whole )?(?:number|integer)\b|between -?\d|-?\d[\d.]*\.\.-?[\d.]+(?: \(|$))/;
+const scalarWanted = (m: string): boolean => SCALAR_ONLY.test(m) || (!m.includes('[') && SCALAR_BOUND.test(m));
+
+/**
+ * The received value and the fix, appended to a shape error (F142): a scalar
+ * where a [min,max] range belongs (`got 0.018; write [0.018, 0.018]`), a
+ * range where one number belongs (`got [0.0012, 0.002]; a streak's `width`
+ * is one number`), and `{min, max}` written for `[min, max]`. One helper for
+ * every range and scalar site, so a new field inherits it. It only words the
+ * error — nothing is coerced, so which fields are seeded stays explicit.
+ */
+function shapeHint(spec: unknown, path: string, message: string): string {
+  if (message.includes(' — got ')) return '';
+  const v = valueAtPath(spec, path);
+  if (v === undefined) return '';
+  if (RANGE_WANTED.test(message)) {
+    if (isNum(v)) {
+      const fits = message.includes('within 0..1') ? v >= 0 && v <= 1 : message.includes('>= 0') ? v >= 0 : !message.includes('positive') || v > 0;
+      return fits ? ` — got ${v}; write [${v}, ${v}]` : ` — got ${v}; a range is two numbers, [min, max]`;
+    }
+    if (isObj(v) && ('min' in v || 'max' in v)) {
+      return ` — got {min, max}; write [${isNum(v.min) ? v.min : 'min'}, ${isNum(v.max) ? v.max : 'max'}]`;
+    }
+    if (Array.isArray(v) && v.length === 2 && isNum(v[0]) && isNum(v[1]) && v[0] > v[1]) {
+      return ` — got ${echo(v)}; the smaller number comes first: write [${v[1]}, ${v[0]}]`;
+    }
+    return ` — got ${echo(v)}`;
+  }
+  if (Array.isArray(v) && scalarWanted(message)) {
+    const segs = path.match(/[^.[\]]+/g) ?? [];
+    const key = segs[segs.length - 1] ?? path;
+    const parentKey = segs[segs.length - 2];
+    const parent = valueAtPath(spec, path.slice(0, path.lastIndexOf('.')));
+    const kind = isObj(parent) && isStr(parent.kind) ? parent.kind : undefined;
+    const noun = kind ? `${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind}'s \`${key}\`` : parentKey && !/^\d+$/.test(parentKey) && parentKey !== 'sprite' ? `\`${parentKey}.${key}\`` : `\`${key}\``;
+    return ` — got ${echo(v)}; ${noun} is one number`;
+  }
+  return '';
 }
 
 /**
@@ -299,7 +377,7 @@ function specPathsValid(spec: SaverSpec, paths: Iterable<string>): boolean {
 function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
-  const err = (path: string, message: string): void => void errors.push({ path, message });
+  const err = (path: string, message: string): void => void errors.push({ path, message: message + shapeHint(spec, path, message) });
   const warn = (path: string, code: string, message: string): void => void warnings.push({ path, code, message });
 
   if (!isObj(spec)) return { valid: false, errors: [{ path: '', message: 'spec must be an object' }], warnings: [] };
@@ -552,9 +630,22 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
   }
 }
 
-function color(v: unknown, path: string, err: (p: string, m: string) => void): void {
-  if (!isStr(v) || !HEX.test(v)) err(path, 'must be a hex colour like #0a3a52');
+/**
+ * A hex colour. A missing one is reported as missing, not as a format error
+ * (F141): "must be a hex colour" sent authors who never wrote the field
+ * hunting through values they had written correctly. `missing` is the
+ * message for an absent value; a present but malformed one keeps the format
+ * message.
+ */
+function color(v: unknown, path: string, err: (p: string, m: string) => void, missing = 'is required (a hex colour like #0a3a52)'): void {
+  if (v === undefined) err(path, missing);
+  else if (!isStr(v) || !HEX.test(v)) err(path, 'must be a hex colour like #0a3a52');
 }
+
+/** A sprite's entity colour: required unless a `colors` palette supplies it (normalizeColors fills it from `colors[0]`). */
+const SPRITE_COLOR_MISSING = '`color` is required (or a `colors` palette)';
+/** Polygon parts and gradients paint over the entity colour but do not replace the need for one (F141). */
+const POLYGON_COLOR_MISSING = `${SPRITE_COLOR_MISSING}; parts without their own colour inherit it, and a gradient or stroke does not stand in for it`;
 
 type WarnFn = (path: string, code: string, message: string) => void;
 
@@ -590,6 +681,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       bg.stops.forEach((s, i) => {
         if (!isObj(s) || !isNum(s.at) || s.at < 0 || s.at > 1) err(`background.stops[${i}].at`, 'must be 0..1');
         color(isObj(s) ? s.color : undefined, `background.stops[${i}].color`, err);
+        if (isObj(s)) for (const k of unknownKeys(s, KNOWN_BG_STOP)) warn(`background.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored`);
       });
     }
     if (bg.drift !== undefined) {
@@ -601,6 +693,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
         if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount <= 0 || bg.drift.amount > LIMITS.maxDriftAmount)) {
           err('background.drift.amount', `must be > 0 and <= ${LIMITS.maxDriftAmount}`);
         }
+        for (const k of unknownKeys(bg.drift, KNOWN_BG_DRIFT)) warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
       }
     }
     if (bg.band !== undefined) {
@@ -608,6 +701,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       else {
         color(bg.band.color, 'background.band.color', err);
         positiveScalar(bg.band.height, 'background.band.height', err);
+        for (const k of unknownKeys(bg.band, KNOWN_BAND)) warn(`background.band.${k}`, 'unknown-property', `unknown band property '${k}' — will be ignored`);
       }
     }
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
@@ -1053,19 +1147,19 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
   } else if (sprite.kind === 'circle') {
     knownSet = KNOWN_CIRCLE;
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'ring') {
     knownSet = KNOWN_RING;
     if (!isRange(sprite.radius) || sprite.radius[0] <= 0) err(`${path}.radius`, rangeMsg(spec));
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'streak') {
     knownSet = KNOWN_STREAK;
     if (!isRange(sprite.length) || sprite.length[0] <= 0) err(`${path}.length`, rangeMsg(spec));
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     if (sprite.width !== undefined) positiveScalar(sprite.width, `${path}.width`, err);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'rect') {
@@ -1077,7 +1171,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.feather !== undefined && (!isNum(sprite.feather) || sprite.feather < 0 || sprite.feather > 1)) {
       err(`${path}.feather`, 'must be 0..1 (fraction of the half-size that fades out)');
     }
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'bar') {
     knownSet = KNOWN_BAR;
@@ -1090,7 +1184,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.direction !== undefined && !['right', 'left', 'up', 'down'].includes(sprite.direction as string)) {
       err(`${path}.direction`, "must be 'right' | 'left' | 'up' | 'down'");
     }
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'polygon') {
     knownSet = KNOWN_POLYGON;
@@ -1136,7 +1230,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
       if (sprite.origin !== undefined && !(Array.isArray(sprite.origin) && sprite.origin.length === 2 && sprite.origin.every((v: unknown) => isNum(v) && Math.abs(v) <= 1))) err(`${path}.origin`, 'must be [x, y] in the unit box (-1..1): the point placed at the position');
     }
     if (sprite.soft !== undefined && typeof sprite.soft !== 'boolean') err(`${path}.soft`, 'must be a boolean');
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, POLYGON_COLOR_MISSING);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'stroke') {
     knownSet = KNOWN_STROKE;
@@ -1147,7 +1241,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (sprite.taper !== undefined && typeof sprite.taper !== 'boolean') err(`${path}.taper`, 'must be a boolean');
     if (sprite.orient !== undefined && typeof sprite.orient !== 'boolean') err(`${path}.orient`, 'must be a boolean');
     if (sprite.draw !== undefined) validateDraw(sprite.draw, `${path}.draw`, err, warn);
-    color(sprite.color, `${path}.color`, err);
+    color(sprite.color, `${path}.color`, err, SPRITE_COLOR_MISSING);
     validatePalette(sprite, path, err);
   } else if (sprite.kind === 'textBlock') {
     knownSet = KNOWN_TEXT_BLOCK;
@@ -1500,12 +1594,12 @@ function validatePathPiece(piece: Record<string, unknown>, path: string, err: (p
 function validatePiecePaint(piece: Record<string, unknown>, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (piece.fill !== undefined && typeof piece.fill !== 'boolean') err(`${path}.fill`, 'must be a boolean');
   if (piece.fill === false && piece.stroke === undefined) err(`${path}.fill`, 'fill: false draws nothing without a stroke');
-  if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err);
+  if (piece.gradient !== undefined) validatePathGradient(piece.gradient, `${path}.gradient`, err, warn);
   if (piece.stroke !== undefined) validatePathStroke(piece.stroke, `${path}.stroke`, err, warn);
 }
 
 /** A path gradient: linear {from, to} or radial {center, radius, focus?}, 2..8 stops, in unit-box coordinates. */
-function validatePathGradient(g: unknown, path: string, err: (p: string, m: string) => void): void {
+function validatePathGradient(g: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(g)) return err(path, "must be { type: 'linear', from, to, stops } or { type: 'radial', center, radius, stops }");
   if (g.type === 'linear') {
     if (!isPair(g.from)) err(`${path}.from`, 'must be [x, y] in unit-box coordinates (-2..2)');
@@ -1517,6 +1611,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
   } else {
     return err(`${path}.type`, "must be 'linear' | 'radial'");
   }
+  for (const k of unknownKeys(g, KNOWN_PATH_GRADIENT[g.type as 'linear' | 'radial'])) warn(`${path}.${k}`, 'unknown-property', `unknown ${g.type} gradient property '${k}' — will be ignored`);
   if (g.units !== undefined && g.units !== 'box' && g.units !== 'part') err(`${path}.units`, "must be 'box' (the drawing's unit box, default) | 'part' (the part's own box, -1..1)");
   if (!Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 8) return err(`${path}.stops`, 'must be 2..8 stops');
   let last = -Infinity;
@@ -1526,18 +1621,20 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
     else last = st.at;
     color(st.color, `${path}.stops[${i}].color`, err);
     if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.stops[${i}].opacity`, 'must be 0..1');
+    for (const k of unknownKeys(st, KNOWN_PATH_STOP)) warn(`${path}.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored`);
   });
 }
 
 /** A path stroke: colour, width in unit-box units, optional opacity / join / cap. */
 function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
-  color(st.color, `${path}.color`, err);
+  color(st.color, `${path}.color`, err, '`color` is required on a stroke (a hex colour like #0a3a52); a stroke does not inherit the entity colour');
   if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
   if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err, warn);
+  for (const k of unknownKeys(st, KNOWN_PATH_STROKE)) warn(`${path}.${k}`, 'unknown-property', `unknown stroke property '${k}' — will be ignored`);
 }
 
 /** A wipe transition's edge: shape, origin, angle and feather. */
