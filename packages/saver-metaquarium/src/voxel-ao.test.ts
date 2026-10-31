@@ -1,7 +1,7 @@
 import { BufferAttribute, BufferGeometry, Color, Group } from 'three';
 import { describe, expect, it } from 'vitest';
 import { batch, CubeWriter } from './scenery-paint';
-import { bakeVoxelOcclusion, BoxField, voxelOcclusion } from './voxel-ao';
+import { bakeVoxelOcclusion, BoxField, faceCorners, voxelOcclusion } from './voxel-ao';
 
 /** Unit cubes at integer cells: their quads (CubeWriter's winding) and their boxes. */
 function cubes(cells: Array<[number, number, number]>): { pos: number[]; boxes: number[] } {
@@ -82,9 +82,28 @@ describe('voxel occlusion', () => {
     const merged = batch(new Group(), [part([[0, 0, 0]]), part([[0, 1, 0], [1, 1, 0]])], 'test')!.geometry;
     expect(bakeVoxelOcclusion(merged)).toBe(true);
     const occ = merged.getAttribute('aMqOcc').array as Float32Array;
-    expect(occ.length).toBe(merged.getAttribute('position').count);
+    expect(occ.length).toBe(merged.getAttribute('position').count * 4);
+    expect(merged.getAttribute('aMqOccUV').count).toBe(merged.getAttribute('position').count);
     // The first part's cube sits under the second part's pair: its +x side meets the overhang.
     expect(Math.max(...occ)).toBeGreaterThan(0);
     expect(bakeVoxelOcclusion(merged)).toBe(false);
+  });
+
+  it('hands every vertex its face\'s four corners and which corner it is, for a bilinear blend', () => {
+    const { pos } = cubes([[0, 0, 0]]);
+    const quad = pos.slice(0, 18);
+    // Dark at one corner only: the blend must reproduce each vertex's own value at its own corner.
+    const occ = new Float32Array(6);
+    const P = (i: number): string => quad.slice(i * 3, i * 3 + 3).join(',');
+    for (let i = 0; i < 6; i += 1) if (P(i) === P(0)) occ[i] = 1;
+    const { corners, uv } = faceCorners(quad, occ);
+    for (let v = 0; v < 6; v += 1) {
+      const c = Array.from(corners.subarray(v * 4, v * 4 + 4)), [u, w] = [uv[v * 2]!, uv[v * 2 + 1]!];
+      const blend = (1 - w) * ((1 - u) * c[0]! + u * c[1]!) + w * ((1 - u) * c[3]! + u * c[2]!);
+      expect(blend).toBeCloseTo(occ[v]!, 6);
+      // The same four corners on all six vertices of the face.
+      expect(c).toEqual(Array.from(corners.subarray(0, 4)));
+    }
+    expect(Array.from(corners.subarray(0, 4)).filter((x) => x === 1)).toHaveLength(1);
   });
 });
