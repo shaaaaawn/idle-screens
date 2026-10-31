@@ -312,6 +312,13 @@ export const METAQUARIUM_PARAMS = {
   /** The dance's tempo, beats per minute. Every move is a bar of four beats.
    *  Integrated when steered, so a glide speeds the class up on the beat. */
   danceTempo: { type: 'number', default: 128, min: 60, max: 180, ease: 'smooth' },
+  /** An authored dance on the beat (choreo.ts): a cue sheet per dancer —
+   *  `a: 8:lie, 4:rise, 4:reach >right @cam | *: 4:march ~360, 4:jacks ^0.5`.
+   *  Set, every starfish dances it (in the class's places, or the couples'
+   *  under `starfishDance: duet`), facing `cameraAzimuth`; a dancer it leaves
+   *  out keeps `starfishDance`'s routine, or stands and waits. Beats on the
+   *  `danceTempo` clock from the start, so a sheet lines up with music. */
+  choreography: { type: 'string', default: '', ease: 'step' },
   /** Eye life, 0..1: blinks on a personal clock, idle saccades, pupils that
    *  lead a turn or a climb, eyes on whoever a vignette has it talking to, a
    *  glance at the camera now and then, wide for a hop and shut for a rest.

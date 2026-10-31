@@ -219,6 +219,7 @@ export function describeMetaquarium(params: Params, timed: MetaquariumAnatomy['t
     stage.push(VIGNETTES[v] ? `vignette: ${v}` : `vignette: ${v.split(/[|\n]/).filter((b) => b.trim()).length} beats`);
   }
   if (str('starfishDance') !== 'off') stage.push(`starfish ${str('starfishDance')}${has('danceTempo') ? ` at ${num('danceTempo')} bpm` : ''}`);
+  if (str('choreography').trim()) stage.push(`a starfish choreography${has('danceTempo') ? ` at ${num('danceTempo')} bpm` : ''}`);
 
   // ---- camera -------------------------------------------------------------
   const camera: string[] = [];

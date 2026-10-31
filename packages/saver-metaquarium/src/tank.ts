@@ -87,7 +87,7 @@ import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
 import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
-  classSpot, coupleSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart,
+  classSpot, coupleSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart, STARFISH_MOVE_NAMES,
   type DuetRole, type StarfishDanceMode, type StarfishOutput, type StarfishRig,
 } from './starfish';
 import { anglerFrame, rigAngler, type AnglerRig } from './angler';
@@ -120,6 +120,7 @@ import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
+import { choreoLine, parseChoreography, type ChoreoLine, type ChoreoSheet } from './choreo';
 import { roomScale } from './interior';
 import { STAGE_SETS, type StageSet } from './club';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseAcross, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
@@ -1173,6 +1174,11 @@ class TankInstance implements SaverInstance {
   /** This frame's dance class: each dancer's feet, by fish index (starfish.ts classSpot). */
   private readonly danceSpots = new Map<number, [number, number]>();
   private danceYaw = 0;
+  /** The choreography (choreo.ts), parsed once per value; each dancer's class slot, the class's spacing and centre. */
+  private choreo: { key: string; sheet: ChoreoSheet | null } = { key: '', sheet: null };
+  private readonly danceSlots = new Map<number, number>();
+  private danceGap = 0;
+  private readonly danceCentre: [number, number] = [0, 0];
   /** The partner dance: each dancer's part, and its partner's fish index. */
   private readonly danceRoles = new Map<number, { role: DuetRole; partner: number }>();
   /** A partner dancer's part and its partner's feet (empty outside the partner dance). */
@@ -1232,6 +1238,15 @@ class TankInstance implements SaverInstance {
     const at = r ? this.danceSpots.get(r.partner) : undefined;
     return r && at ? { role: r.role, partnerX: at[0], partnerZ: at[1] } : {};
   }
+  /** A choreographed dancer's line (its own or `*`), and the class's spacing and centre for its travel. A dancer the
+   *  sheet leaves out keeps the dance mode's routine — or, with none, stands and waits (starfish.ts choreoFrame). */
+  private choreoOf(index: number): { line?: ChoreoLine; gap?: number; cx?: number; cz?: number } {
+    const sheet = this.choreo.sheet;
+    if (!sheet?.lines.size) return {};
+    const line = choreoLine(sheet, this.danceSlots.get(index) ?? -1);
+    return { ...(line ? { line } : {}), gap: this.danceGap, cx: this.danceCentre[0], cz: this.danceCentre[1] };
+  }
+
   /** Beats danced by `tSec` (starfish.ts danceBeats). */
   private danceBeats(tSec: number): number {
     return danceBeats(tSec, this.num('danceTempo'), this.space, this.track, this.danceTempoTracked);
@@ -3088,7 +3103,10 @@ class TankInstance implements SaverInstance {
     // A dance scene: every starfish (not seated in a formation) joins the
     // class at the tank's centre, in rows facing the camera (starfish.ts).
     const danceMode = this.str('starfishDance');
-    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle' || danceMode === 'duet';
+    const choreoValue = this.str('choreography');
+    if (choreoValue !== this.choreo.key) this.choreo = { key: choreoValue, sheet: choreoValue.trim() ? parseChoreography(choreoValue, STARFISH_MOVE_NAMES) : null };
+    const choreo = this.choreo.sheet?.lines.size ? this.choreo.sheet : null;
+    const dancing = danceMode === 'aerobics' || danceMode === 'freestyle' || danceMode === 'duet' || !!choreo;
     const danceSpots = this.danceSpots;
     danceSpots.clear();
     if (dancing) {
@@ -3097,7 +3115,9 @@ class TankInstance implements SaverInstance {
       // the followed dancer's own facing: the class would chase it round. Then
       // it faces the orbit's azimuth, which nothing here moves.
       const camX = this.camera.position.x, camZ = this.camera.position.z;
-      const yaw = followSlot >= 0 ? (this.num('cameraAzimuth') * Math.PI) / 180
+      // A choreography faces the orbit's azimuth too: travel, turns and facings are authored against the room, and a
+      // turning camera (autoRotate) must not swing the whole dance round with it.
+      const yaw = followSlot >= 0 || choreo ? (this.num('cameraAzimuth') * Math.PI) / 180
         : Math.hypot(camX, camZ) > 1e-6 ? Math.atan2(camX, camZ) : 0;
       const fx = Math.sin(yaw), fz = Math.cos(yaw);
       // The front of the class (the instructor) at the tank's centre, the rows
@@ -3110,11 +3130,18 @@ class TankInstance implements SaverInstance {
       const mid = spots.length ? Math.max(...spots.map((s) => s.depth)) : 0;
       const roles = this.danceRoles;
       roles.clear();
+      this.danceSlots.clear();
       dancers.forEach((f, slot) => {
         const { side } = spots[slot]!, depth = spots[slot]!.depth - mid;
         const gap = FISH_LENGTH * this.fishSizeAt(f.index) * 1.7;
         danceSpots.set(f.index, [fx * depth * gap + fz * side * gap, fz * depth * gap - fx * side * gap]);
+        this.danceSlots.set(f.index, slot);
+        if (slot === 0) this.danceGap = gap;
       });
+      // the class's centre: where a choreography's `>centre` goes
+      const all = [...danceSpots.values()];
+      this.danceCentre[0] = all.length ? all.reduce((a, p) => a + p[0], 0) / all.length : 0;
+      this.danceCentre[1] = all.length ? all.reduce((a, p) => a + p[1], 0) / all.length : 0;
       if (duet) {
         dancers.forEach((f, slot) => {
           const c = coupleSpot(slot, dancers.length);
@@ -3612,9 +3639,10 @@ class TankInstance implements SaverInstance {
             scale: starRig.norm * f.baseScale * size, ground: this.crabGround,
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
             ...(this.danceSpots.has(f.index) ? { dance: {
-              mode: this.str('starfishDance') as StarfishDanceMode, beats: this.danceBeats(tSec),
+              mode: (this.choreo.sheet?.lines.size && this.str('starfishDance') === 'off' ? 'choreo' : this.str('starfishDance')) as StarfishDanceMode, beats: this.danceBeats(tSec),
               x: this.danceSpots.get(f.index)![0], z: this.danceSpots.get(f.index)![1], yaw: this.danceYaw,
               ...this.partnerOf(f.index),
+              ...this.choreoOf(f.index),
             } } : {}),
           }, this.starOut)
         : null;
