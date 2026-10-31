@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAST_FOV, castPose, pickLandmark, SHOT_NAMES, shotBearing, shotPose, type ShotInput, type ShotPose } from './shots';
+import { CAST_FOV, castPose, lastStepChange, pickLandmark, shotBlendAt, SHOT_NAMES, shotBearing, shotPose, type ShotInput, type ShotPose } from './shots';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { PARAM_DOCS } from './guide';
 
@@ -99,5 +99,39 @@ describe('cast shot', () => {
     const low = castPose([{ x: 0, y: -5, z: 0 }], 16, { ...base, floor: () => 20 }, out())!;
     expect(low.ty).toBe(28);
     expect(castPose([], 16, base, out())).toBeNull();
+  });
+});
+
+describe('shot blend', () => {
+  const d = (t: number, value: string) => ({ t, path: 'shot', value });
+  const track = { deltas: [{ t: 0, path: 'fishMix', value: 'dori:3' }, d(0, 'hero'), d(10_000, 'cast'), d(30_000, 'top')] };
+
+  it('reads when the shot last changed, from what to what', () => {
+    expect(lastStepChange(track, 'shot', 5_000)).toBeNull(); // the mount is not a cut
+    expect(lastStepChange(track, 'shot', 12_000)).toEqual({ from: 'hero', to: 'cast', at: 10_000 });
+    expect(lastStepChange(track, 'shot', 31_000)).toEqual({ from: 'cast', to: 'top', at: 30_000 });
+    expect(lastStepChange({ deltas: [d(0, 'hero'), d(5_000, 'hero')] }, 'shot', 6_000)).toBeNull(); // no change
+    expect(lastStepChange({ deltas: [] }, 'shot', 6_000)).toBeNull();
+  });
+
+  it('on a loop, the seam is a change from the second cycle on', () => {
+    const loop = { ...track, loop: true, duration: 40_000 };
+    expect(lastStepChange(loop, 'shot', 1_000)).toBeNull();
+    expect(lastStepChange(loop, 'shot', 41_000)).toEqual({ from: 'top', to: 'hero', at: 40_000 });
+    expect(lastStepChange(loop, 'shot', 52_000)).toEqual({ from: 'hero', to: 'cast', at: 50_000 });
+    // A loop whose first key is late: before it, the last change was the previous cycle's last key.
+    const late = { deltas: [d(5_000, 'hero'), d(20_000, 'cast')], loop: true, duration: 30_000 };
+    expect(lastStepChange(late, 'shot', 32_000)).toEqual({ from: 'hero', to: 'cast', at: 20_000 });
+  });
+
+  it('eases from 0 to 1 over the blend, smoothly at both ends; no blend is a cut', () => {
+    expect(shotBlendAt(0, 4)).toBe(0);
+    expect(shotBlendAt(2, 4)).toBeCloseTo(0.5, 9);
+    expect(shotBlendAt(4, 4)).toBe(1);
+    expect(shotBlendAt(9, 4)).toBe(1);
+    expect(shotBlendAt(0, 0)).toBe(1);
+    const e = 1e-4;
+    expect((shotBlendAt(e, 4) - shotBlendAt(0, 4)) / e).toBeLessThan(1e-3); // starts at rest
+    expect((shotBlendAt(4, 4) - shotBlendAt(4 - e, 4)) / e).toBeLessThan(1e-3); // and lands at rest
   });
 });

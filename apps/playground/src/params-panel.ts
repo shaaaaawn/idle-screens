@@ -122,13 +122,13 @@ function fishPicker(value: ParamValue, onChange: (v: ParamValue) => void): Param
 const METAQUARIUM: PanelKnowledge = {
   owns: (saver) => saver.manifest.id === 'metaquarium' || saver.manifest.id.startsWith('metaquarium-'),
   sections: [
-    ['camera', ['shot', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle', 'followAvoid', 'nearFade']],
+    ['camera', ['shot', 'shotBlend', 'cameraAzimuth', 'cameraElevation', 'cameraDistance', 'autoRotate', 'cameraFollow', 'followDistance', 'followAngle', 'followAvoid', 'nearFade']],
     ['light', ['caustics', 'causticScale', 'surfaceMirror', 'highlights', 'tiltShift']],
     ['cast', ['fishMix', 'fishCount', 'fishUrl', 'dracoPath', 'vignette']],
     ['dance', ['starfishDance', 'danceTempo']],
     ['snails', ['snailShell']],
     // The renderer's look: on by default, listed so it can be turned off.
-    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient', 'fishRim', 'fishShadows']],
+    ['look', ['fishLighting', 'fishGlow', 'fishMetal', 'fishLook', 'eyeLife', 'swimWave', 'fishAmbient', 'fishRim', 'fishShadows', 'sceneryShadows']],
     ['stage', ['followSpot', 'spotStrength', 'spotColor', 'spotShadow', 'spotRig', 'spotCues']],
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek', 'fishAvoid']],
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],

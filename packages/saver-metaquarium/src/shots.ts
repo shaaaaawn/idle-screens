@@ -188,3 +188,52 @@ export function castPose(points: readonly { x: number; y: number; z: number }[],
   out.fov = CAST_FOV;
   return out;
 }
+
+/** A step param's last change on a control track: what it was, what it is, and when (ms on the track's clock). */
+export interface StepChange { from: string; to: string; at: number }
+
+/**
+ * When `path` (a step param such as `shot`) last changed at `t` (ms), from
+ * what to what — the cut a `shotBlend` eases. Reads the deltas the way the
+ * track does: a step value holds from its own `t`. On a looping track the
+ * seam is a change too (from the cycle's last value to its first), from the
+ * second cycle on; the very first value, at mount, is not. Null when nothing
+ * changed (or changed to what it already was).
+ */
+export function lastStepChange(
+  track: { deltas: ReadonlyArray<{ t: number; path: string; value: unknown }>; loop?: boolean; duration?: number },
+  path: string, t: number,
+): StepChange | null {
+  const ds = track.deltas.filter((d) => d.path === path).slice().sort((a, b) => a.t - b.t);
+  if (!ds.length) return null;
+  const loop = !!track.loop && !!track.duration && track.duration > 0;
+  const w = loop ? t % track.duration! : t;
+  let i = -1;
+  for (let k = 0; k < ds.length; k++) if (ds[k]!.t <= w) i = k;
+  const cycle = t - w; // when this cycle began (0 off a loop)
+  let from: unknown, at: number;
+  if (i < 0) {
+    // Before this cycle's first key: the last change was the previous cycle's last key.
+    if (!loop || t < track.duration! || ds.length < 2) return null;
+    i = ds.length - 1;
+    from = ds[i - 1]!.value;
+    at = cycle - track.duration! + ds[i]!.t;
+  } else if (i > 0) {
+    from = ds[i - 1]!.value;
+    at = cycle + ds[i]!.t;
+  } else if (loop && t >= track.duration!) {
+    // The seam: this cycle's first key, from the last cycle's last.
+    from = ds[ds.length - 1]!.value;
+    at = cycle + ds[i]!.t;
+  } else return null;
+  const to = ds[i]!.value;
+  if (String(from) === String(to)) return null;
+  return { from: String(from), to: String(to), at };
+}
+
+/** How far into a `shotBlend` of `blend` seconds a camera is, `since` seconds after the cut: 0..1, eased (smootherstep). 1 when there is no blend. */
+export function shotBlendAt(since: number, blend: number): number {
+  if (!(blend > 0) || since >= blend) return 1;
+  const u = Math.max(0, since / blend);
+  return u * u * u * (u * (u * 6 - 15) + 10);
+}
