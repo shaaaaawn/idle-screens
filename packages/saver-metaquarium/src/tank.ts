@@ -887,6 +887,8 @@ class TankInstance implements SaverInstance {
   /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
   private finishPass: FinishPass | null = null;
   private finishAmount = 0;
+  /** `tiltShift`, as this tier allows it (the finish pass draws it). */
+  private tiltAmount = 0;
   /** The highlights pass (highlights.ts): made the first frame `highlights` goes above 0 on a tier and GPU that allow it. */
   private highlightPass: HighlightPass | null = null;
   private highlightAmount = 0;
@@ -2159,20 +2161,23 @@ class TankInstance implements SaverInstance {
     const tier = this.quality.glowLights;
     this.finishAmount = tier >= 3 ? this.num('finish') : 0;
     this.highlightAmount = tier >= 3 ? this.num('highlights') : 0;
-    if (this.finishAmount > 0 && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
+    this.tiltAmount = tier >= 3 ? this.num('tiltShift') : 0;
+    if ((this.finishAmount > 0 || this.tiltAmount > 0) && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
+    if (this.finishPass) this.finishPass.tilt = this.tiltAmount;
     if (this.highlightAmount > 0 && !this.highlightPass) {
       if (canHoldHighlights(this.renderer)) this.highlightPass = new HighlightPass(this.quality.antialias ? 4 : 0);
       else this.highlightAmount = 0;
     }
     if (this.highlightAmount <= 0) this.highlightPass?.release();
-    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0)) return;
+    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0 && this.tiltAmount <= 0)) return;
     this.postWrapped = true;
     const raw = this.renderer.render.bind(this.renderer);
     this.renderer.render = (scene, camera) => {
       // Only the tank's own frame for the canvas: the passes' quads, the mirror, stills and captures go straight through.
       if (scene !== this.scene || this.renderer.getRenderTarget() !== null) { raw(scene, camera); return; }
       const hl = this.highlightAmount > 0 ? this.highlightPass : null;
-      const fin = this.finishAmount > 0 ? this.finishPass : null;
+      // The finish carries tilt-shift too, so it runs for either (its grade at `finish`, 0 = none).
+      const fin = this.finishAmount > 0 || this.tiltAmount > 0 ? this.finishPass : null;
       if (hl && fin) fin.renderFrom(this.renderer, raw, hl.draw(this.renderer, raw, scene, camera), this.finishAmount, this.highlightAmount);
       else if (hl) hl.render(this.renderer, raw, scene, camera, this.highlightAmount);
       else if (fin) fin.render(this.renderer, raw, scene, camera, this.finishAmount);
