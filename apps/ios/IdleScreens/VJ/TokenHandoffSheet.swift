@@ -27,7 +27,7 @@ struct TokenHandoffSheet: View {
     /// A link the recipient can act on in one tap, rather than two paste
     /// operations they have to get right. Parsed by `ChannelTokenFormat`.
     private var deepLink: String {
-        "idlescreens://channel/\(handoff.credential.channelId)?token=\(handoff.token)"
+        ChannelTokenFormat.handoffLink(channelId: handoff.credential.channelId, token: handoff.token)
     }
 
     var body: some View {

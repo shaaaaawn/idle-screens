@@ -74,6 +74,7 @@ import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { addRimNormals, patchFishRim, setFishRim } from './rim';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
 import { HighlightPass, canHoldHighlights } from './highlights';
@@ -1030,6 +1031,8 @@ class TankInstance implements SaverInstance {
   /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
   private houseLevel = 1;
   private fishLightInstalled = false;
+  /** The fish's rim light (rim.ts): patched onto the lit coats the first frame `fishRim` is on. */
+  private fishRimInstalled = false;
   /** The near fade (nearfade.ts): patched onto the cast the first frame `nearFade` is on. */
   private nearFadeInstalled = false;
   /** Params a control track steers: an authored value, so a room palette never overrides them. */
@@ -2730,6 +2733,7 @@ class TankInstance implements SaverInstance {
     this.reconcile();
     this.updateCaustics(tSec);
     this.updateFishLight();
+    this.updateFishRim();
     this.updateNearFade();
 
     // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
@@ -4117,6 +4121,27 @@ class TankInstance implements SaverInstance {
       const mat = (n as Mesh).material as Material | Material[] | undefined;
       if (!mat) return;
       for (const m of Array.isArray(mat) ? mat : [mat]) patchFishLight(m);
+    });
+    for (const f of this.fish) if (f) patch(f.group);
+    if (this.shoal) patch(this.shoal.mesh);
+  }
+
+  /**
+   * The fish's rim (rim.ts): patched onto the lit coats the first frame
+   * `fishRim` is on (a fish that loads later gets it on its first frame),
+   * then fed the water's colour every frame. Lit mode only.
+   */
+  private updateFishRim(): void {
+    const amount = this.num('fishRim');
+    if (amount > 0) this.fishRimInstalled = true;
+    if (!this.fishRimInstalled) return;
+    setFishRim({ tint: this.waterTint(), surface: this.roomSurface, rays: this.roomRays, house: this.houseLevel, amount });
+    const patch = (o: Object3D): void => o.traverse((n) => {
+      const mat = (n as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      const ms = Array.isArray(mat) ? mat : [mat];
+      if (ms.some((m) => m.userData.mqFish)) addRimNormals((n as Mesh).geometry);
+      for (const m of ms) patchFishRim(m);
     });
     for (const f of this.fish) if (f) patch(f.group);
     if (this.shoal) patch(this.shoal.mesh);
