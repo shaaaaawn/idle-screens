@@ -419,6 +419,14 @@ describe('a choreographed starfish (choreo.ts)', () => {
     expect(starfishFrame(rig, input(5, 0, dance(sheet, 6)), blank()).squash).toBeCloseTo(0.84, 6); // landed
     expect(starfishFrame(rig, input(5, 0, dance(sheet, 8)), blank()).squash).toBeCloseTo(1, 9); // back up
   });
+  it('a lean pivots on what touches the floor, so nothing goes through it', () => {
+    const rig = rigged();
+    const upright = starfishFrame(rig, input(5, 0, dance('4:hold', 2)), blank());
+    const forward = starfishFrame(rig, input(5, 0, dance('4:hold /30', 2)), blank());
+    expect(forward.y - upright.y).toBeCloseTo(FEET * 0.375 * Math.sin(Math.PI / 6), 6); // on its feet: the disc rises by reach·sin
+    const lying = starfishFrame(rig, input(5, 0, dance('4:lie /-30', 2)), blank());
+    expect(lying.y).toBeGreaterThan(upright.y); // on its rim
+  });
   it('a starfish living its own life is never squashed', () => {
     const rig = rigged();
     const out = blank(); out.squash = 0.5;

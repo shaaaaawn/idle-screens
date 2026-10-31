@@ -531,8 +531,13 @@ function place(rig: StarfishRig, inp: StarfishInput, x: number, z: number, yaw: 
   const reach = up * rig.feet * inp.scale;
   out.x = x - fx * reach; out.z = z - fz * reach;
   out.y = inp.ground(x, z) + lift;
-  // a lean tips it about its feet, toward where it faces (+) or back
-  euler.set((lean * Math.PI) / 180, yaw, 0);
+  // a lean tips it about what touches the floor, never through it (probe-measured: a forward lean about the disc's place
+  // drove the feet a quarter of its height into the floor). Standing, it pivots on its feet: the disc rises by
+  // reach·sin and slides toward them. Lying, it pivots on its rim: it rises by a half-width·|sin|.
+  const lr = (lean * Math.PI) / 180, sl = Math.sin(lr);
+  if (lr > 0 && reach > 0) { const slide = reach * (1 - Math.cos(lr)); out.x += fx * slide; out.z += fz * slide; out.y += reach * sl; }
+  out.y += (1 - up) * inp.len * 0.45 * Math.abs(sl) + up * inp.len * 0.12 * Math.max(0, -sl);
+  euler.set(lr, yaw, 0);
   out.squash = 1;
   out.quaternion.setFromEuler(euler);
   out.fx = fx; out.fz = fz; out.tx = fx; out.tz = fz;
