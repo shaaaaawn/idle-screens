@@ -19,6 +19,7 @@
  *           dark gradients on 8-bit panels.
  */
 
+import { KNEE, SHOULDER_GLSL } from './highlights';
 import {
   Camera, FramebufferTexture, LinearFilter, Mesh, NoBlending, AdditiveBlending, OrthographicCamera, PlaneGeometry,
   Scene, ShaderMaterial, UnsignedByteType, Vector2, WebGLRenderTarget, type Object3D, type WebGLRenderer,
@@ -44,6 +45,8 @@ const BOX = /* glsl */ `
       + texture2D(tSrc, vUv + vec2(-o.x, o.y)).rgb + texture2D(tSrc, vUv + vec2(o.x, o.y)).rgb);
     if (uThreshold > 0.0) {
       // Soft knee: only what is already near white blooms.
+      // (A half-float source can be far past white: a shaft is a glow, not a flare.)
+      c = min(c, vec3(1.5));
       float l = max(c.r, max(c.g, c.b));
       float k = clamp((l - uThreshold) / (1.0 - uThreshold), 0.0, 1.0);
       c *= k * k;
@@ -54,21 +57,28 @@ const BOX = /* glsl */ `
 
 const COMPOSITE = /* glsl */ `
   uniform sampler2D tScene; uniform sampler2D tBloom;
-  uniform float uAmount; uniform float uBloom; uniform vec2 uRes;
+  uniform float uAmount; uniform float uBloom; uniform vec2 uRes; uniform float uHighlights;
   varying vec2 vUv;
+  ${SHOULDER_GLSL}
   float mqLuma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
   float mqRand(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
   void main() {
     // The finished frame, in display space: the grade is where "a touch of
     // contrast" means what it says, and the bloom adds like light on glass.
     vec3 g = texture2D(tScene, vUv).rgb + texture2D(tBloom, vUv).rgb * uBloom;
+    // With highlights, the source is the half-float frame: what is past white
+    // sits out the grade (its S-curve is for 0–1) and comes back for the shoulder.
+    vec3 over = vec3(0.0);
+    if (uHighlights > 0.0) { over = max(g - 1.0, 0.0); g = min(g, vec3(1.0)); }
     float a = uAmount;
     g = mix(g, g * g * (3.0 - 2.0 * g), 0.18 * a);       // S-curve
     float l = mqLuma(g);
     g = mix(vec3(l), g, 1.0 + 0.08 * a);                  // saturation
     g += a * ((1.0 - l) * vec3(-0.004, 0.006, 0.012) + l * vec3(0.014, 0.006, -0.008)); // cool shadows, warm highlights
     vec2 q = vUv - 0.5; q.x *= uRes.x / uRes.y;
-    g *= 1.0 - 0.2 * a * smoothstep(0.35, 0.95, length(q)); // vignette
+    float vig = 1.0 - 0.2 * a * smoothstep(0.35, 0.95, length(q));
+    g *= vig; // vignette
+    if (uHighlights > 0.0) g = mqShoulder(g + over * vig, ${KNEE.toFixed(3)}, uHighlights);
     // Dither: triangular noise of ±1 LSB, no visible grain.
     float n = mqRand(gl_FragCoord.xy) + mqRand(gl_FragCoord.xy + 17.31) - 1.0;
     gl_FragColor = vec4(clamp(g, 0.0, 1.0) + n / 255.0, 1.0);
@@ -97,7 +107,7 @@ export class FinishPass {
     this.composite = new ShaderMaterial({
       uniforms: {
         tScene: { value: this.frame }, tBloom: { value: this.half.texture },
-        uAmount: { value: 0 }, uBloom: { value: 0 }, uRes: { value: new Vector2(1, 1) },
+        uAmount: { value: 0 }, uBloom: { value: 0 }, uRes: { value: new Vector2(1, 1) }, uHighlights: { value: 0 },
       },
       vertexShader: VERT, fragmentShader: COMPOSITE, depthTest: false, depthWrite: false, toneMapped: false,
     });
@@ -111,6 +121,19 @@ export class FinishPass {
     raw(scene, camera);
     // Only a frame on the canvas is finished (a still drawn into a target is left alone).
     if (renderer.getRenderTarget() !== null) return;
+    this.compose(renderer, raw, null, amount, 0);
+  }
+
+  /**
+   * Finish the frame `hdr` holds (the highlights pass's half-float buffer)
+   * onto the canvas, its shoulder applied last — so the grade cannot push a
+   * rolled-off highlight back into clipping.
+   */
+  renderFrom(renderer: WebGLRenderer, raw: (s: Object3D, c: Camera) => void, hdr: WebGLRenderTarget, amount: number, highlights: number): void {
+    this.compose(renderer, raw, hdr, amount, highlights);
+  }
+
+  private compose(renderer: WebGLRenderer, raw: (s: Object3D, c: Camera) => void, hdr: WebGLRenderTarget | null, amount: number, highlights: number): void {
     renderer.getDrawingBufferSize(this.size);
     const w = Math.max(1, Math.floor(this.size.x)), h = Math.max(1, Math.floor(this.size.y));
     if (this.frame.image.width !== w || this.frame.image.height !== h) {
@@ -122,14 +145,16 @@ export class FinishPass {
       this.quarter.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
       this.eighth.setSize(Math.max(1, w >> 3), Math.max(1, h >> 3));
     }
-    renderer.copyFramebufferToTexture(this.frame);
+    if (!hdr) renderer.copyFramebufferToTexture(this.frame);
+    const src = hdr ?? this.frame;
+    this.composite.uniforms.tScene!.value = hdr ? hdr.texture : this.frame;
     const autoClear = renderer.autoClear;
     // The small passes clear (or add) themselves; the composite draws over the frame.
     renderer.autoClear = false;
     let bloom = 0;
     if (this.o.bloom) {
       bloom = 0.24 * amount;
-      this.pass(renderer, raw, this.frame, this.half, 0.78, false);
+      this.pass(renderer, raw, src, this.half, 0.78, false);
       this.pass(renderer, raw, this.half, this.quarter, 0, false);
       this.pass(renderer, raw, this.quarter, this.eighth, 0, false);
       this.pass(renderer, raw, this.eighth, this.quarter, 0, true);
@@ -138,6 +163,7 @@ export class FinishPass {
     const u = this.composite.uniforms;
     u.uAmount!.value = amount;
     u.uBloom!.value = bloom;
+    u.uHighlights!.value = highlights;
     (u.uRes!.value as Vector2).set(w, h);
     this.quad.material = this.composite;
     renderer.setRenderTarget(null);

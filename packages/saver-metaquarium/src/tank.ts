@@ -75,6 +75,7 @@ import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { FinishPass } from './finish';
+import { HighlightPass, canHoldHighlights } from './highlights';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
@@ -864,6 +865,11 @@ class TankInstance implements SaverInstance {
   /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
   private finishPass: FinishPass | null = null;
   private finishAmount = 0;
+  /** The highlights pass (highlights.ts): made the first frame `highlights` goes above 0 on a tier and GPU that allow it. */
+  private highlightPass: HighlightPass | null = null;
+  private highlightAmount = 0;
+  /** Whether the renderer's own render has been wrapped for the post passes (it never is while both are 0). */
+  private postWrapped = false;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -2077,21 +2083,33 @@ class TankInstance implements SaverInstance {
   }
 
   /**
-   * The finish wraps the renderer's own render for THIS scene only (the
-   * passes it draws go straight through), so every path that draws the tank —
-   * the loop, stills, capture — gets it, and at 0 the call is the original.
-   * Mid and high tiers only; bloom on high.
+   * The post passes wrap the renderer's own render for THIS scene only (the
+   * passes they draw go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets them, and while both are 0 the call is
+   * the original. The highlights pass draws the scene; the finish works on
+   * the canvas after it. Mid and high tiers only; bloom on high.
    */
   private updateFinish(): void {
-    const amount = this.num('finish');
     const tier = this.quality.glowLights;
-    this.finishAmount = tier >= 3 ? amount : 0;
-    if (this.finishAmount <= 0 || this.finishPass) return;
-    const pass = new FinishPass({ bloom: tier >= 4 });
-    this.finishPass = pass;
+    this.finishAmount = tier >= 3 ? this.num('finish') : 0;
+    this.highlightAmount = tier >= 3 ? this.num('highlights') : 0;
+    if (this.finishAmount > 0 && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
+    if (this.highlightAmount > 0 && !this.highlightPass) {
+      if (canHoldHighlights(this.renderer)) this.highlightPass = new HighlightPass(this.quality.antialias ? 4 : 0);
+      else this.highlightAmount = 0;
+    }
+    if (this.highlightAmount <= 0) this.highlightPass?.release();
+    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0)) return;
+    this.postWrapped = true;
     const raw = this.renderer.render.bind(this.renderer);
     this.renderer.render = (scene, camera) => {
-      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      // Only the tank's own frame for the canvas: the passes' quads, the mirror, stills and captures go straight through.
+      if (scene !== this.scene || this.renderer.getRenderTarget() !== null) { raw(scene, camera); return; }
+      const hl = this.highlightAmount > 0 ? this.highlightPass : null;
+      const fin = this.finishAmount > 0 ? this.finishPass : null;
+      if (hl && fin) fin.renderFrom(this.renderer, raw, hl.draw(this.renderer, raw, scene, camera), this.finishAmount, this.highlightAmount);
+      else if (hl) hl.render(this.renderer, raw, scene, camera, this.highlightAmount);
+      else if (fin) fin.render(this.renderer, raw, scene, camera, this.finishAmount);
       else raw(scene, camera);
     };
   }
@@ -4335,6 +4353,7 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.finishPass?.dispose();
+    this.highlightPass?.dispose();
     this.mirror?.dispose();
     this.stop();
     for (const f of this.fish) {
