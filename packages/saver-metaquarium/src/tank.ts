@@ -3836,8 +3836,12 @@ class TankInstance implements SaverInstance {
         // A floor creature stands level — the script's travel pitch is a swimmer's —
         // but still nods, bows and wiggles through a gesture.
         const level = floorActor && !act.gesture;
+        // a floor creature tipping through a gesture (a nod, a wiggle) rises by as much as the tilt drops its edge:
+        // tipped about its middle, an octopus's arms went a sixth of its height into the floor (probe-measured)
+        // (the group is placed already: lift it after it is faced, or the raised target would tip it back)
         f.group.lookAt(px + act.fx, y + (level ? 0 : act.fy), pz + act.fz);
         if (!level) f.group.rotateZ(act.roll);
+        if (floorActor && act.gesture) f.group.position.y += L * 0.5 * (Math.abs(act.fy) + Math.abs(Math.sin(act.roll)));
       } else {
         f.group.lookAt(px + lfx, y + lfy, pz + lfz);
         f.group.rotateZ(pose.roll);
