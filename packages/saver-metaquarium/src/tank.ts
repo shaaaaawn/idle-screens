@@ -74,6 +74,7 @@ import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
 import { HighlightPass, canHoldHighlights } from './highlights';
 import { buildStudio, type Studio } from './studio';
@@ -1023,6 +1024,8 @@ class TankInstance implements SaverInstance {
   /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
   private houseLevel = 1;
   private fishLightInstalled = false;
+  /** The near fade (nearfade.ts): patched onto the cast the first frame `nearFade` is on. */
+  private nearFadeInstalled = false;
   /** Params a control track steers: an authored value, so a room palette never overrides them. */
   private trackedPaths = new Set<string>();
   /** The background when a water tint is on: a dome shaded with the same in-scatter the fog fades to. */
@@ -2721,6 +2724,7 @@ class TankInstance implements SaverInstance {
     this.reconcile();
     this.updateCaustics(tSec);
     this.updateFishLight();
+    this.updateNearFade();
 
     // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
     const rotation = rateOffset(
@@ -4087,6 +4091,27 @@ class TankInstance implements SaverInstance {
       const mat = (n as Mesh).material as Material | Material[] | undefined;
       if (!mat) return;
       for (const m of Array.isArray(mat) ? mat : [mat]) patchFishLight(m);
+    });
+    for (const f of this.fish) if (f) patch(f.group);
+    if (this.shoal) patch(this.shoal.mesh);
+  }
+
+  /**
+   * The near fade (nearfade.ts): what crowds the lens dissolves. Patched onto
+   * the cast the first frame `nearFade` is on (a fish that loads later gets it
+   * on its first frame), then only the shared depths move.
+   */
+  private updateNearFade(): void {
+    const amount = this.num('nearFade');
+    if (amount > 0) this.nearFadeInstalled = true;
+    if (!this.nearFadeInstalled) return;
+    const slot = Math.round(this.num('cameraFollow'));
+    const [gone, whole] = nearFadeRange(amount, slot >= 0 && this.fish[slot] ? this.num('followDistance') : null);
+    NEAR_FADE.value.set(gone, whole);
+    const patch = (o: Object3D): void => o.traverse((n) => {
+      const mat = (n as Mesh).material as Material | Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) patchNearFade(m);
     });
     for (const f of this.fish) if (f) patch(f.group);
     if (this.shoal) patch(this.shoal.mesh);

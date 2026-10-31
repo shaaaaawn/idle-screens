@@ -41,6 +41,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye and the fish is hidden; a floor walker (Dot, crab, octopus, snail, starfish) sees from its own head height.',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
   followAvoid: 'Keep the followed fish in view, 0–1 (default 0): when something is in the way the chase camera rises over low clutter or pulls in, eased. For long walking takes through a village. No effect in the fish\'s own eye (followDistance under about 16).',
+  nearFade: 'A creature that swims up to the lens dissolves instead of being sliced by it, 0–1 (default 0). For close orbits, follow cameras and busy reefs; 1 is whole beyond about a fish and a half and gone inside about half that. The followed fish never fades.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',

@@ -231,6 +231,10 @@ export const METAQUARIUM_PARAMS = {
    *  their backs, the water around on their flanks, the floor under their
    *  bellies — and mirrored in silvered plates. 0 is the studio alone. */
   fishAmbient: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** A creature that comes too close to the camera dissolves (an ordered
+   *  dither by depth) instead of being cut by the lens: at 1 it is whole
+   *  beyond about a fish and a half and gone inside about half that. 0 is off. */
+  nearFade: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** The finish: one full-screen pass — a gentle grade, dither against
    *  banding, and restrained bloom on high-end devices. 0 draws straight to
    *  the screen as before; the low tier never runs it. */
