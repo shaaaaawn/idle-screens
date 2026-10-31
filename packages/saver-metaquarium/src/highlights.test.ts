@@ -3,7 +3,10 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { SRGBColorSpace, WebGLRenderTarget } from 'three';
 import { describe, expect, it } from 'vitest';
-import { KNEE, displaySpace, shoulder } from './highlights';
+import { FinishPass } from './finish';
+import { HighlightPass, KNEE, canHoldHighlights, displaySpace, shoulder } from './highlights';
+import { METAQUARIUM_PARAMS } from './manifest';
+import { PARAM_DOCS } from './guide';
 
 describe('shoulder', () => {
   it('leaves everything below the knee alone', () => {
@@ -42,5 +45,75 @@ describe('displaySpace', () => {
     const programs = readFileSync(join(root, 'src/renderers/webgl/WebGLPrograms.js'), 'utf8');
     expect(programs).toMatch(/currentRenderTarget\.isXRRenderTarget === true \? currentRenderTarget\.texture\.colorSpace/);
     expect(programs).toMatch(/currentRenderTarget === null \|\| currentRenderTarget\.isXRRenderTarget === true/);
+  });
+});
+
+describe('highlights render path (a stand-in renderer)', () => {
+  const fake = (w = 640, h = 360) => {
+    const calls: string[] = [];
+    let target: unknown = null;
+    const size = { w, h };
+    const r = {
+      autoClear: true,
+      capabilities: { isWebGL2: true },
+      extensions: { has: (n: string) => n === 'EXT_color_buffer_float' },
+      getDrawingBufferSize: (v: { set: (x: number, y: number) => void }) => { v.set(size.w, size.h); return v; },
+      getRenderTarget: () => target,
+      setRenderTarget: (t: unknown) => { target = t; calls.push(t ? 'target' : 'canvas'); },
+      copyFramebufferToTexture: () => { calls.push('copy'); },
+      clear: () => { calls.push('clear'); },
+    };
+    return { r, calls, size };
+  };
+  const scene = { children: [] };
+  const draw = (log: string[]) => (s: { children: unknown[] }) => { log.push(s.children.length ? 'quad' : 'scene'); };
+
+  it('is off by default and documented', () => {
+    expect(METAQUARIUM_PARAMS.highlights).toMatchObject({ type: 'number', default: 0, min: 0, max: 1 });
+    expect(PARAM_DOCS.highlights).toMatch(/clipping/);
+  });
+
+  it('needs WebGL2 with float colour buffers', () => {
+    expect(canHoldHighlights(fake().r as never)).toBe(true);
+    expect(canHoldHighlights({ ...fake().r, extensions: { has: () => false } } as never)).toBe(false);
+    expect(canHoldHighlights({ ...fake().r, capabilities: { isWebGL2: false } } as never)).toBe(false);
+  });
+
+  it('draws the scene into its buffer, then the shoulder onto the canvas; follows the canvas size', () => {
+    const { r, calls, size } = fake();
+    const log: string[] = [];
+    const p = new HighlightPass(4);
+    p.render(r as never, draw(log) as never, scene as never, {} as never, 1);
+    expect(log).toEqual(['scene', 'quad']);
+    expect(calls).toEqual(['target', 'canvas']);
+    const t = p.draw(r as never, draw(log) as never, scene as never, {} as never);
+    expect([t.width, t.height, t.samples]).toEqual([640, 360, 4]);
+    size.w = 512; size.h = 288; // the pixel governor rescales the canvas
+    const u = p.draw(r as never, draw(log) as never, scene as never, {} as never);
+    expect(u).toBe(t);
+    expect([u.width, u.height]).toEqual([512, 288]);
+    p.dispose();
+  });
+
+  it('leaves a frame drawn into a render target alone', () => {
+    const { r, calls } = fake();
+    r.setRenderTarget({});
+    calls.length = 0;
+    const log: string[] = [];
+    new HighlightPass(0).render(r as never, draw(log) as never, scene as never, {} as never, 1);
+    expect(log).toEqual(['scene']);
+    expect(calls).toEqual([]);
+  });
+
+  it('hands its buffer to the finish, which grades it without copying the canvas', () => {
+    const { r, calls } = fake();
+    const log: string[] = [];
+    const hl = new HighlightPass(4), fin = new FinishPass({ bloom: true });
+    fin.renderFrom(r as never, draw(log) as never, hl.draw(r as never, draw(log) as never, scene as never, {} as never), 0.6, 1);
+    expect(log[0]).toBe('scene');
+    expect(log.filter((d) => d === 'quad')).toHaveLength(6); // 5 bloom passes + composite
+    expect(calls).not.toContain('copy');
+    expect(calls.at(-1)).toBe('canvas');
+    hl.dispose(); fin.dispose();
   });
 });
