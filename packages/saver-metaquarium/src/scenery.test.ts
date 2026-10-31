@@ -386,6 +386,6 @@ describe('scenery footprints (sceneryShadows)', () => {
     const { METAQUARIUM_PARAMS } = await import('./manifest');
     const { PARAM_DOCS } = await import('./guide');
     expect(METAQUARIUM_PARAMS.sceneryShadows).toMatchObject({ type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' });
-    expect(PARAM_DOCS.sceneryShadows).toMatch(/floating/);
+    expect(PARAM_DOCS.sceneryShadows).toMatch(/floats/);
   });
 });
