@@ -72,7 +72,14 @@ export type StarfishDanceMode = 'aerobics' | 'freestyle' | 'duet' | 'choreo';
  *   loop    a cycle in seconds (lying still, standing still, walking, crawling)
  * `posture`: where its weight is through the cue — up, down, or rising/sitting.
  */
-interface StarfishMoveSpec { clip: StarfishClip; play: 'bar' | 'beats' | 'once' | 'loop'; beats?: number; posture: 'up' | 'down' | 'rise' | 'sit'; reverse?: boolean }
+interface StarfishMoveSpec { clip: StarfishClip; play: 'bar' | 'beats' | 'once' | 'loop'; beats?: number; posture: 'up' | 'down' | 'rise' | 'sit'; reverse?: boolean; phase?: number }
+/**
+ * Where a cycling clip's hits fall: beats to advance it so the moments it HOLDS a pose land on the beat. Measured
+ * (2026-10-31) by dancing each move alone at a still camera and folding the frame-difference energy on the beat:
+ * march, jacks and kick hold their poses on the beat (min at 0.06 of a beat, contrast 4.5–8); circles and mambo
+ * hold theirs half a beat late (min at 0.56) — on the off-beat, so they read as out of time until advanced.
+ */
+const ON_THE_BEAT: Partial<Record<StarfishClip, number>> = { circles: 0.5, mambo: 0.5 };
 export const STARFISH_MOVES = {
   ...(Object.fromEntries(DANCE_MOVES.map((m) => [m, { clip: m, play: 'bar', posture: 'up' }])) as Record<DanceMove, StarfishMoveSpec>),
   mambo: { clip: 'mambo', play: 'beats', beats: 4, posture: 'up' },
@@ -340,6 +347,8 @@ export interface StarfishOutput {
   doing: StarfishDoing;
   /** How much glow it throws (StarfishRig bloom): low while it lies on the floor, higher standing. */
   bloom: number;
+  /** A choreography's crouch: the tank scales the starfish's height by it (and its width by its inverse root). Absent: 1. */
+  squash?: number;
 }
 
 const smooth = (x: number): number => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
@@ -360,6 +369,7 @@ type Weights = Partial<Record<StarfishClip, [time: number, weight: number]>>;
 
 /** Places the starfish and sets its clips for time `t`. Pure in its input. */
 export function starfishFrame(rig: StarfishRig, inp: StarfishInput, out: StarfishOutput): StarfishOutput {
+  out.squash = 1;
   return inp.dance ? danceFrame(rig, inp, inp.dance, out) : lifeFrame(rig, inp, out);
 }
 
@@ -515,13 +525,15 @@ function duetFrame(rig: StarfishRig, inp: StarfishInput, dance: StarfishDance, o
 const CHEAT = 0.45;
 
 /** A dancer with its feet at (x, z), facing `yaw`: standing (`up` 1), lying (0) or between, `lift` above the floor. */
-function place(rig: StarfishRig, inp: StarfishInput, x: number, z: number, yaw: number, out: StarfishOutput, up = 1, lift = 0): void {
+function place(rig: StarfishRig, inp: StarfishInput, x: number, z: number, yaw: number, out: StarfishOutput, up = 1, lift = 0, lean = 0): void {
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
   // standing, its feet are ahead of the disc's resting place; lying, the disc is where it is (lifeFrame does the same)
   const reach = up * rig.feet * inp.scale;
   out.x = x - fx * reach; out.z = z - fz * reach;
   out.y = inp.ground(x, z) + lift;
-  euler.set(0, yaw, 0);
+  // a lean tips it about its feet, toward where it faces (+) or back
+  euler.set((lean * Math.PI) / 180, yaw, 0);
+  out.squash = 1;
   out.quaternion.setFromEuler(euler);
   out.fx = fx; out.fz = fz; out.tx = fx; out.tz = fz;
   out.focusX = x; out.focusZ = z;
@@ -531,14 +543,13 @@ function place(rig: StarfishRig, inp: StarfishInput, x: number, z: number, yaw: 
 
 /** A dancer the sheet has no line for, in a choreographed class: it stands and waits. */
 const HOLD_LINE: ChoreoLine = { cues: [{ b0: 0, beats: 4, move: 'hold', turn: 0, lift: 0 }], beats: 4 };
-/** Beats over which one cue's clip hands over to the next (moves that do not share a pose, like lying and standing). */
-const CUE_HANDOVER = 0.5;
 
 /** Where a move's clip is `beat` beats (u of the way) into a cue, in clip seconds. */
 function moveTime(rig: StarfishRig, m: StarfishMoveSpec, beat: number, u: number, t: number): number {
   const D = rig.durations[m.clip];
-  if (m.play === 'bar') return (posMod(beat, 4) / 4) * D;
-  if (m.play === 'beats') return (posMod(beat, m.beats!) / m.beats!) * D;
+  const ph = ON_THE_BEAT[m.clip] ?? 0;
+  if (m.play === 'bar') return (posMod(beat + ph, 4) / 4) * D;
+  if (m.play === 'beats') return (posMod(beat + ph, m.beats!) / m.beats!) * D;
   if (m.play === 'once') return (m.reverse ? 1 - u : u) * D;
   return posMod(t, D);
 }
@@ -551,7 +562,7 @@ function moveUp(m: StarfishMoveSpec, u: number): number {
 function choreoFrame(rig: StarfishRig, inp: StarfishInput, dance: StarfishDance, line: ChoreoLine, out: StarfishOutput): StarfishOutput {
   const p = choreoAt(line, dance.beats);
   const spec = (c: ChoreoCue): StarfishMoveSpec => (STARFISH_MOVES as Record<string, StarfishMoveSpec>)[c.move] ?? STARFISH_MOVES.hold;
-  const m = spec(p.cue), pm = spec(p.prev);
+  const m = spec(p.cue), nm = spec(p.next);
   // the class's own axes: depth toward the room along its facing, side across it
   const fx0 = Math.sin(dance.yaw), fz0 = Math.cos(dance.yaw), gap = dance.gap ?? inp.len * 1.7;
   let x = dance.x + (fx0 * p.depth + fz0 * p.side) * gap, z = dance.z + (fz0 * p.depth - fx0 * p.side) * gap;
@@ -559,16 +570,18 @@ function choreoFrame(rig: StarfishRig, inp: StarfishInput, dance: StarfishDance,
   let yaw = dance.yaw + (p.face * Math.PI) / 180;
   if (p.faceCam > 0 && Number.isFinite(inp.camX)) yaw += wrap(Math.atan2(inp.camX - x, inp.camZ - z) - yaw) * p.faceCam;
   yaw += (p.turn * Math.PI) / 180;
-  const h = Math.min(CUE_HANDOVER, p.cue.beats / 2), k = p.prev === p.cue || (pm.clip === m.clip && m.play !== 'once') ? 1 : smooth(p.beat / h);
-  const up = moveUp(pm, 1) + (moveUp(m, p.u) - moveUp(pm, 1)) * k;
-  place(rig, inp, x, z, yaw, out, up, p.lift * inp.len);
-  out.doing = p.cue.move as StarfishMove;
-  const w: Weights = { [m.clip]: [moveTime(rig, m, p.beat, p.u, inp.t), k] };
-  if (k < 1) {
-    const prevEnd = moveTime(rig, pm, p.prev.beats, 1, inp.t);
-    const both = w[pm.clip];
-    if (both) w[pm.clip] = [both[0], 1];
-    else w[pm.clip] = [prevEnd, 1 - k];
+  // into the next cue over the end of this one, so its pose is complete on its first beat (choreo.ts CHOREO_HANDOVER);
+  // the same looping clip carries straight on
+  const k = p.next === p.cue || (nm.clip === m.clip && m.play !== 'once' && nm.play !== 'once') ? 0 : p.ahead;
+  const up = moveUp(m, p.u) + (moveUp(nm, 0) - moveUp(m, p.u)) * k;
+  place(rig, inp, x, z, yaw, out, up, p.lift * inp.len, p.lean);
+  out.squash = p.squash;
+  out.doing = (k > 0.5 ? p.next.move : p.cue.move) as StarfishMove;
+  const w: Weights = { [m.clip]: [moveTime(rig, m, p.beat, p.u, inp.t), 1 - k] };
+  if (k > 0) {
+    const start = moveTime(rig, nm, 0, 0, inp.t);
+    if (nm.clip === m.clip) w[m.clip] = [k > 0.5 ? start : w[m.clip]![0], 1];
+    else w[nm.clip] = [start, k];
   }
   apply(rig, w);
   return out;

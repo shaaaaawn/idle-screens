@@ -50,6 +50,28 @@ describe('choreography: the sheet', () => {
     expect(choreoAt(l, 6).centre).toBe(1);
     expect(choreoAt(l, 12 - 1e-6)).toMatchObject({ centre: expect.closeTo(0, 4), side: expect.closeTo(-2, 4) });
   });
+  it('reads a lean and a crouch, and names bad ones', () => {
+    const { lines, problems } = parseChoreography('4:hold /15 %0.7, 4:hold /back %0', MOVES);
+    expect(lines.get('*')!.cues[0]).toMatchObject({ lean: 15, squash: 0.7 });
+    expect(problems.join(' ')).toMatch(/lean "back" is not degrees/);
+    expect(problems.join(' ')).toMatch(/crouch "0" is not a height scale/);
+  });
+  it('what a cue is arrives on its first beat; what it does lands at its end', () => {
+    const l = parseChoreography('4:hold, 4:hold @90 /10 >right ~360', MOVES).lines.get('*')!;
+    expect(choreoAt(l, 3.45).ahead).toBe(0); // half a beat ahead, no more
+    expect(choreoAt(l, 3.8).ahead).toBeGreaterThan(0);
+    expect(choreoAt(l, 4)).toMatchObject({ face: 90, lean: 10, side: 0, turn: 0 }); // turned and leaning on the beat, not yet travelled
+    expect(choreoAt(l, 8 - 1e-6).side).toBeCloseTo(2, 4);
+    expect(choreoAt(l, 8 - 1e-6).turn).toBeCloseTo(360, 3);
+  });
+  it('a groove dips into every beat, lowest on it', () => {
+    const l = parseChoreography('8:reach *0.1', MOVES).lines.get('*')!;
+    expect(choreoAt(l, 3).squash).toBeCloseTo(0.9, 9);
+    expect(choreoAt(l, 3.5).squash).toBeCloseTo(1, 9);
+    expect(choreoAt(l, 2.9).squash).toBeGreaterThan(choreoAt(l, 3).squash);
+    expect(choreoAt(l, 3.1).squash).toBeGreaterThan(choreoAt(l, 3).squash);
+    expect(parseChoreography('4:reach *x', MOVES).problems[0]).toMatch(/groove "x"/);
+  });
   it('clamps a long cue, a big turn and a high leap', () => {
     const c = parseChoreography('9999:march ~9000 ^9 >99,-99', MOVES).lines.get('*')!.cues[0]!;
     expect(c).toMatchObject({ beats: 512, turn: 1440, lift: 3, to: [6, -6] });
