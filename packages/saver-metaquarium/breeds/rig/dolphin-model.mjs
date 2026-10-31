@@ -72,13 +72,14 @@ export const BODY = [
   [7, 6.1, 4.2, 3.2],
   [9, 6.3, 4.4, 3.5],       // the eyes
   [12, 6.5, 4.8, 3.7],
-  [15, 6.5, 5.0, 3.8],      // thickest
-  [18, 6.3, 4.8, 3.6],
-  [22, 6.0, 4.0, 3.0],
-  [26, 5.7, 2.9, 2.1],
-  [29.5, 5.5, 1.9, 1.3],
-  [32, 5.4, 1.3, 0.9],      // the tail stock
-  [34, 5.4, 1.0, 0.8],
+  [15, 6.5, 4.9, 3.7],      // thickest, a third of the way back
+  [18, 6.3, 4.5, 3.3],
+  [22, 6.0, 3.6, 2.6],      // the taper starts at the dorsal, as a real one's does
+  [26, 5.7, 2.6, 1.6],
+  [29, 5.5, 2.0, 0.9],      // the tail stock: a KEEL, tall and one cube thin,
+  [31.5, 5.4, 1.7, 0.5],    // deep all the way into the flukes (round and thin,
+  [33.5, 5.4, 1.3, 0.45],   // it read as a stick, the dolphin as a swordfish)
+  [34, 5.4, 1.1, 0.4],
 ];
 export const LENGTH = 34;
 /** The arch: the head lifted a little, the tail dropping in a long curve (cube units of z at s). */
@@ -150,10 +151,12 @@ export const PUPIL = { n: [7, 8], k: [5, 6] };
 const DORSAL = [[1, 14, 21], [2, 16, 22], [3, 18, 22], [4, 20, 23], [5, 22, 23]];
 /** Each flipper: [|i| beyond the skin, n, k] — out from the chest, back, and a little down. */
 const FLIPPER = [[1, 11, 4], [1, 12, 4], [2, 12, 3], [2, 13, 3], [3, 13, 3], [3, 14, 2], [4, 14, 2], [4, 15, 2]];
-/** The flukes, seen from above: for |i| = x, the cells n from lead(x) to trail(x) — a crescent, pointed tips, a notch. */
-export const FLUKE_X = 7;
-const flukeLead = (x) => 31.6 + 0.78 * x;
-const flukeTrail = (x) => 33.8 + 0.95 * x - 0.05 * x * x;
+/** The flukes, seen from above: for |i| = x, the cells n from lead(x) to trail(x) — a crescent, pointed tips, a notch.
+ *  Sized to the real thing (Fish 1998, Tursiops): span ~0.25 of the body (a cartoon's a little more, 11 of 37 cubes),
+ *  the leading edge swept back ~31°, a root chord of ~8%. Wider and swept further, seen edge-on they were a long stick. */
+export const FLUKE_X = 5;
+const flukeLead = (x) => 32 + 0.6 * x;
+const flukeTrail = (x) => 34.8 + 0.72 * x - 0.03 * x * x;
 
 export function voxels() {
   return draw().cells;
