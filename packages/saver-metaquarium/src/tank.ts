@@ -93,7 +93,7 @@ import { angelFrame, rigAngel, type AngelRig } from './angel';
 import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
-import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLeap, LEAP, dolphinLeapAhead, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
+import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLeap, dolphinUpright, LEAP, UPRIGHT, dolphinLeapAhead, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import {
@@ -3695,6 +3695,7 @@ class TankInstance implements SaverInstance {
         dolphin = dolphinFrame(f.rig.dolphin, tSec, f.index, dBeat, {
           pace: dPace, flurry: act ? 0 : mnv.flurry + flurryBoost, actor: !!act,
           turn: act ? 0 : pose.turn ?? 0, leap: dLeap ? { phase: dLeap.phase, w: dLeap.w } : null,
+          upright: act && this.vignette ? dolphinUpright(this.vignette, f.index, tSec) : 0,
           gesture: act?.gesture && ownMoves?.(act.gesture.name) ? { name: act.gesture.name, at: act.gesture.at, weight: act.gesture.weight } : null,
         });
       }
@@ -3873,9 +3874,20 @@ class TankInstance implements SaverInstance {
         }
         // A flip or a roll turns the WHOLE dolphin about its body bone (dolphin.ts dolphinTurn): one
         // smooth angle, never blended (a whole turn baked into a clip unwinds when the mixer blends it).
+        // Standing up for a character beat (dolphin.ts dolphinUpright): its front to whoever it plays to —
+        // its partner, by the script's heading; else you, three-quarters on — then nose up.
+        const up = dolphin.upright;
+        if (up > 0.001 && viewer && !act?.lookAt) {
+          const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
+          let toYou = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
+          toYou -= Math.round(toYou / (Math.PI * 2)) * Math.PI * 2;
+          // The side it turns to eases in across dead-ahead (no pop as the camera crosses its heading).
+          const side = MathUtils.clamp(toYou / 0.3, -1, 1);
+          f.group.rotateOnWorldAxis(Y_AXIS, (toYou - side * UPRIGHT.offAxis) * up);
+        }
         const { roll } = dolphin.turn;
-        // A breach pitches it along its arc (+ nose up there; + head down here).
-        const pitch = dolphin.turn.pitch - (dLeap ? dLeap.pitch * dLeap.w : 0);
+        // A breach pitches it along its arc (+ nose up there; + head down here); standing, nose up.
+        const pitch = dolphin.turn.pitch - (dLeap ? dLeap.pitch * dLeap.w : 0) - UPRIGHT.pitch * up;
         if (pitch || roll) {
           const dr = f.rig!.dolphin;
           f.group.updateMatrixWorld(true);
