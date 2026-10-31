@@ -26,8 +26,15 @@ export function painted(geometry: BufferGeometry, color: string, position: Vecto
 }
 export function batch(group: Group, parts: BufferGeometry[], name: string, side: Side = DoubleSide): Mesh | null {
   if (!parts.length) return null;
+  // mergeGeometries drops userData: the voxel boxes a writer kept (voxel-ao.ts) are in world space, so they concatenate.
+  const boxes = parts.map(g => g.userData.mqBoxes as Float32Array | undefined).filter((b): b is Float32Array => !!b);
   const geometry = mergeGeometries(parts)!;
   parts.forEach(g => g.dispose());
+  if (boxes.length) {
+    const all = new Float32Array(boxes.reduce((n, b) => n + b.length, 0));
+    boxes.reduce((at, b) => { all.set(b, at); return at + b.length; }, 0);
+    geometry.userData.mqBoxes = all;
+  }
   geometry.userData.mqOwned = true;
   const material = new MeshBasicMaterial({ vertexColors: true, side });
   material.userData.mqOwned = true;

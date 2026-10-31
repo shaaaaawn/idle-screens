@@ -110,6 +110,9 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     return new Vector3(x * v * R, y0 + y * v * H, z * v * R);
   };
   const shellP: number[] = [], shellC: number[] = [], glowP: number[] = [], glowC: number[] = [];
+  /** Per lining vertex: its crystal's centre and reach (nearfade.ts dissolves a crystal at the lens whole). */
+  const glowF: number[] = [];
+  const reach = [0, 0, 0, 0];
   const put = (arr: number[], col: number[], p: Vector3, c: Color): void => { arr.push(p.x, p.y, p.z); col.push(c.r, c.g, c.b); };
 
   // Agate strata: the wall is banded by height, the bands wandering with the
@@ -164,6 +167,7 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     const out = tmp.dot(p.clone().add(q).add(r).multiplyScalar(1 / 3).sub(about)) >= 0;
     if (out) { put(glowP, glowC, p, cp); put(glowP, glowC, q, cq); put(glowP, glowC, r, cr); }
     else { put(glowP, glowC, p, cp); put(glowP, glowC, r, cr); put(glowP, glowC, q, cq); }
+    glowF.push(...reach, ...reach, ...reach);
   };
   for (let n = 0; n < crystals; n += 1) {
     const face = faces[Math.floor(trng.next() ** 1.25 * faces.length)]!;
@@ -191,6 +195,9 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
     }
     const tip = base.clone().addScaledVector(axis, len);
     const mid2 = base.clone().addScaledVector(axis, len * 0.4);
+    // The crystal's sphere: about its middle, out to its tip or its widest foot.
+    const mid3 = base.clone().addScaledVector(axis, len * 0.5);
+    reach[0] = mid3.x; reach[1] = mid3.y; reach[2] = mid3.z; reach[3] = 1.15 * Math.hypot(len * 0.5 + 1.5 * s, wid); // the lean puts a foot a little past the right angle
     const clear = trng.next() < 0.08;
     const glowUp = 0.55 + 0.45 * (1 - up);
     const hue = (clear ? quartz : tint).clone().lerp(white, clear ? 0.5 : 0.12 + patch * 0.3);
@@ -421,6 +428,9 @@ export function buildGeodeInterior(rng: CrystalRng, opts: InteriorOptions): Inte
   const room = new BufferGeometry();
   room.setAttribute('position', new BufferAttribute(pos, 3));
   room.setAttribute('color', new BufferAttribute(col, 3));
+  const fade = new Float32Array((pos.length / 3) * 4);
+  fade.set(glowF, (shellP.length / 3) * 4);
+  room.setAttribute('aMqFade', new BufferAttribute(fade, 4));
   return {
     room: [room], crystals, boxes: cubes.count,
     emitters, lights, vents, obstacles, radius: R, height: H, triangles: pos.length / 9,

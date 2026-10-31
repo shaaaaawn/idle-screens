@@ -17,7 +17,7 @@ import { createRng } from '@idle-screens/core';
 import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
-import { fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
+import { FIELD_RASTER_SHORT_SIDE, fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
 import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
@@ -372,6 +372,9 @@ export interface LuminanceGridOptions extends PerceiveOptions {
   rows?: number;
 }
 
+/** Hard ceiling on any luminance grid side, internal callers included. */
+const MAX_GRID_SIDE = 400;
+
 /** The canvas's soft-sprite alpha at radius fraction u: stops 1 @ 0, 0.75 @ 0.35, 0 @ 1 (compile.ts). */
 function softProfile(u: number): number {
   if (u <= 0) return 1;
@@ -433,13 +436,23 @@ function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, sof
  * sampled at its rest position. Good enough to perceive composition, focus,
  * balance — and now smear.
  */
-export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}): LuminanceGrid {
+export function luminanceGrid(
+  spec: SaverSpec,
+  opts: LuminanceGridOptions = {},
+  /**
+   * @internal The largest grid side. 200 for every public caller (a request
+   * cannot ask for more); the pattern-hazard check raises it to resolve
+   * stripes finer than a 200-cell grid can (see `pattern-hazard.ts`).
+   */
+  maxSide = 200,
+): LuminanceGrid {
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? 5000);
   const scene = buildScene(spec, opts);
   const t = opts.t ?? 5000;
-  const cols = Math.max(8, Math.min(200, opts.cols ?? 80));
-  const rows = Math.max(8, Math.min(200, opts.rows ?? 48));
+  const cap = Math.max(8, Math.min(MAX_GRID_SIDE, maxSide));
+  const cols = Math.max(8, Math.min(cap, opts.cols ?? 80));
+  const rows = Math.max(8, Math.min(cap, opts.rows ?? 48));
   const { w, h, scale } = scene;
   const cellW = w / cols;
   const cellH = h / rows;
@@ -457,10 +470,27 @@ export function luminanceGrid(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     const short = Math.max(1, Math.min(w, h));
     const seed = scene.seed;
     const ft = fieldSampleTime(bg, t);
+    // The canvas paints a field from a raster FIELD_RASTER_SHORT_SIDE cells
+    // on the short side (compile.ts drawField). A grid finer than that reads
+    // the raster cell under each grid cell's centre, as the screen shows it,
+    // instead of sampling the field per grid cell (finer than any screen,
+    // and the dominant cost of a fine grid).
+    const fCols = Math.max(1, Math.round((FIELD_RASTER_SHORT_SIDE * w) / short));
+    const fRows = Math.max(1, Math.round((FIELD_RASTER_SHORT_SIDE * h) / short));
+    const viaRaster = cols > fCols || rows > fRows;
+    const rasterLum = viaRaster ? new Float64Array(fCols * fRows).fill(-1) : null;
+    const fieldLum = (c: number, r: number): number => {
+      if (!rasterLum) return rgb255Luma(fieldRgbAt(((c + 0.5) * cellW) / short, ((r + 0.5) * cellH) / short, ft, bg, seed));
+      const fc = Math.min(fCols - 1, Math.floor(((c + 0.5) / cols) * fCols));
+      const fr = Math.min(fRows - 1, Math.floor(((r + 0.5) / rows) * fRows));
+      const k = fr * fCols + fc;
+      if (rasterLum[k]! < 0) rasterLum[k] = rgb255Luma(fieldRgbAt(((fc + 0.5) * w) / fCols / short, ((fr + 0.5) * h) / fRows / short, ft, bg, seed));
+      return rasterLum[k]!;
+    };
     for (let r = 0; r < rows; r++) {
       let rowSum = 0;
       for (let c = 0; c < cols; c++) {
-        const lum = rgb255Luma(fieldRgbAt(((c + 0.5) * cellW) / short, ((r + 0.5) * cellH) / short, ft, bg, seed));
+        const lum = fieldLum(c, r);
         bgCells[r * cols + c] = lum;
         rowSum += lum;
       }

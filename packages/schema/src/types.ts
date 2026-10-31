@@ -619,7 +619,9 @@ export interface TextNumber {
  * words must be readable from across the room and opts the layer into
  * `adviseSpec`'s legibility advisories (`text-legibility`, `text-safe-area`).
  * `atmosphere` says the text is texture (a haiku fading in a corner, dim
- * labels on a wall board) and is the same as absent: silent. Changes no
+ * labels on a wall board): silent on legibility, like absent, and also left
+ * out of the layout checks (`text-overlap`, `layout-text-overlap`,
+ * `list-length-mismatch`) that still judge undeclared text. Changes no
  * pixel anywhere, on any client; never part of the structural signature.
  */
 export type TextRole = 'read' | 'atmosphere';

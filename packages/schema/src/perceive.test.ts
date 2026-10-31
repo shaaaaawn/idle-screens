@@ -541,7 +541,9 @@ describe('diffScenes', () => {
       { count: 300, sprite: { kind: 'circle', radius: [0.01, 0.02], color: '#8fd0ff' }, motion: { type: 'static' } },
     ]);
     const vu: SaverSpec = { ...s, units: 'viewport' };
-    // 600 declared entities: dense-scene at 1080p, not at 540p (countScale 0.5).
+    // 600 declared entities: dense-scene reads the declared count, so it fires
+    // at 540p as at 1080p (F146, X771) — the build is density-scaled, the
+    // declaration is not.
     const vp = { width: 960, height: 540 };
     const own = new Set(adviseSpec(vu, vp).map((w) => w.code));
     const diff = diffScenes(vu, vu, { viewport: vp });
@@ -549,7 +551,18 @@ describe('diffScenes', () => {
     expect(diff.advisories.removed).toEqual([]);
     const big = diffScenes(vu, { ...vu, layers: [vu.layers[0]!] }, { viewport: { width: 1920, height: 1080 } });
     expect(big.advisories.removed).toContain('dense-scene');
-    expect(own.has('dense-scene')).toBe(false);
+    expect(own.has('dense-scene')).toBe(true);
+    // A box that fits a landscape frame runs off a portrait one: the diff
+    // judges it at the viewport it is given, as previewScene does.
+    const caption: SaverSpec = spec([
+      { count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'text', strings: ['A caption about twelve hundred px wide'], color: '#ffffff' }, size: [0.06, 0.06], motion: { type: 'static' } },
+    ], { units: 'viewport' });
+    const bare: SaverSpec = { ...caption, layers: [{ ...caption.layers[0]!, sprite: { kind: 'text', strings: ['short'], color: '#ffffff' } }] };
+    const portrait = { width: 1080, height: 1920 };
+    expect(new Set(adviseSpec(caption, portrait).map((w) => w.code)).has('text-off-screen')).toBe(true);
+    expect(new Set(adviseSpec(caption).map((w) => w.code)).has('text-off-screen')).toBe(false);
+    expect(diffScenes(caption, bare, { viewport: portrait }).advisories.removed).toContain('text-off-screen');
+    expect(diffScenes(caption, bare).advisories.removed).not.toContain('text-off-screen');
   });
 });
 

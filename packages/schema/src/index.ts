@@ -8,6 +8,11 @@ export * from './cohesion';
 export * from './describe';
 export * from './perceive';
 export { flashSamplingForecast, timelineFlashReport, type FlashSamplingForecast, type TimelineFlashReport } from './flash-timeline';
+export {
+  layerPatternMotion, patternHazardReport, patternSampleTimes,
+  PATTERN_FLICKER_AREA, PATTERN_GRID_SHORT_SIDE, PATTERN_MAX_PITCH, PATTERN_MAX_SAMPLE_TIMES, PATTERN_MIN_EXTENT, PATTERN_MIN_PAIRS, PATTERN_MOVING_AREA, PATTERN_STATIONARY_AREA,
+  type PatternHazardKind, type PatternHazardOptions, type PatternHazardReport, type PatternMotion,
+} from './pattern-hazard';
 export * from './field';
 export * from './finish';
 export * from './sequence';
