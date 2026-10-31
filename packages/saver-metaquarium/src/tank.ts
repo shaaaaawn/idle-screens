@@ -2076,9 +2076,15 @@ class TankInstance implements SaverInstance {
     const p = shotPose(name, this.shotInput(azimuth), this.shotScratch);
     this.camera.position.set(p.x, p.y, p.z);
     this.camera.lookAt(p.tx, p.ty, p.tz);
-    // Follow keeps the classic lens.
-    const fov = this.num('cameraFollow') >= 0 ? ORBIT_FOV : p.fov;
+    // Follow keeps the classic lens, unless it asks for its own.
+    const fov = this.num('cameraFollow') >= 0 ? this.followFov() : p.fov;
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+  }
+
+  /** The chase camera's lens (`followLens`), degrees top to bottom: the orbit camera's unless it asks for its own. */
+  private followFov(): number {
+    const lens = this.num('followLens');
+    return lens > 0 ? Math.min(90, Math.max(10, lens)) : ORBIT_FOV;
   }
 
   /** What every named shot is placed from: the author's angles and distance, the water's bounds, the macro landmark. */
@@ -2182,7 +2188,9 @@ class TankInstance implements SaverInstance {
   private placeFollowCamera(slot: number, back: number, pov: boolean, len = FISH_LENGTH, eye = 0): void {
     if (slot < 0 || !this.followSeen) { this.followState = null; return; }
     const at = this.followAt, head = this.followHead, cam = this.camera.position;
-    const lift = pov ? 1.5 : len * 0.35 + back * 0.18;
+    // `followHeight` stands the chase camera at a height over the fish's feet, aimed at them (a shot of a walker's feet)
+    const level = !pov && this.num('followHeight') >= 0;
+    const lift = pov ? 1.5 : level ? len * this.num('followHeight') : len * 0.35 + back * 0.18;
     if (pov) {
       cam.set(at.x, at.y + (eye > 0 ? eye : lift), at.z);
     } else {
@@ -2221,7 +2229,7 @@ class TankInstance implements SaverInstance {
     const r = Math.hypot(cam.x, cam.z), rMax = BOUNDS.radius * 2.2;
     if (r > rMax) { cam.x *= rMax / r; cam.z *= rMax / r; }
     const floor = this.floorHeightAt ? this.floorHeightAt(cam.x, cam.z) : 0;
-    cam.y = Math.max(cam.y, floor + 7);
+    cam.y = Math.max(cam.y, floor + (level ? 1 : 7));
     if (this.ceiling) cam.y = Math.min(cam.y, this.ceiling.position.y - 6);
     // The eye looks where it goes; the chase looks AT the fish, a touch ahead.
     // Turned round to face it, the camera looks at the fish itself, not past it.
@@ -2232,7 +2240,7 @@ class TankInstance implements SaverInstance {
       this.camera.lookAt(v.tx, v.ty, v.tz);
     } else {
       const ahead = pov ? 60 : len * 0.5 * Math.max(0, Math.cos((this.num('followAngle') * Math.PI) / 180));
-      this.camera.lookAt(at.x + head.x * ahead, at.y + (pov ? 0 : len * 0.12), at.z + head.z * ahead);
+      this.camera.lookAt(at.x + head.x * ahead, at.y + (pov || level ? 0 : len * 0.12), at.z + head.z * ahead);
     }
     this.followState = { slot, x: Math.round(cam.x * 10) / 10, y: Math.round(cam.y * 10) / 10, z: Math.round(cam.z * 10) / 10 };
   }

@@ -23,7 +23,11 @@
  *                  `/deg` lean (+ forward); `%s` crouch (a height scale: `%0.7`
  *                  bends low, `%1.15` stretches tall); `*a` groove: a dip of a
  *                  (0.06 is a nod) into every beat, lowest exactly on it — the
- *                  pulse a move without its own hits (reach, twist, sway) needs.
+ *                  pulse a move without its own hits (reach, twist, sway) needs;
+ *                  `xN` speed: the move's clip N times as fast (`x2` double time,
+ *                  footwork on the eighths; `x0.5` half time); `=f` a pose: the
+ *                  move's clip held at f of its cycle (`rise =0.4` sits up,
+ *                  `jacks =0.25` arms up and legs wide) — a still to hit.
  *   ON THE BEAT: what a cue IS — its clip, its posture, facing, lean and
  *   crouch — has fully arrived at the cue's first beat: the dancer moves into
  *   it over the end of the cue before (half a beat at most). What a cue DOES
@@ -60,6 +64,10 @@ export interface ChoreoCue {
   squash?: number;
   /** Groove: a dip of this depth (0.02–0.3 of its height) into every beat, lowest exactly on the beat. */
   groove?: number;
+  /** Speed: the move's clip this many times as fast (0.25–4; 2 is double time). */
+  rate?: number;
+  /** A pose: the move's clip held at this fraction of its cycle (0–1) through the cue. */
+  pose?: number;
 }
 export interface ChoreoLine { cues: ChoreoCue[]; beats: number }
 export interface ChoreoSheet { lines: Map<number | '*', ChoreoLine>; problems: string[] }
@@ -89,8 +97,8 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
       if (!known.has(m[2]!)) { problems.push(`"${raw}": no move "${m[2]}" (moves: ${moves.join(' ')})`); continue; }
       const cue: ChoreoCue = { b0, beats: Math.min(beats, 512), move: m[2]!, turn: 0, lift: 0 };
       for (const tok of (m[3] ?? '').replace(/^[,\s]+/, '').split(/\s+/).filter(Boolean)) {
-        const mod = /^([>@~^/%*])(.+)$/.exec(tok);
-        if (!mod) { problems.push(`"${raw}": "${tok}" is not >to, @face, ~turn, ^leap, /lean, %crouch or *groove`); continue; }
+        const mod = /^([>@~^/%*x=])(.+)$/.exec(tok);
+        if (!mod) { problems.push(`"${raw}": "${tok}" is not >to, @face, ~turn, ^leap, /lean, %crouch, *groove, xspeed or =pose`); continue; }
         const [, op, arg] = mod as unknown as [string, string, string];
         if (op === '>') {
           const mark = CHOREO_MARKS[arg];
@@ -109,6 +117,12 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
         } else if (op === '%') {
           if (Number.isFinite(Number(arg)) && Number(arg) > 0) cue.squash = clamp(Number(arg), 0.4, 1.5);
           else problems.push(`"${raw}": crouch "${arg}" is not a height scale`);
+        } else if (op === '=') {
+          if (arg !== '' && Number.isFinite(Number(arg)) && Number(arg) >= 0 && Number(arg) <= 1) cue.pose = Number(arg);
+          else problems.push(`"${raw}": pose "${arg}" is not a fraction of the move (0–1)`);
+        } else if (op === 'x') {
+          if (Number.isFinite(Number(arg)) && Number(arg) > 0) cue.rate = clamp(Number(arg), 0.25, 4);
+          else problems.push(`"${raw}": speed "${arg}" is not a multiple`);
         } else if (op === '*') {
           if (Number.isFinite(Number(arg)) && Number(arg) > 0) cue.groove = clamp(Number(arg), 0.02, 0.3);
           else problems.push(`"${raw}": groove "${arg}" is not a depth`);

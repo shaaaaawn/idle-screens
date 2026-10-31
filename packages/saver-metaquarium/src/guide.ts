@@ -38,11 +38,13 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraDistance: 'Distance from the tank centre. 80 is a close-up, 170–220 a village, 300+ a landmark.',
   shot: 'A framing: `orbit`, `hero` (three-quarter), `front` (level, long lens), `low`, `top` (a map), `surface`, `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
-  cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera, whose params are ignored while following. With `followSpot` on the slot, a spotlit chase.',
-  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
-  followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye; a floor walker sees from its own head height.',
-  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
-  followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises over low clutter or pulls in, eased. For walks through a village.',
+  cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera (its params ignored while following).',
+  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 facing it.',
+  followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye (a walker\'s: its head height).',
+  autoRotate: 'Turntable speed, degrees/second. 0 holds the shot, 1–2 a slow reveal. frame.state.camera.bearing: where it stands now.',
+  followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises or pulls in, eased.',
+  followHeight: 'Chase camera height in body lengths over its feet, aimed at them (0.2: feet); -1 off.',
+  followLens: 'Chase lens, degrees (0: 55; 25 long).',
   nearFade: 'A creature at the lens dissolves, not sliced, 0–1. The followed fish never fades.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
@@ -87,7 +89,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes, lamps, 0–1: nothing floats.',
   voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1. All tiers.',
   swimWave: 'Fish bend as they swim: a wave nose to tail, the body curling into turns (0 = rigid wiggle). Skips the turtle, crab and fish with a skeleton; the seahorse gets fin, tail and nod instead.',
-  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
+  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',
@@ -187,7 +189,7 @@ geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian 
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
-choreography  [a|*:] <beats>:<move> [>to @face ~turn ^leap /lean %crouch *groove],…|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
+choreography  [a|*:] <beats>:<move> [>to @face ~turn ^leap /lean %crouch *groove xspeed =pose],…|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
@@ -495,7 +497,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   if (choreographed && !starfishSwims) out.push({ path: 'choreography', also: ['fishMix'], message: 'no starfish in the cast to dance it — add e.g. starfish:5' });
   // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
   if (follow < 0) {
-    for (const k of ['followDistance', 'followAngle', 'followAvoid']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
+    for (const k of ['followDistance', 'followAngle', 'followAvoid', 'followHeight', 'followLens']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });
   } else if (follow < cast) {
     for (const k of ORBIT_PARAMS) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: `ignored while cameraFollow rides with slot ${follow} — they return when it is -1` });
   }
