@@ -109,6 +109,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   rockDensity: 'Faceted boulders, an arch and a back ridge around the crystals.',
   rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
   geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`…. Capped at 2 on basic/minimal tiers (3 on standard/high); a dropped house takes its homeN/homeNin marks, and indoors there are none.',
+  stoneStyle: '`weathered` gives the rocks, homes and castle keep river-grey stone with silt on the tops, so they read as stone in a lit room instead of dark holes; `classic` (default) is the dark slate.',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants: one tank-wide budget (density × 36/72/108 by tier) shared among crystals and geodes (or six bare spots), so more crystals means sparser gardens. What grows is `floraMix`; empty, the room picks (coral on a reef, kelp in the kelp forest, glow caps in the abyss).',
   geodes: 'Wild geodes about the floor (0 = none): split geodes and thunder eggs, amethyst cathedrals, crystal clusters, one mega cavern. They glow and pulse with the crystals (crystalGlow, crystalPulse), take the nearest crystal\'s mineral, grow flora like a crystal, and wake when a fish comes close.',

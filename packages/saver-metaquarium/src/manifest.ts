@@ -301,6 +301,11 @@ export const METAQUARIUM_PARAMS = {
   /** How fractured the rocks are: fissure width, forks, and crystals pushing
    *  out of the crack. 0 is plain stone. Only matters with `rockDensity`. */
   rockVeins: { type: 'number', default: 0.7, min: 0, max: 1, ease: 'step' },
+  /** The world's stone — rocks, arches, homes, the castle keep: `classic`,
+   *  the dark slate it always was, or `weathered` — river-grey, each facet its
+   *  own shade, silt settled on the tops — so stone in a lit room reads as
+   *  stone and not as a hole. */
+  stoneStyle: { type: 'enum', default: 'classic', options: ['classic', 'weathered'], ease: 'step' },
   geodeHomes: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   /** A follow-spot: a beam from the rig and a pool of moving caustics on the
    *  floor that track ONE fish across the scene like a performer on a stage,
