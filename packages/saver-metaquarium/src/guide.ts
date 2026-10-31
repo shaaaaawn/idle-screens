@@ -308,10 +308,10 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes and go home again, seen high through a tilt-shift lens: a model village.',
-    params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
+    params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', floorKind: 'flat', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
       fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
-      fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, tiltShift: 0.55, shot: 'orbit', cameraDistance: 165, cameraElevation: 30, autoRotate: 0.5 },
+      fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, tiltShift: 0.55, shot: 'orbit', cameraDistance: 125, cameraElevation: 32, autoRotate: 0.5 },
   },
 ];
 
