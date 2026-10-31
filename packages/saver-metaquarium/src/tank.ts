@@ -160,7 +160,7 @@ import {
   type TankQuality,
 } from './quality';
 import { LogicalClock, rateOffset } from './runtime';
-import { ContactShadows } from './contact-shadow';
+import { ContactShadows, SwimShadows, swimShade, swimSpread } from './contact-shadow';
 
 const BOUNDS: TankBounds = { radius: 120, yMin: 15, yMax: 72 };
 const CAMERA_FAR = 1400;
@@ -940,6 +940,12 @@ class TankInstance implements SaverInstance {
   private rockCrystals: CrystalField | null = null;
   /** Under each crab, a soft shadow on the ground it stands on (made when the first crab lands). */
   private walkShadows: ContactShadows | null = null;
+  /** The swimmers' shadows (`fishShadows`), made the first frame it is on. */
+  private swimShadows: SwimShadows | null = null;
+  private swimShadowN = 0;
+  private readonly swimTurn = new Quaternion();
+  private readonly swimTilt = new Quaternion();
+  private readonly swimNormal = new Vector3();
   private walkShadowN = 0;
   /** The shard shapes this scene's crystals wear — rock colonies wear them too. */
   private shardVariants: ReturnType<typeof shardGeometry>[] | null = null;
@@ -2924,8 +2930,10 @@ class TankInstance implements SaverInstance {
     // Tint reads LAST frame's fish emitters (this frame's are still being
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
+    const shadowAmount = this.num('fishShadows');
     const tintPulse = this.num('crystalPulse');
     this.walkShadowN = 0;
+    this.swimShadowN = 0;
     // Every floor creature's own spot first (crabs and starfish), so each can
     // give the others room (crab.ts).
     const crabSpots = this.crabSpots;
@@ -3649,6 +3657,23 @@ class TankInstance implements SaverInstance {
         // On the floor even when a jet lifts the octopus, and smaller the higher it goes.
         const gy = octo ? octo.groundY : floor.y, far = octo ? 1 - 0.6 * octo.lift : 1;
         this.walkShadows.set(this.walkShadowN++, floor.x, gy + 0.15, floor.z, floor.quaternion, L * 1.15 * far, L * 0.95 * far);
+      } else if (!floor && f.group.visible && shadowAmount > 0) {
+        // A swimmer's shadow on the ground under it (`fishShadows`): small and dark near the sand,
+        // wide and faint high up, along its heading.
+        const ground = this.terrainAt;
+        const gy = ground ? ground(px, pz) : 0;
+        const h = y - gy, shade = shadowAmount * 0.5 * swimShade(h);
+        if (shade > 0.01) {
+          if (!this.swimShadows) { this.swimShadows = new SwimShadows(MAX_FISH); this.scene.add(this.swimShadows.mesh); }
+          const spread = swimSpread(h);
+          // Laid on the slope it falls on (a flat ellipse on a reef's hill is half buried in it), then turned to the heading.
+          const e = 4;
+          if (ground) this.swimNormal.set(ground(px - e, pz) - ground(px + e, pz), 2 * e, ground(px, pz - e) - ground(px, pz + e)).normalize();
+          else this.swimNormal.copy(Y_AXIS);
+          this.swimTilt.setFromUnitVectors(Y_AXIS, this.swimNormal);
+          this.swimTurn.setFromAxisAngle(Y_AXIS, Math.atan2(lfx, lfz)).premultiply(this.swimTilt);
+          this.swimShadows.setShaded(this.swimShadowN++, px, gy + 0.6, pz, this.swimTurn, L * 0.5 * spread, L * 1.05 * spread, shade);
+        }
       }
       // An octopus's eyes — each pupil turned level with the world — its skin, its ink (octopus.ts, ink.ts).
       let oLook: ReturnType<typeof octopusLook> | null = null;
@@ -3914,6 +3939,7 @@ class TankInstance implements SaverInstance {
     }
     this.lastCrowding = { ...crowding(at, MAX_FISH), without };
     this.walkShadows?.commit(this.walkShadowN);
+    this.swimShadows?.commit(this.swimShadowN);
     // The garden answers the cast: crowns fold, worms duck, pods swell as a fish passes —
     // after the cast is placed, so it answers this frame's fish, not last frame's.
     if (this.scenery) {
