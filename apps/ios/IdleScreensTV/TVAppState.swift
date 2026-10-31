@@ -616,6 +616,8 @@ final class TVAppState {
                 if timeline == .live { applyLiveTrack(track) }
             } else if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 applySpec(spec, fallbackSeed: sceneSeed ?? 42)
+                // A sequence mounts on its kept clicker cue, as the web does.
+                if timeline == .live, activeSequence != nil { applySegmentCue(track) }
             }
         case .reseed(let seed, let epoch):
             if let epoch { channelEpochMs = epoch }
@@ -780,6 +782,15 @@ final class TVAppState {
     /// compiledScene the tier renderers already draw.
     private(set) var activeSequence: SequenceSubset?
     private var sequenceEpoch: Date?
+    /// The clicker (compile.ts SequenceInstance): a `sequence.segment` steer
+    /// to segment n moves the clock to n's start (by moving `sequenceEpoch`)
+    /// and releases every `advance: 'input'` hold before n.
+    private(set) var sequenceReleasedBelow = 0
+    /// The cue last acted on. The server re-sends the whole track with every
+    /// steer, so an unchanged cue must not rewind the segment again.
+    private var lastSegmentCue: JSONValue?
+    /// The host seed the sequence mounted with, for a cue's re-render.
+    private var sequenceFallbackSeed: Int?
     private var sequenceTask: Task<Void, Never>?
     /// Bumps on every live scene message (publish, recall, scheduled entry):
     /// part of the renderer identity, so a new scene dissolves in.
@@ -899,6 +910,9 @@ final class TVAppState {
         guard seq != activeSequence else { return }
         sequenceTask?.cancel()
         activeSequence = seq
+        sequenceReleasedBelow = 0
+        lastSegmentCue = nil
+        sequenceFallbackSeed = fallbackSeed
         // `sync: 'epoch'` starts the clock where the channel's shared clock
         // is (every screen in the room on one segment); `mount` at 0.
         let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date().addingTimeInterval(serverSkew))
@@ -938,6 +952,8 @@ final class TVAppState {
         stopMorph()
         activeSequence = nil
         sequenceEpoch = nil
+        sequenceReleasedBelow = 0
+        lastSegmentCue = nil
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
         sequenceWipe = nil
@@ -962,14 +978,14 @@ final class TVAppState {
     /// screen; the first segment of a new sequence is dissolved in by the scene
     /// message (or the channel change) that started it.
     private func applySegment(_ seq: SequenceSubset, at T: TimeInterval, fallbackSeed: Int?,
-                              advancing: Bool = true) {
+                              advancing: Bool = true, wrapped forceWrap: Bool = false) {
         stopKeyframes()
         stopMorph()
-        let resolved = seq.resolve(at: T)
+        let resolved = seq.resolve(at: T, releasedBelow: sequenceReleasedBelow)
         let index = resolved.index
         let segment = seq.segments[index]
         // The crossing is the OUTGOING segment's transition (web parity).
-        let crossing = seq.crossing(into: index, wrapped: index == 0 && seq.hasWrapped(at: T))
+        let crossing = seq.crossing(into: index, wrapped: index == 0 && (forceWrap || seq.hasWrapped(at: T)))
         var dissolve: TimeInterval = 0
         var wipe: SequenceSubset.Wipe?
         switch crossing {
@@ -1096,8 +1112,9 @@ final class TVAppState {
                 guard let self, let seq = self.activeSequence,
                       let epoch = self.sequenceEpoch else { return }
                 let now = Date().timeIntervalSince(epoch)
-                // A durationless tail with no loop holds forever.
-                guard let wait = seq.nextBoundary(after: now) else { return }
+                // A durationless tail with no loop holds forever; an
+                // `advance: 'input'` hold waits for the clicker.
+                guard let wait = seq.nextBoundary(after: now, releasedBelow: self.sequenceReleasedBelow) else { return }
                 try? await Task.sleep(for: .seconds(wait + 0.02))
                 guard !Task.isCancelled else { return }
                 self.applySegment(seq, at: Date().timeIntervalSince(epoch),
@@ -1128,6 +1145,36 @@ final class TVAppState {
         return SpecTimeline.applyDeltas(spec, mount)
     }
 
+    /// The track's `sequence.segment` cue, if it has one.
+    nonisolated static func segmentCue(_ track: JSONValue?) -> JSONValue? {
+        guard case .object(let t)? = track, let raw = t["deltas"]?.array else { return nil }
+        return raw.last { item in
+            if case .object(let d) = item { return d["path"]?.string == "sequence.segment" && d["value"]?.number != nil }
+            return false
+        }
+    }
+
+    /// The clicker (compile.ts SequenceInstance `applyTrack`): land the
+    /// sequence at the cued segment's start — its `life.enter` build replays —
+    /// and keep running on the timer from there, every hold before it
+    /// released. Holds at and after it stay armed, so a step back re-arms
+    /// the ones in between. A mount carrying a kept cue lands the same way.
+    private func applySegmentCue(_ track: JSONValue?) {
+        guard let seq = activeSequence, let cue = Self.segmentCue(track), cue != lastSegmentCue,
+              case .object(let d) = cue, let value = d["value"]?.number else { return }
+        lastSegmentCue = cue
+        let index = max(0, min(seq.segments.count - 1, Int(value.rounded())))
+        let start = seq.segmentStart(index)
+        sequenceReleasedBelow = index
+        sequenceEpoch = Date().addingTimeInterval(-start)
+        sequenceTask?.cancel()
+        // A cue back to 0 under loop is the jump a lap wrap makes: it plays
+        // the last segment's transition, as the wrap does.
+        applySegment(seq, at: start, fallbackSeed: sequenceFallbackSeed, advancing: true,
+                     wrapped: seq.loop == true && index == 0 && seq.segments.count > 1)
+        scheduleSequenceAdvance(fallbackSeed: sequenceFallbackSeed)
+    }
+
     // MARK: Live steering (`track`)
 
     /// The live scene as steering has left it (JSON), and the frame on screen
@@ -1151,6 +1198,10 @@ final class TVAppState {
         if isClassicSpec {
             liveClassicParams = Self.trackParams(from: track.map { .object(["track": $0]) })
             if timeline == .live { classicParams = liveClassicParams }
+            return
+        }
+        if activeSequence != nil {
+            if timeline == .live { applySegmentCue(track) }
             return
         }
         guard timeline == .live, activeSequence == nil, let base = steeredJSON ?? currentSpecJSON,

@@ -1342,7 +1342,8 @@ makes a timed segment **hold** at the end of its `duration` until a
 `sequence.segment` steer releases it — the clicker (see Steering below). The
 held scene keeps animating (its `localT` keeps growing), so a slide waiting for
 the presenter never freezes. A durationless final segment holds regardless of
-`advance`.
+`advance`. **Native:** tvOS holds the same way and takes the
+`sequence.segment` cue, including a kept cue when a screen mounts.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
 `{ type: 'morph', dur: number, text?: 'step' | 'crossfade' | 'dip' }` interpolates
