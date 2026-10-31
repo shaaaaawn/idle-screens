@@ -1,3 +1,4 @@
+import regexp from 'eslint-plugin-regexp';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -23,5 +24,13 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
+  },
+  {
+    // The class CodeQL reports as js/polynomial-redos, caught at lint time: twice it reached a release PR and blocked it
+    // (#359's scalar-bound hint, #383's choreography cue pattern). Two quantifiers that can trade the same characters.
+    files: ['**/*.ts'],
+    ignores: ['**/*.test.ts'], // a test's own pattern never sees outside input
+    plugins: { regexp },
+    rules: { 'regexp/no-super-linear-backtracking': 'error' },
   },
 );
