@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type SpriteSpec, type ValidationResult } from './types';
-import { applyDeltasShared, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
+import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
@@ -1013,7 +1013,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         const variants = sp.kind === 'text' && Array.isArray(sp.strings) ? sp.strings.length
           : sp.kind === 'emoji' && Array.isArray(sp.glyphs) ? sp.glyphs.length
             : sp.kind === 'bar' && Array.isArray(sp.values) ? sp.values.length : null;
-        if (variants !== null && variants !== layer.count) {
+        // `role: 'atmosphere'` text is texture: labels that cycle or run out are the look (X807).
+        const atmosphere = sp.kind === 'text' && sp.role === 'atmosphere';
+        if (variants !== null && variants !== layer.count && !atmosphere) {
           warn(`${path}.count`, 'list-length-mismatch', `count is ${layer.count} but the sprite carries ${variants} ${sp.kind === 'bar' ? 'values' : 'variants'} — a ${lay.type} layout reads them in order, so they cycle or go unused`);
         }
       }
@@ -1902,7 +1904,7 @@ export function validateSequence(seq: unknown): ValidationResult {
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
-          message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+          message: `segments ${i}→${i + 1} differ structurally (${describeStructuralDifferences(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec)}): morph will fall back to cut`,
         });
       } else if (s.scene.timeline === undefined && (next as Record<string, unknown> & { scene: Record<string, unknown> }).scene.timeline === undefined
         && morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec, { textCrossfade: s.transition.text === 'crossfade' || s.transition.text === 'dip' })) {
@@ -1928,7 +1930,7 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (sq.loop !== true) why = 'the sequence does not loop';
     else if (last < 1) why = 'there is only one segment';
     else if (lastTr?.type !== 'morph') why = 'the last segment declares no morph transition';
-    else if (structuralSignature(sq.segments[last]!.scene) !== structuralSignature(sq.segments[0]!.scene)) why = `segment ${last} and segment 0 differ structurally`;
+    else if (structuralSignature(sq.segments[last]!.scene) !== structuralSignature(sq.segments[0]!.scene)) why = `segment ${last} and segment 0 differ structurally (${describeStructuralDifferences(sq.segments[last]!.scene, sq.segments[0]!.scene)})`;
     else if (morphChainRoot(sq, last) !== 0) why = `the lap is not one morph chain (segment ${morphChainRoot(sq, last)} starts a new chain), so the wrap would jump seeds`;
     if (why || !canWrapMorph(sq)) {
       warnings.push({ path: 'wrapMorph', code: 'wrap-morph-inactive', message: `wrapMorph has no effect: ${why ?? 'the wrap cannot morph'} — the wrap stays a cut` });
