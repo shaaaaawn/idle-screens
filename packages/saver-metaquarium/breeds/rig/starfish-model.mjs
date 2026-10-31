@@ -17,7 +17,7 @@
  * faces -Y; its left is +X. A voxel (i, j, k) spans x 2i-1..2i+1, y 2j-1..2j+1,
  * z 2k..2k+2.
  *
- *   disc    r ≤ 2.9 voxels, three layers: the face is on its top
+ *   disc    r ≤ 3.9 voxels (DISC_FILL), three layers: the face is on its top
  *   arms    five, at 36° + 72°·n from the front (two forward, two to the
  *           sides, one back), ARM_R long, each laid on a grid of its own along
  *           it (cubes square to the arm: straight edges, no stair-steps): five
@@ -38,6 +38,9 @@ export const ARM_R = 10.5;
 export const ARM_THICK = 5;
 export const TIP_LEN = 1.6;
 const DISC_R = 2.9;
+/** The disc as drawn: a little wider than the rig's (DISC_R, where the arms hinge), so the round lattice disc
+ *  fills the join between arms — two arms' angled roots overlapping there left saw-tooth wedges. */
+const DISC_FILL = 3.9;
 /** Arm axes, radians from the front (-Y) toward the starfish's left (+X). */
 export const ARM_ANGLES = [0, 1, 2, 3, 4].map((n) => ((36 + 72 * n) * Math.PI) / 180);
 
@@ -51,11 +54,12 @@ const MATERIALS = {
 
 /** Half an arm's width at `along` voxels out (a cell is on the arm if |across| ≤ this). */
 export const armHalfWidth = (along) => 2.3 - 1.55 * (along / ARM_R);
-/** An arm's cells either side of its axis, `u` cells out: five wide by the disc, three down its length, and the
- *  glowing tip narrowing to a point — the arm's own end, lit (a full-width glowing paddle at the end of a
+/** An arm's cells either side of its axis, `u` cells out: three wide from the disc's rim down its length (the
+ *  wide disc gives the arms their chunky roots: a five-wide angled root poked its corners out between the arms
+ *  as saw-teeth), and the glowing tip narrowing to a point — the arm's own end, lit (a full-width glowing paddle at the end of a
  *  thinning arm read as a separate slab stuck on). Chunky on purpose: the arms are the character (cut to the
  *  taper above on their own grid, they came out thin and spiky). */
-export const armHalfCells = (u) => (u <= 4 ? 2 : u < Math.round(ARM_R) ? 1 : 0);
+export const armHalfCells = (u) => (u < Math.round(ARM_R) ? 1 : 0);
 
 /** Which arm a point (voxel units) lies in, and how far out: null off the arms. */
 export function armOf(x, y) {
@@ -95,9 +99,9 @@ const bumpAt = (u, v) => (v === 0 && u >= 4 && u <= 8 && u % 2 === 0) || (u === 
  */
 export function cubes() {
   const out = [];
-  const R = Math.ceil(DISC_R) + 1;
+  const R = Math.ceil(DISC_FILL) + 1;
   for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) {
-    if (Math.hypot(i, j) > DISC_R) continue;
+    if (Math.hypot(i, j) > DISC_FILL) continue;
     for (let k = 0; k < 3; k++) out.push({ grid: 'disc', cell: [i, j, k], mat: 'PrimaryColor', centre: [2 * i, 2 * j, 2 * k + 1], basis: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], size: 2 });
   }
   // The face, on the disc's top (k = 2): a smile toward the front…
@@ -118,7 +122,7 @@ export function cubes() {
     for (let u = 2; u <= TIP_U; u++) {
       for (let v = -2; v <= 2; v++) {
         // Inside the disc the disc is the starfish (its face is drawn on it): an arm starts at its rim.
-        if (Math.abs(v) > armHalfCells(u) || Math.hypot(u, v) < DISC_R) continue;
+        if (Math.abs(v) > armHalfCells(u) || Math.hypot(u, v) < DISC_FILL) continue;
         // The light is the tip itself: the last cell and the one behind it down the middle. A whole lit paddle,
         // haloed and bloomed past its cubes, read as a glowing slab pasted over the end of the arm.
         const tip = u === TIP_U || (u === TIP_U - 1 && v === 0);
