@@ -22,6 +22,9 @@ export const METAQUARIUM_PARAMS = {
    *  as close as their spread allows). Azimuth and autoRotate still turn it;
    *  distance scales it. A change is a cut. */
   shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro', 'cast'], ease: 'step' },
+  /** Seconds a change of `shot` takes: 0 (default) cuts; above it the camera
+   *  moves from the old framing to the new one, eased. */
+  shotBlend: { type: 'number', default: 0, min: 0, max: 12, ease: 'step' },
   /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
    *  camera. The orbit params are ignored while following. */
   cameraFollow: { type: 'number', default: -1, min: -1, max: 23, ease: 'step' },
