@@ -93,7 +93,7 @@ import { angelFrame, rigAngel, type AngelRig } from './angel';
 import { rigTurtle, turtleFrame, type TurtleRig } from './turtle';
 import { hackerFrame, rigHacker, type HackerRig } from './hacker';
 import { rigShark, sharkFrame, type SharkRig } from './shark';
-import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
+import { DOLPHIN_GESTURES, dolphinFrame, dolphinHold, dolphinLeap, LEAP, dolphinLeapAhead, dolphinLook, rigDolphin, type DolphinRig } from './dolphin';
 import { rigTang, tangFrame, tangHold, tangLook, type TangRig } from './tang';
 import { pufferFrame, pufferHold, pufferLook, rigPuffer, type PufferRig } from './puffer';
 import {
@@ -3111,6 +3111,8 @@ class TankInstance implements SaverInstance {
     const finish = this.avoidFinish;
     finish.length = 0;
     const off = this.avoidOff, offRate = this.avoidRate;
+    // A dolphin breaches only through an open surface (dolphin.ts dolphinLeap): not with no water, not under ice.
+    const leapSurface = this.ceiling && this.str('environment') !== 'ice' ? this.ceiling.position.y : null;
     for (const f of this.fish) {
       if (!f) continue;
       f.group.visible = f.index < visible;
@@ -3184,7 +3186,10 @@ class TankInstance implements SaverInstance {
       // A seahorse stops on its route to hold on to something (holdfast.ts), and picks up where it stopped.
       const holdOf = this.wantBreeds[f.index] === 'dori' ? tangHold : this.wantBreeds[f.index] === 'blowfish' ? pufferHold
         : this.wantBreeds[f.index] === 'seahorse' ? seahorseHeld : this.wantBreeds[f.index] === 'dolphin' ? dolphinHold : null;
-      const held = holdOf && !style.formation ? holdOf(f.index, tSec) * f.plan.cruise * speed * styleSpeed * style.travel : 0;
+      // A breaching dolphin is pushed on along its route and gives it back after (negative held).
+      const leaps = leapSurface !== null && this.wantBreeds[f.index] === 'dolphin' && !scripted && !style.formation;
+      const held = ((holdOf && !style.formation ? holdOf(f.index, tSec) : 0) - (leaps ? dolphinLeapAhead(f.index, tSec) : 0))
+        * f.plan.cruise * speed * styleSpeed * style.travel;
       const d = anchor + effort * style.travel + mnv.along * L - held;
 
       // What drives the animation. For a free fish that is its own effort; for
@@ -3666,6 +3671,7 @@ class TankInstance implements SaverInstance {
       // A dolphin (dolphin.ts): its strokes keep time with the ground it covers — a vignette
       // actor's scripted travel, or its own — its moments, its blinks, its gestures.
       let dolphin: ReturnType<typeof dolphinFrame> | null = null;
+      let dLeap: ReturnType<typeof dolphinLeap> = null;
       if (f.rig?.dolphin) {
         let dPace = rigPace, dBeat = beat;
         if (act && this.vignette) {
@@ -3673,8 +3679,10 @@ class TankInstance implements SaverInstance {
           const nx = poseAcross(this.vignette, f.index, tSec, 0.25, ownMoves);
           dPace = nx ? (Math.hypot(nx.x - act.x, nx.y - act.y, nx.z - act.z) * 4) / 17 : 0;
         }
+        dLeap = leaps ? dolphinLeap(f.index, tSec, leapSurface!, y, L, f.plan.cruise * speed * styleSpeed * style.travel) : null;
         dolphin = dolphinFrame(f.rig.dolphin, tSec, f.index, dBeat, {
           pace: dPace, flurry: act ? 0 : mnv.flurry + flurryBoost, actor: !!act,
+          turn: act ? 0 : pose.turn ?? 0, leap: dLeap ? { phase: dLeap.phase, w: dLeap.w } : null,
           gesture: act?.gesture && ownMoves?.(act.gesture.name) ? { name: act.gesture.name, at: act.gesture.at, weight: act.gesture.weight } : null,
         });
       }
@@ -3835,6 +3843,9 @@ class TankInstance implements SaverInstance {
       // A dolphin eyes you side-on, as a real one does: for a friendly moment it turns
       // three-quarters to you, its near eye your way; then its pupils (dolphin.ts) and its bubble.
       if (dolphin && f.rig!.dolphin) {
+        // Its bank in a hard turn, in place of a fish's lean (dolphin.ts dolphinBank); then a breach's height.
+        if (!act) f.group.rotateZ(dolphin.bank - pose.roll);
+        if (dLeap) f.group.position.y += dLeap.y - y;
         const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
         if (viewer && dolphin.face > 0.01) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
@@ -3846,7 +3857,9 @@ class TankInstance implements SaverInstance {
         }
         // A flip or a roll turns the WHOLE dolphin about its body bone (dolphin.ts dolphinTurn): one
         // smooth angle, never blended (a whole turn baked into a clip unwinds when the mixer blends it).
-        const { pitch, roll } = dolphin.turn;
+        const { roll } = dolphin.turn;
+        // A breach pitches it along its arc (+ nose up there; + head down here).
+        const pitch = dolphin.turn.pitch - (dLeap ? dLeap.pitch * dLeap.w : 0);
         if (pitch || roll) {
           const dr = f.rig!.dolphin;
           f.group.updateMatrixWorld(true);
@@ -3864,6 +3877,15 @@ class TankInstance implements SaverInstance {
         const friend = act?.lookAt ? this.burpTmp.set(act.lookAt.x, act.lookAt.y, act.lookAt.z) : null;
         dolphinLook(f.rig!.dolphin, tSec, f.index, dolphin, viewer, friend);
         const hole = f.rig!.dolphin.blowhole;
+        // Back in: a ring of bubbles where it broke the surface.
+        if (dLeap && dLeap.phase === 'dive' && this.burps && leapSurface !== null) {
+          const at = dLeap.start + LEAP.run + LEAP.air;
+          for (let j = 0; j < 6; j++) {
+            const a = (j / 6) * Math.PI * 2 + fishHash(f.index, Math.round(at * 10) + j), r = L * (0.15 + 0.2 * fishHash(f.index * 7 + j, Math.round(at * 10)));
+            this.burps.emit(`dolphin-splash:${f.index}:${at.toFixed(2)}:${j}`, at + 0.05 * j, px + Math.cos(a) * r, leapSurface - L * (0.2 + 0.15 * (j % 3)), pz + Math.sin(a) * r,
+              L * (0.05 + 0.04 * (j % 2)), fishHash(f.index * 11 + j, Math.round(at * 10)));
+          }
+        }
         if (dolphin.bubble && hole && this.burps) {
           hole.getWorldPosition(this.burpAt);
           this.burps.emit(dolphin.bubble.key, dolphin.bubble.t, this.burpAt.x, this.burpAt.y + L * 0.05, this.burpAt.z,
@@ -4012,7 +4034,7 @@ class TankInstance implements SaverInstance {
         // The shell a snail wears as drawn (`snailShell`, dressSnail): checkable without pixels (X491).
         ...(f.rig?.snail ? { shell: f.rig.snail.shell.style || null } : {}),
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper, turnPerL: Math.round((pose.turn ?? 0) * 1000) / 1000 } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

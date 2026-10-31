@@ -42,8 +42,13 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const CAPE = 'PAINT-#1f6fd1';
-export const BELLY = 'PAINT-#d9ecfa';
+// The body is SKIN- (lit as a coat: its faces shade by where they point); the accents are PAINT- (they glow a little, to pop).
+export const CAPE = 'SKIN-#1f6fd1';
+export const BELLY = 'SKIN-#d9ecfa';
+/** The blues by which way the skin faces, as a real bottlenose (and a cel-shaded cartoon) wears them:
+ *  a darker cape along the spine, CAPE on the upper sides, a lighter flank above the pale belly. */
+export const BACK = 'SKIN-#1858b4';
+export const FLANK = 'SKIN-#3f8fe6';
 export const LINE = 'PAINT-#0f2238';
 export const TONGUE = 'PAINT-#ff6f8e';
 export const BLUSH = 'PAINT-#ff8fb0';
@@ -58,7 +63,7 @@ const paint = (name) => ({ color: linear(name.slice(name.indexOf('#'))) });
 
 /** Blender material colours (linear); the tank reads the names. */
 const MATERIALS = {
-  [CAPE]: paint(CAPE), [BELLY]: paint(BELLY), [LINE]: paint(LINE), [TONGUE]: paint(TONGUE), [BLUSH]: paint(BLUSH),
+  [CAPE]: paint(CAPE), [BELLY]: paint(BELLY), [BACK]: paint(BACK), [FLANK]: paint(FLANK), [LINE]: paint(LINE), [TONGUE]: paint(TONGUE), [BLUSH]: paint(BLUSH),
   [WHITE]: { color: [0.85, 0.85, 0.85], roughness: 0.4 },
   [BLACK]: { color: [0, 0, 0], roughness: 0.1, metal: 1 },
 };
@@ -178,7 +183,10 @@ export function draw() {
     // The jaw and the cheek under the smile are pale; then the belly, below its line.
     const smileK = SMILE.find(([sn]) => sn === n)?.[1];
     const pale = n < BEAK_N ? k < MOUTH_K || (n === 0 && k === MOUTH_K) : smileK !== undefined ? k < smileK : z < zc + bellyO(s) * h;
-    put(i, n, k, pale ? BELLY : CAPE, jaw ? 'jaw' : null);
+    // The blues by the way the skin faces: the section's outward normal, its upward share (ellipse gradient).
+    const gx = i / (section(s).w + 0.35) ** 2, gz = (z - zc) / (h + 0.35) ** 2, up = gz / (Math.hypot(gx, gz) || 1);
+    const blue = n < BEAK_N ? CAPE : up > 0.8 ? BACK : up > 0.2 ? CAPE : FLANK;
+    put(i, n, k, pale ? BELLY : blue, jaw ? 'jaw' : null);
   }
   for (const side of [-1, 1]) {
     // The smile: on the skin, a line along the beak curving up toward the eye.
@@ -246,17 +254,36 @@ const FACES = [
   [2, -1, [[-1, -1, -1], [-1, 1, -1], [1, 1, -1], [1, -1, -1]]],
 ];
 
+/**
+ * Ambient occlusion, per corner of every face (the classic voxel rule): of the three cubes that sit just
+ * outside the face round that corner — the two along its edges and the one across its diagonal — how
+ * many are there. Both edges blocked is fully tucked in. Written as a grey (COLOR_0) the tank multiplies
+ * over a SKIN- part, so every crease, step and joint darkens a little and the stair-steps of a curved
+ * body read as sculpted, not pixelated.
+ */
+export const AO_LEVELS = [1, 0.8, 0.66, 0.55];
+export function aoAt(solid, cell, axis, sign, corner) {
+  const [u, v] = [0, 1, 2].filter((a) => a !== axis);
+  const out = [...cell]; out[axis] += sign;
+  const at = (du, dv) => { const q = [...out]; q[u] += du; q[v] += dv; return solid.has(q.join(',')) ? 1 : 0; };
+  const s1 = at(corner[u], 0), s2 = at(0, corner[v]), c = at(corner[u], corner[v]);
+  return AO_LEVELS[s1 && s2 ? 3 : s1 + s2 + c];
+}
+
 export function build() {
   const doc = new Document();
   const buffer = doc.createBuffer();
   const scene = doc.createScene('Scene');
   const byMat = new Map();
-  for (const v of voxels()) (byMat.get(v[3]) ?? byMat.set(v[3], []).get(v[3])).push(v);
+  const all = voxels();
+  const solid = new Set(all.map((v) => `${v[0]},${v[1]},${v[2]}`));
+  for (const v of all) (byMat.get(v[3]) ?? byMat.set(v[3], []).get(v[3])).push(v);
   for (const [name, spec] of Object.entries(MATERIALS)) {
     const cells = byMat.get(name) ?? [];
     if (!cells.length) continue;
     const mat = doc.createMaterial(name).setBaseColorFactor([...spec.color, 1]).setRoughnessFactor(spec.roughness ?? 0.5).setMetallicFactor(spec.metal ?? 0);
-    const pos = [], nrm = [], idx = [];
+    const pos = [], nrm = [], idx = [], col = [];
+    const shaded = name.startsWith('SKIN-');
     for (const [i, j, k] of cells) {
       const c = [2 * i, 2 * j, 2 * k + 1]; // Blender centre
       for (const [axis, sign, quad] of FACES) {
@@ -264,6 +291,7 @@ export function build() {
         for (const q of quad) {
           const b = [c[0] + q[0], c[1] + q[1], c[2] + q[2]];
           pos.push(b[0], b[2], -b[1]); // Blender → glTF
+          if (shaded) { const g = aoAt(solid, [i, j, k], axis, sign, q); col.push(g, g, g); }
         }
         const n = [0, 0, 0]; n[axis] = sign;
         for (let m = 0; m < 4; m++) nrm.push(n[0], n[2], -n[1]);
@@ -274,6 +302,7 @@ export function build() {
       .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(pos)).setBuffer(buffer))
       .setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(nrm)).setBuffer(buffer))
       .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(idx)).setBuffer(buffer));
+    if (shaded) prim.setAttribute('COLOR_0', doc.createAccessor().setType('VEC3').setArray(new Float32Array(col)).setBuffer(buffer));
     const mesh = doc.createMesh(`Dolphin-${name}`).addPrimitive(prim);
     scene.addChild(doc.createNode(`Dolphin-${name}`).setMesh(mesh));
   }

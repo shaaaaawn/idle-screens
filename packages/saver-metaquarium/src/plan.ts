@@ -34,6 +34,8 @@ export interface SwimPose {
   fz: number;
   /** Bank roll (radians): lean into horizontal turns. */
   roll: number;
+  /** The heading's change across one body length (radians, + to its left), where chordPose measured it. */
+  turn?: number;
   /** Distance travelled (drives the tail-beat clip phase). */
   dist: number;
 }

@@ -400,7 +400,7 @@ def main():
             'eye.L': ['scale'], 'eye.R': ['scale'], 'blowhole': ['scale'],
         }
         clips = bake(rig, 'dolphin', CLIPS, apply_pose, LOOPS, keyed)
-        out = export(rig, out_path('dolphin'), {})
+        out = export(rig, out_path('dolphin'), {}, colors=True)  # the skin's baked occlusion (dolphin-model.mjs aoAt)
         return {'faces_per_bone': counts, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 

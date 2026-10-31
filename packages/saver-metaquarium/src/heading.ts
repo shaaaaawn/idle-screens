@@ -58,7 +58,7 @@ export function chordPose(plan: SwimPlan, d: number, length: number): SwimPose {
   const a = chordHeading(plan, d - length * 0.5, length * 1.5), b = chordHeading(plan, d + length * 0.5, length * 1.5);
   let turn = Math.atan2(b.fx, b.fz) - Math.atan2(a.fx, a.fz);
   turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
-  return { ...p, fx: h.fx, fy: h.fy, fz: h.fz, roll: -0.35 * Math.tanh(turn * 1.2) };
+  return { ...p, fx: h.fx, fy: h.fy, fz: h.fz, roll: -0.35 * Math.tanh(turn * 1.2), turn };
 }
 
 /** How far a dodge's climb tips the nose (added to the heading's y), compressed like its turn. */
