@@ -241,7 +241,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'commute', label: 'Going home', what: 'Three neighbours leave their own front doors, meet in the village, and go home again. Loops.',
     params: { ...ALIVE, ...NIGHT, floorColor: '#2a1a2a', paths: 0.5, geodeHomes: 3, rockDensity: 0.3, rockVeins: 0.6, floraDensity: 0.12, bubbleVents: 0.7, marineSnow: 0.4, skyLanterns: 0.6, horizon: 0.8,
       propMix: 'crystal:3@druse/rainbow', crystalTint: 0.6, fishMix: '100:2,257:1', fishGlow: 0.5,
-      vignette: '4s: a =home1in, b =home2in, c =home3in | 8s: a >centre, b >centre @a | 6s: a @b talk, b @a nod | 8s: c >centre, a @c, b @c | 9s: a b c circle centre | 8s: a >home1in, b >home2in, c >home3in',
+      vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
       cameraDistance: 135, cameraElevation: 9, cameraAzimuth: 4, autoRotate: 0 },
   },
   {
@@ -310,7 +310,7 @@ export const RECIPES: readonly Recipe[] = [
     id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes and go home again, seen high through a tilt-shift lens: a model village.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
       fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
-      vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
+      vignette: '4s: a =home1in, b =home2in, c =home3in | 8s: a >centre, b >centre @a | 6s: a @b talk, b @a nod | 8s: c >centre, a @c, b @c | 9s: a b c circle centre | 8s: a >home1in, b >home2in, c >home3in',
       fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, tiltShift: 0.55, shot: 'orbit', cameraDistance: 165, cameraElevation: 30, autoRotate: 0.5 },
   },
 ];
