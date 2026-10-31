@@ -428,11 +428,15 @@ describe('scenePeriod and the loop-seam advisory', () => {
 
   describe('loop-seam fires only for parts that do not run through the wrap (F145, X725, X823)', () => {
     const vp = { width: 960, height: 540 };
-    const codes = (s: SaverSpec): string[] => adviseSpec(s, vp).map((w) => w.code);
-    const seam = (s: SaverSpec) => adviseSpec(s, vp).find((w) => w.code === 'loop-seam');
+    /** Every scene here must be valid, or the advisory is judging a scene no screen would draw. */
+    const seam = (s: SaverSpec) => {
+      expect(validateSpec(structuredClone(s)).errors).toEqual([]);
+      return adviseSpec(s, vp).find((w) => w.code === 'loop-seam');
+    };
+    const codes = (s: SaverSpec): string[] => (seam(s) ? ['loop-seam'] : []);
     const tl = (duration: number): SaverSpec['timeline'] => ({ loop: true, duration, keys: [{ t: 0, path: 'p.opacity', value: 0.5 }] });
     /** A 4 s path lap: an entity travelling a route, which a lap off its period cuts mid-route. */
-    const route = (duration = 4000): LayerSpec => ({ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#ffffff' }, motion: { type: 'path', duration, points: [[0.2, 0.5], [0.8, 0.5]] } } as LayerSpec);
+    const route = (duration = 4000): LayerSpec => ({ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#ffffff' }, motion: { type: 'path', duration, points: [{ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 }] } });
     const withRoute = (lap?: number, extra: LayerSpec[] = []): SaverSpec => scene([{ ...line(), key: 'p', opacity: 1 }, route(), ...extra], lap ? { timeline: tl(lap) } : {});
 
     it('raises it for a path lap the timeline does not fit', () => {
