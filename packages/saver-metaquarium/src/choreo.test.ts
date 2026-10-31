@@ -30,6 +30,30 @@ describe('choreography: the sheet', () => {
     expect(problems[0]).toMatch(/no move "moonwalk"/);
     expect(problems.join(' ')).toMatch(/travel to "nowhere"/);
   });
+  it('names every kind of bad modifier, a repeated dancer and an empty line', () => {
+    const { lines, problems } = parseChoreography('a: 4:march @upward ~twice ^-1 ^high, 4:jacks | a: 2:hold | b: 0:march', MOVES);
+    expect(problems.join(' ')).toMatch(/face "upward"/);
+    expect(problems.join(' ')).toMatch(/turn "twice" is not degrees/);
+    expect(problems.join(' ')).toMatch(/leap "-1" is not a height/);
+    expect(problems.join(' ')).toMatch(/dancer a has two lines/);
+    expect(problems.join(' ')).toMatch(/has no cues/);
+    expect(lines.get(0)!.cues.map((c) => c.move)).toEqual(['hold']);
+  });
+  it('a cue without beats is named; a line stops at 256 cues', () => {
+    expect(parseChoreography('march', MOVES).problems[0]).toMatch(/"march" is not <beats>:<move>/);
+    const long = parseChoreography(Array.from({ length: 300 }, () => '1:march').join(', '), MOVES);
+    expect(long.lines.get('*')!.cues).toHaveLength(256);
+    expect(long.problems[0]).toMatch(/more than 256 cues/);
+  });
+  it('a dancer that went to the centre stays there for the next cue, and leaves it for the next mark', () => {
+    const l = parseChoreography('4:walk >centre, 4:hold, 4:walk >left', MOVES).lines.get('*')!;
+    expect(choreoAt(l, 6).centre).toBe(1);
+    expect(choreoAt(l, 12 - 1e-6)).toMatchObject({ centre: expect.closeTo(0, 4), side: expect.closeTo(-2, 4) });
+  });
+  it('clamps a long cue, a big turn and a high leap', () => {
+    const c = parseChoreography('9999:march ~9000 ^9 >99,-99', MOVES).lines.get('*')!.cues[0]!;
+    expect(c).toMatchObject({ beats: 512, turn: 1440, lift: 3, to: [6, -6] });
+  });
   it('every starfish move plays a clip the rig has', () => {
     for (const name of STARFISH_MOVE_NAMES) expect(STARFISH_CLIPS).toContain(STARFISH_MOVES[name].clip);
   });

@@ -144,3 +144,13 @@ describe('the served guide stays readable whole', () => {
   });
 });
 const ENGINE_GUIDE_BUDGET = 34_500;
+
+describe('choreography in the guide', () => {
+  it('a bad sheet is advised, token by token; a sheet without starfish says so', () => {
+    expect(validateMetaquariumParams({ fishMix: 'starfish:3', choreography: '4:march, 4:moonwalk' })).toEqual([{ path: 'choreography', message: expect.stringMatching(/no move "moonwalk"/) }]);
+    expect(validateMetaquariumParams({ fishMix: 'dori:3', choreography: '4:march' })).toEqual([{ path: 'choreography', also: ['fishMix'], message: expect.stringMatching(/no starfish/) }]);
+  });
+  it('a choreography makes danceTempo count without a dance mode', () => {
+    expect(validateMetaquariumParams({ fishMix: 'starfish:1', choreography: '4:march', danceTempo: 100 })).toEqual([]);
+  });
+});
