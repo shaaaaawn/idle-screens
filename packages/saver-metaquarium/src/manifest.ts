@@ -244,6 +244,10 @@ export const METAQUARIUM_PARAMS = {
    *  mode), brighter on top: what separates a dark fish from dark water.
    *  0 is none. */
   fishRim: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The fish's own corners darken — a fin's root, the step at the head, the
+   *  gap under a shell — read off the voxels they are built from. Baked once
+   *  per breed, the first frame it is on; every tier. 0 is off. */
+  fishAO: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** A soft shadow on the ground under every swimmer: small and dark near
    *  the sand, wide and faint high up — what puts a fish at a height instead
    *  of floating in front of the floor. 0 is none (floor walkers always

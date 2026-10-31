@@ -79,6 +79,7 @@ import { rigSpawnFade, spawnAmount, type SpawnUniform } from './spawnfade';
 import { FLOOR_DETAIL, patchFloorDetail } from './floor-detail';
 import { addRimNormals, patchFishRim, setFishRim } from './rim';
 import { bakeVoxelOcclusion, patchVoxelAO, VOXEL_AO } from './voxel-ao';
+import { bakeFishOcclusion, FISH_AO, patchFishAO } from './fish-ao';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
 import { HighlightPass, canHoldHighlights } from './highlights';
@@ -2869,6 +2870,7 @@ class TankInstance implements SaverInstance {
     this.updateSceneryShadows();
     this.updateFloorDetail();
     this.updateFishRim();
+    this.updateFishAO();
     this.updateVoxelAO();
     this.updateNearFade();
 
@@ -4368,6 +4370,28 @@ class TankInstance implements SaverInstance {
     });
     for (const f of this.fish) if (f) patch(f.group);
     if (this.shoal) patch(this.shoal.mesh);
+  }
+
+  /**
+   * `fishAO` (fish-ao.ts): each fish's corner shading, read off its voxels and
+   * baked into its geometry the first frame the param is on (a fish that loads
+   * later gets it on its first frame; a breed's shared geometry bakes once),
+   * then patched onto its lit coats. After that only the strength moves.
+   */
+  private updateFishAO(): void {
+    const amount = this.num('fishAO');
+    FISH_AO.value = Math.max(0, Math.min(1, amount));
+    if (amount <= 0) return;
+    const install = (root: Object3D): void => {
+      bakeFishOcclusion(root);
+      root.traverse((n) => {
+        const mat = (n as Mesh).material as Material | Material[] | undefined;
+        if (mat) for (const m of Array.isArray(mat) ? mat : [mat]) patchFishAO(m);
+      });
+    };
+    // Every frame, like the rim: both steps are no-ops once done, and a fish whose model arrives later is caught.
+    for (const f of this.fish) if (f) install(f.group);
+    if (this.shoal) install(this.shoal.mesh);
   }
 
   /**
