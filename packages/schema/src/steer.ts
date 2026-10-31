@@ -545,53 +545,140 @@ export const STEER_EASES: ReadonlySet<string> = new Set(['in', 'out', 'spring'])
  * are baked at build time). Colour/alpha/pulse-only changes redraw in place.
  */
 export function structuralSignature(spec: SaverSpec): string {
-  return JSON.stringify([
-    spec.units,
-    // Normalized against the same default every renderer uses — an omitted
-    // referenceViewport and an explicit 1080 render identically, so they must
-    // hash identically or a same-sizing morph gets rejected as structural.
-    spec.referenceViewport ?? LIMITS.referenceViewport,
-    spec.layers.map((l) => {
+  const f = structuralFields(spec);
+  return JSON.stringify([...f.root.map(([, v]) => v), f.layers.map((l) => l.map(([, v]) => v))]);
+}
+
+/**
+ * One field of the structural signature: its path (relative to the scene, or
+ * to the layer) and its value. A tuple slot names each of its elements.
+ */
+type StructuralField = [name: string | readonly string[], value: unknown];
+
+/**
+ * The structural signature's fields, named, in signature order — one list for
+ * the scene and one per layer. `structuralSignature` stringifies exactly these
+ * values, so `structuralDifferences` names what decides a mismatch and can
+ * never drift from it.
+ */
+function structuralFields(spec: SaverSpec): { root: StructuralField[]; layers: StructuralField[][] } {
+  return {
+    root: [
+      ['units', spec.units],
+      // Normalized against the same default every renderer uses — an omitted
+      // referenceViewport and an explicit 1080 render identically, so they must
+      // hash identically or a same-sizing morph gets rejected as structural.
+      ['referenceViewport', spec.referenceViewport ?? LIMITS.referenceViewport],
+    ],
+    layers: spec.layers.map((l): StructuralField[] => {
       const s = l.sprite as Record<string, unknown>;
       return [
-        l.count,
-        l.size,
-        l.region,
-        l.position,
-        l.motion,
-        l.wrap,
-        l.flip,
-        l.alpha,
-        l.pulse,
-        l.spin,
-        l.grow,
-        l.layout,
-        l.emit,
-        l.clock,
-        l.sprite.kind,
+        ['count', l.count],
+        ['size', l.size],
+        ['region', l.region],
+        ['position', l.position],
+        ['motion', l.motion],
+        ['wrap', l.wrap],
+        ['flip', l.flip],
+        ['alpha', l.alpha],
+        ['pulse', l.pulse],
+        ['spin', l.spin],
+        ['grow', l.grow],
+        ['layout', l.layout],
+        ['emit', l.emit],
+        ['clock', l.clock],
+        ['sprite.kind', l.sprite.kind],
         // Dimensional draws baked into entities: radius (circle/ring), length
         // (streak), width+aspect (rect), palette pick (all shaped sprites).
-        s.radius,
-        s.length,
-        l.sprite.kind === 'rect' ? [s.width, s.aspect] : l.sprite.kind === 'bar' ? [s.length, s.thickness] : undefined,
-        Array.isArray(s.colors) ? s.colors.length : undefined,
-        s.colorWeights,
+        ['sprite.radius', s.radius],
+        ['sprite.length', s.length],
+        l.sprite.kind === 'rect'
+          ? [['sprite.width', 'sprite.aspect'], [s.width, s.aspect]]
+          : l.sprite.kind === 'bar' ? [['sprite.length', 'sprite.thickness'], [s.length, s.thickness]] : ['sprite.dimensions', undefined],
+        ['sprite.colors.length', Array.isArray(s.colors) ? s.colors.length : undefined],
+        ['sprite.colorWeights', s.colorWeights],
         l.sprite.kind === 'emoji'
-          ? [l.sprite.glyphs.length, l.sprite.cycle?.period]
+          ? [['sprite.glyphs.length', 'sprite.cycle.period'], [l.sprite.glyphs.length, l.sprite.cycle?.period]]
           : l.sprite.kind === 'text'
-            ? [l.sprite.strings.length, l.sprite.cycle?.period]
+            ? [['sprite.strings.length', 'sprite.cycle.period'], [l.sprite.strings.length, l.sprite.cycle?.period]]
             : l.sprite.kind === 'textBlock'
               // `anchor` is placement (in); `font`/`opacity`/`text` are paint
               // (out — opacity must glide). Appended only when set so every
               // existing spec's signature string is byte-identical.
-              ? (l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize])
-              : undefined,
+              ? [['sprite.fontSize', 'sprite.anchor'], l.sprite.anchor ? [l.sprite.fontSize, l.sprite.anchor] : [l.sprite.fontSize]]
+              : ['sprite.variants', undefined],
         // Static rotation is baked into entities (a range draws a seeded
         // angle). Appended only when set — same rule as `anchor` above.
-        ...(l.rotate !== undefined ? [l.rotate] : []),
+        ...(l.rotate !== undefined ? [['rotate', l.rotate] as StructuralField] : []),
         // `rock` is baked per entity like `pulse` (and draws a seeded phase).
-        ...(l.rock !== undefined ? [{ rock: l.rock }] : []),
+        ...(l.rock !== undefined ? [['rock', { rock: l.rock }] as StructuralField] : []),
       ];
     }),
-  ]);
+  };
+}
+
+/** A value as a difference names it: short, and `(unset)` for absent. */
+function showValue(v: unknown): string {
+  if (v === undefined) return '(unset)';
+  if (typeof v === 'string') return v;
+  const j = JSON.stringify(v);
+  return j.length > 40 ? `${j.slice(0, 37)}…` : j;
+}
+
+/** Leaf-level differences between two values, as `path: a → b` (objects descend; arrays and scalars compare whole). */
+function leafDifferences(path: string, a: unknown, b: unknown, out: string[]): void {
+  if (JSON.stringify(a) === JSON.stringify(b)) return;
+  const isRec = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+  if (isRec(a) && isRec(b)) {
+    const before = out.length;
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) leafDifferences(`${path}.${k}`, a[k], b[k], out);
+    // The signature compares JSON text, so the same fields written in another order still differ.
+    if (out.length === before) out.push(`${path}: the same fields in a different key order`);
+    return;
+  }
+  out.push(`${path}: ${showValue(a)} → ${showValue(b)}`);
+}
+
+/** A field list flattened to one value per name (tuple slots split per element). */
+function namedFields(fields: StructuralField[]): Map<string, unknown> {
+  const m = new Map<string, unknown>();
+  for (const [name, value] of fields) {
+    if (typeof name === 'string') { m.set(name, value); continue; }
+    const vs = Array.isArray(value) ? value : [];
+    name.forEach((n, i) => m.set(n, vs[i]));
+  }
+  return m;
+}
+
+/**
+ * What makes two scenes differ structurally, named field by field — e.g.
+ * `layers[2].layout.type: grid → list` — in the order `structuralSignature`
+ * reads them. Empty exactly when the signatures agree. A layer whose sprite
+ * kind changed reports the kind alone: every sprite field differs with it.
+ */
+export function structuralDifferences(a: SaverSpec, b: SaverSpec): string[] {
+  const fa = structuralFields(a);
+  const fb = structuralFields(b);
+  const out: string[] = [];
+  const ra = namedFields(fa.root);
+  const rb = namedFields(fb.root);
+  for (const k of new Set([...ra.keys(), ...rb.keys()])) leafDifferences(k, ra.get(k), rb.get(k), out);
+  if (fa.layers.length !== fb.layers.length) out.push(`layers.length: ${fa.layers.length} → ${fb.layers.length}`);
+  for (let i = 0; i < Math.min(fa.layers.length, fb.layers.length); i++) {
+    const la = namedFields(fa.layers[i]!);
+    const lb = namedFields(fb.layers[i]!);
+    const kindChanged = la.get('sprite.kind') !== lb.get('sprite.kind');
+    for (const k of new Set([...la.keys(), ...lb.keys()])) {
+      if (kindChanged && k.startsWith('sprite.') && k !== 'sprite.kind') continue;
+      leafDifferences(`layers[${i}].${k}`, la.get(k), lb.get(k), out);
+    }
+  }
+  return out;
+}
+
+/** `structuralDifferences` as one phrase for a message: the first few, then a count of the rest. */
+export function describeStructuralDifferences(a: SaverSpec, b: SaverSpec, max = 3): string {
+  const d = structuralDifferences(a, b);
+  if (d.length === 0) return '';
+  return d.length <= max ? d.join('; ') : `${d.slice(0, max).join('; ')}; +${d.length - max} more`;
 }

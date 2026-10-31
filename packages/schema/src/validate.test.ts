@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateSpec, assertValidSpec, ignoredPropertyPaths } from './validate';
+import { validateSpec, validateSequence, assertValidSpec, ignoredPropertyPaths } from './validate';
 import type { SaverSpec } from './types';
 
 const base = (): SaverSpec => ({
@@ -680,5 +680,73 @@ describe('validateSpec — Screen Test cold-read messages (F141, F142, F148)', (
       const s = spec({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: leaf, gradient: { ...grad, units: 'part', stops: [{ at: 0, color: '#000000', opacity: 0.4 }, { at: 1, color: '#ffffff' }] }, stroke: { color: '#000000', width: 0.01, opacity: 0.5, join: 'round', cap: 'round', draw: { end: 0.5 } } });
       expect(unknown(s)).toEqual([]);
     });
+  });
+});
+
+describe('sprite.size (F24)', () => {
+  const MISPLACED = "'size' belongs on the layer, not inside sprite — move it up one level";
+  type Loose = { layers: Array<Record<string, unknown>> };
+  const layerWith = (sprite: Record<string, unknown>, extra: Record<string, unknown> = {}): Loose => ({
+    ...base(),
+    layers: [{ count: 5, sprite, motion: { type: 'drift', speed: [30, 90] }, ...extra }],
+  }) as unknown as Loose;
+  const sizeWarnings = (spec: unknown) => (validateSpec(spec).warnings ?? []).filter((w) => w.path === 'layers[0].sprite.size');
+
+  it('aliases sprite.size on an emoji sprite to layer.size, with a misplaced-property warning', () => {
+    const spec = layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [30, 60] });
+    const r = validateSpec(spec);
+    expect(r.valid).toBe(true);
+    const w = sizeWarnings(structuredClone(layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [30, 60] })));
+    expect(w).toHaveLength(1);
+    expect(w[0]!.code).toBe('misplaced-property');
+    expect(w[0]!.message.startsWith(MISPLACED)).toBe(true);
+    expect(spec.layers[0]!.size).toEqual([30, 60]);
+    expect((spec.layers[0]!.sprite as Record<string, unknown>).size).toBeUndefined();
+  });
+
+  it('aliases sprite.size on a text sprite too', () => {
+    const spec = layerWith({ kind: 'text', strings: ['HI'], color: '#ffffff', size: [14, 22] });
+    expect(validateSpec(spec).valid).toBe(true);
+    expect(spec.layers[0]!.size).toEqual([14, 22]);
+  });
+
+  it('keeps layer.size when both are set, and says the layer value wins', () => {
+    const spec = layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [30, 60] }, { size: [10, 20] });
+    const w = sizeWarnings(spec);
+    expect(w).toHaveLength(1);
+    expect(w[0]!.code).toBe('misplaced-property');
+    expect(w[0]!.message).toBe(`${MISPLACED} — layer.size is also set, so the layer's value wins and sprite.size is ignored`);
+    expect(spec.layers[0]!.size).toEqual([10, 20]);
+  });
+
+  it('does not alias on kinds that never read layer.size, and names the field that sizes them', () => {
+    const circle = layerWith({ kind: 'circle', radius: [2, 6], color: '#ffffff', size: [30, 60] });
+    const w = sizeWarnings(circle);
+    expect(w).toHaveLength(1);
+    expect(w[0]!.code).toBe('unknown-property');
+    expect(w[0]!.message).toContain('radius');
+    expect(circle.layers[0]!.size).toBeUndefined();
+    const rect = sizeWarnings(layerWith({ kind: 'rect', width: [2, 6], color: '#ffffff', size: [30, 60] }));
+    expect(rect[0]!.message).toContain('width');
+  });
+
+  it('range-checks an aliased value as layers[i].size', () => {
+    expect(paths(layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [-5, 10] }))).toContain('layers[0].size');
+  });
+
+  it('aliases inside sequence segments (validateSequence routes scenes through validateSpec)', () => {
+    const scene = layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [30, 60] });
+    const seq = { format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false, segments: [{ key: 'a', scene, duration: 2000 }, { key: 'b', scene: structuredClone(scene) }] };
+    const r = validateSequence(seq);
+    expect(r.valid).toBe(true);
+    expect((r.warnings ?? []).filter((w) => w.path.endsWith('sprite.size') && w.code === 'misplaced-property')).toHaveLength(2);
+    expect(scene.layers[0]!.size).toEqual([30, 60]);
+  });
+
+  it('ignoredPropertyPaths stays pure and still reports a misplaced sprite.size', () => {
+    const spec = layerWith({ kind: 'emoji', glyphs: ['🐟'], size: [30, 60] });
+    expect(ignoredPropertyPaths(spec)).toEqual(['layers.0.sprite.size']);
+    expect((spec.layers[0]!.sprite as Record<string, unknown>).size).toEqual([30, 60]);
+    expect(spec.layers[0]!.size).toBeUndefined();
   });
 });

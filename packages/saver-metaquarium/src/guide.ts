@@ -35,11 +35,11 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraAzimuth: 'Orbit bearing in degrees. 0 looks at the village from the front.',
   cameraElevation: 'Degrees above the floor. 8–15 is eye level with the fish; 40+ looks down on a castle.',
   cameraDistance: 'Distance from the tank centre. 80 is a close-up, 170–220 a village, 300+ a landmark.',
-  shot: 'A named framing: `orbit` (default), `hero` (three-quarter), `front` (level, long lens), `low` (among the plants, looking up), `top` (the floor as a map), `surface` (the water\'s underside), `macro` (close on the nearest landmark), `cast` (frames the mix\'s first three wherever they swim). Azimuth and autoRotate turn it; distance scales it.',
+  shot: 'A framing: `orbit` (default), `hero` (three-quarter), `front` (level, long lens), `low` (looking up), `top` (a map), `surface` (the underside), `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
-  cameraFollow: 'Ride with one fish (cast slot, 0 = first); -1 is the orbit camera. Orbit params are ignored while following. Pair with `followSpot` on the same slot for a spotlit chase.',
+  cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera, whose params are ignored while following. With `followSpot` on the slot, a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
-  followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye and the fish is hidden; a floor walker (Dot, crab, octopus, snail, starfish) sees from its own head height.',
+  followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye; a floor walker sees from its own head height.',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
   followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises over low clutter or pulls in, eased. For walks through a village.',
   nearFade: 'A creature at the lens dissolves instead of being sliced, 0–1. The followed fish never fades.',
@@ -51,7 +51,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   ambientOcclusion: 'Ambient occlusion, 0–1: crevices darken. High tier.',
   highlights: 'Bright light rolls off instead of clipping, 0–1: a fish in a shaft stays a fish. Bright rooms want it. Mid/high tiers.',
   fishUrl: 'The single model used when `fishMix` is empty: ipfs://, https://assets.idlescreens.com/, or a URL on the page\'s own origin. Any other host is refused and the default fish swims.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace (swimSpeed does not hurry them): crab (climbs rocks, forages, pinches, waves), starfish (walks upright too; dances with `starfishDance`), snail (very slow; hides in its shell). `dot` (experimental): Dot the courier, a box on legs with a screen face; `dolphin` (experimental) chatters, flips, blows bubbles, breaches where there is open surface, and in a scene stands on its tail for character beats (talk, nod, bow...). Both act out vignette gestures. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace: crab, starfish (dances with `starfishDance`), snail. `dot` (a courier box on legs) and `dolphin` (chatters, flips, breaches; stands on its tail to act) play vignette gestures. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel. Only the page\'s own origin or the shipped copy is used.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -74,15 +74,16 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishAmbient: 'The water\'s light on the fish in lit mode (backs, flanks, bellies, metal plates). Fixes fish reading dark; 0.6–1 in bright tanks. Dims with a follow-spot\'s house lights.',
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
-  snailShell: 'The snails\' shells: `banded` (as drawn), `pearl` (iridescent nacre), `gold`, `glow` (a spiral that breathes light; best at night); `mix` (default), each its own. Lit fish only. frame.state.fish[i].shell says which.',
-  starfishDance: 'Starfish dance: `aerobics`, a class facing the camera with an instructor, in unison; `freestyle`, each its own move every eight counts; `duet`, couples face to face, best with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`. `off` (default): they crawl and wave on their own. Cast a few (`fishMix: starfish:7`); best with `shot: front`, `autoRotate: 0`, a bright room.',
+  snailShell: 'Snail shells: `banded`, `pearl` (iridescent), `gold`, `glow` (a spiral breathing light; best at night); `mix` (default), each its own. Lit fish only. frame.state.fish[i].shell says which.',
+  starfishDance: 'Starfish dance: `aerobics`, a class in unison facing the camera; `freestyle`, each its own move every eight counts; `duet`, couples face to face (with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`); `off` (default). Cast a few (`starfish:7`), `shot: front`, `autoRotate: 0`, a bright room.',
   danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
-  fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
+  fishLook: '`neon` dresses the bundled creatures for blacklight: near-black coats, eyes (and a crab\'s mouth) glowing a neon of their own. Best in a dark room with `finish`. Default `natural`.',
   fishRim: 'A thin edge of the water\'s light round each fish, 0–1 (lit mode): dark fish on dark water. 0.6–1 in dark rooms.',
   fishShadows: 'Soft shadows on the ground under the swimmers, 0–1: dark near the sand, faint high up.',
   fishFadeIn: 'Seconds an arriving fish takes to dissolve in (0 = it pops in).',
   sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes and lamps, 0–1, so nothing floats.',
-  swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
+  voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1: solid coral. All tiers.',
+  swimWave: 'Fish bend as they swim: a wave nose to tail, the body curling into turns (0 = rigid wiggle). Skips the turtle, crab and fish with a skeleton; the seahorse gets fin, tail and nod instead.',
   fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
@@ -92,21 +93,21 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   floorColor: 'Sea-floor colour.',
   water: 'Water instead of fog: red fades with distance first, then green, blue last — a red fish goes blue-green before it goes into the murk. 0.6–1 for most scenes; 0 is plain fog.',
   waterClarity: 'With `water` on: 0 murky (colour lost fast, short reach), 0.5 as before, 1 clear (colour kept, reach ×1.5). Bright tanks want 0.7–1.',
-  waterTint: 'The sunlit water, `#rrggbb`: distant things fade into it looking up, half of it on the level, none looking down, and the background becomes that gradient. Empty = off; with `water` on, reef, kelp, ice and lagoon bring their own.',
+  waterTint: 'The sunlit water, `#rrggbb`: distance fades into it looking up, half on the level, none looking down; the background takes the gradient. Empty = off; with `water` on, reef, kelp, ice and lagoon bring their own.',
   dither: '`on` adds an invisible dither that removes colour banding in dark fogged gradients on TVs. Recommended with `water`; `off` (default) is byte-exact with older scenes.',
   moteDensity: 'Suspended motes.',
   moteColor: 'Their colour.',
   environment: 'A room preset (floor, ceiling, light shafts). `void` for the mineral-world scenes.',
   floorKind: 'Floor shape: `auto` follows the environment, `flat`, or terrain `dunes`, `ridges`, `basin`, `shelf` (the town on a terraced plateau), `trench` (a deep channel across the front), `terraces` (tiers behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
-  rayStrength: 'Light shafts from the surface, within device budget: 5 on the high tier, 2 on standard, none on the lowest tier in a room with a water surface (reef, kelp, ice, lagoon; abyss, vent and universe keep 2). Where dropped, perceiveChannel reads room.rayStrength 0.',
+  rayStrength: 'Surface light shafts, within device budget: 5 high tier, 2 standard; none on the lowest tier with a surface (abyss, vent, universe keep 2; perceiveChannel then reads 0).',
   raySoftness: 'Shafts as soft volume, not flat sheets, 0–1. 1 for anything cinematic.',
   floorDetail: 'A seabed, not a coloured plane, 0–1: ripples, silt, grain; the floor\'s far edge fades into the fog.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
-  surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',
+  surfaceMirror: 'The surface from below: a window to the light in a rippling mirror of the tank (0 = plain). Needs reef, kelp, ice or lagoon; for the `surface` and `low` shots. High tier mirrors the tank, mid the deep water.',
   // world
-  propMix: 'Crystals: `crystal[:count][@habit][/palette][*size]`. Habits lotus·spire·druse·scatter·coral; palettes env·rainbow or a colour (blue hotpink purple seafoam yellow orange cyan white glass); `*6` is tower-sized. `crystal:3@druse/rainbow`.',
+  propMix: 'Crystals: `crystal[:count][@habit][/palette][*size]`. Habits lotus spire druse scatter coral; palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass; `*6` is tower-sized.',
   envProps: '`on` lets the environment preset plant its own crystals when `propMix` is empty.',
   crystalScale: 'Size of the whole mineral world (crystals, rocks, homes, flora).',
   crystalWild: 'Organic individuality: lean, bald sides, branching. 0 is a catalogue crystal, 1 is coral.',
@@ -115,30 +116,32 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   crystalTint: 'How much nearby light sources colour a passing fish. 0.5–0.7 ties the cast to the place.',
   rockDensity: 'Faceted boulders, an arch and a back ridge around the crystals.',
   rockVeins: 'Crystals bursting out of the rocks: each crown broken open, chips on the rim, a colony of the same crystal growing from the breach. 0 is plain stone.',
-  geodeHomes: 'Geode houses (0–3) in a crescent: a village. Their doors are vignette marks `home1`…, `home1in`…. Capped at 2 on basic/minimal tiers (3 on standard/high); a dropped house takes its homeN/homeNin marks, and indoors there are none.',
+  geodeHomes: 'Geode houses (0–3) in a crescent: a village. Doors are vignette marks `home1`…, `home1in`…. Capped at 2 on basic/minimal tiers; a dropped house takes its marks, and indoors there are none.',
   stoneStyle: '`weathered`: river-grey rocks and homes with silt on top, not dark holes in a lit room. `classic` (default): dark slate.',
   interior: '`geode` sets the whole scene INSIDE a geode home: furniture, chandelier, marks like `table`, `bed`, `door`.',
   floraDensity: 'Voxel plants: one tank-wide budget (× 36/72/108 by tier) shared among crystals and geodes, so more crystals means sparser gardens. What grows is `floraMix`; empty, the room picks.',
-  geodes: 'Wild geodes on the floor (0 = none): split geodes, thunder eggs, cathedrals, clusters, one cavern. They glow and pulse with the crystals, take the nearest crystal\'s mineral, and wake when a fish comes close.',
+  geodes: 'Wild geodes on the floor (0 = none): split geodes, thunder eggs, cathedrals, clusters, one cavern. They pulse with the crystals, take the nearest one\'s mineral, and wake when a fish comes close.',
   geodeMix: 'Which geodes: `kind[:weight]`, comma-separated. geode cathedral cluster cavern (the cavern is one at most).',
   geodeMineral: 'What they are made of: amethyst agate celestine citrine carnelian rose emerald quartz smoky. Empty = the mineral nearest in colour to the nearest crystal; `world` = two from the seed; or a list.',
-  fountain: 'The town square\'s fountain where the paths meet: `vent` (a hot-vent chimney crusted with crystal, glowing at the mouth) or `geode` (a great geode basin on a plinth). A bubble column, a pebble plaza, a light of its own, and a vignette mark `fountain`.',
-  signs: 'Signs, `kind[@place][>target][/#color][*size][:text]`: `plank` on a post, `arrow` to another place, life-`ring`, lit `porthole`, `neon` lettering, scrolling `led` board, each beside its place. Original words only. `plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
-  signFlicker: 'How unstable the lit signs\' power is (neon and LED), 0–1, default 0.4: hums, stutters, a dead row for a moment, now and then a reboot. Each sign has its own supply; 0 is steady. Flash-safe at any setting.',
-  streetLamps: 'Crystal streetlamps along the paths (0 = none, 1 = about 24): slate posts with a crystal crown in their nearest crystal\'s colour, a halo and light on the floor. Needs paths.',
+  fountain: 'The town square\'s fountain: `vent` (a crystal-crusted chimney glowing at the mouth) or `geode` (a geode basin on a plinth). A bubble column, a plaza, its own light, and a vignette mark `fountain`.',
+  signs: 'Signs, `kind[@place][>target][/#color][*size][:text]`: `plank` on a post, `arrow` to a place, life-`ring`, lit `porthole`, `neon` lettering, scrolling `led`, each beside its place. Original words only. `neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
+  stageSet: '`club`: a brick back wall, a mic on a stand at the `mic` mark, a stool; `mic`: the stand alone. For the `openmic` vignette.',
+  dolphinCast: 'Comic dolphins, in fishMix order: `showman` (navy suit, red tie, quick), `drifter` (tan, flannel, trucker cap, slow slouch), `bigguy` (big, slate, dark tee, deadpan), `host` (a bow tie); else `classic`. Types, no likeness.',
+  signFlicker: 'How unstable the lit signs\' power is, 0–1 (default 0.4): hums, stutters, a dead row, now and then a reboot, each sign on its own supply; 0 is steady. Flash-safe.',
+  streetLamps: 'Crystal streetlamps along the paths (0–1, about 24 at 1): slate posts crowned in the nearest crystal\'s colour, a halo, light on the floor. Needs paths.',
   townProps: 'Village props, kind[:count][/style]: fence (a yard per home; driftwood coral stone crystal), mailbox (by each gate: post clam bottle; marks mailbox1…), bench[:n] (shell stone), sock[:n]. Fences and mailboxes need geodeHomes.',
-  floorCover: 'What the village lays on its floor, kind[/style]: lawn (yards; stripes checks), mosaic (a compass rose at the hub; stone shell glass), mat (at doors; kelp stripe), steps (down every walk; slate sand moss), ripples (open sand; fine broad). Lawns and mats need geodeHomes, steps need paths. Flat ground only.',
-  pyramids: 'Pyramids built of cubes like the fish (0 = none, 1 = about a dozen complexes): symmetric stacks, a great pyramid and its queens, the great ones at the back. Flat ground only: use floorKind: flat (none on dunes, ridges or a basin).',
+  floorCover: 'The village\'s floor, kind[/style]: lawn (yards; stripes checks), mosaic (at the hub; stone shell glass), mat (at doors; kelp stripe), steps (down walks; slate sand moss), ripples (fine broad). Lawns and mats need geodeHomes, steps paths. Flat ground.',
+  pyramids: 'Pyramids of cubes (0 = none, 1 = about a dozen complexes): a great pyramid and its queens, the great ones at the back. Flat ground only (floorKind: flat).',
   pyramidMix: 'Shapes and stones, `shape|stone[:weight], …`: giza step bent djoser mayan frame; sandstone limestone obsidian jade gold lapis coral crystal nacre basalt, and lit led and neon (every cube a lamp). Empty = every shape in the room\'s stone.',
-  pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid in the middle of the camera\'s orbit (lit if the mix has led or neon, else stone with lit trim), a small one at each side, the field behind. Needs flat ground in the middle.',
+  pyramidLayout: 'field = complexes over the floor; stage = one monumental pyramid mid-orbit (lit with led or neon, else stone with lit trim), a small one each side, the field behind. Needs flat ground in the middle.',
   pyramidShow: 'The lit pyramids\' show (led, neon or trim): auto = one wave through every routine; solo = each its own; a routine (rings beam edges equalizer rainbow twinkle faces rain spiral breathe ripple); or cues `8s:rings, 16s:equalizer`. Live, no rebuild.',
   pyramidBpm: 'The light show\'s tempo, 0–140 (0 = free-running): the motion steps on the beat and each beat lifts the lamps a little — never a flash.',
   geodeLayout: '`field` (default) scatters them; `gallery` lines them up, a row per kind and a column per mineral, the mega geode behind. Frame with cameraDistance 400, elevation ~26, nothing else in the scene.',
-  floraLayout: '`garden` (default) grows plants round the crystals; `gallery` plants one of each species in two rows across the front (low before tall). With `floraMix` set, only its species. Frame with `shot: front` or `cameraDistance` ~260.',
-  floraPalette: 'One colour scheme for the garden: `world` picks a hero hue, a neighbour and an accent from the seed; or give up to six `#rrggbb`. Each colony is pulled most of the way to one of them. Empty = every species its own colours.',
-  floraMix: 'Which plants: `species[:weight]`, comma-separated: grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (clam: two at most; elder: one). `kelp:3, whip, seapen` is a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Empty = the room\'s garden. Needs floraDensity.',
+  floraLayout: '`garden` (default) grows plants round the crystals; `gallery` plants one of each species in two rows across the front (only floraMix\'s, if set). Frame with `shot: front` or `cameraDistance` ~260.',
+  floraPalette: 'One colour scheme for the garden: `world` (a hero hue, a neighbour and an accent from the seed) or up to six `#rrggbb`; each colony is pulled most of the way to one. Empty = each species its own.',
+  floraMix: 'Which plants, `species[:weight]`: grass tube bulb fan kelp anemone staghorn brain whip barrel shelf seapen clam bubble elder curl pod (clam ≤2, elder 1). `kelp:3, whip, seapen` a kelp forest; `staghorn:2, brain, anemone:2, clam` a reef. Needs floraDensity.',
   bubbleVents: 'Bubbles from chimneys, fissures and crystals.',
-  bubbleStyle: 'How vent bubbles live: `classic` loops puffs; `live` grows each bubble at the vent, rises it to the surface (if there is one) and pops it, resting the vent now and then. Distant bubbles dim instead of fattening.',
+  bubbleStyle: 'Vent bubbles: `classic` loops puffs; `live` grows each at the vent, rises it to the surface and pops it, resting the vent now and then. Distant bubbles dim instead of fattening.',
   pearling: 'Oxygen pearls on the plants: beads grow on the leaves over half a minute or more, sway with them and let go (0 = none). Needs floraDensity > 0; with no flora there is nothing to pearl on.',
   co2Mist: 'A fine haze of tiny bubbles from the vents, drifting on a slow current (0 = none).',
   marineSnow: 'Drifting lit particles; gives the water depth.',
@@ -150,12 +153,12 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   landmark: 'One thing bigger than everything else. `castle`: voxel walls, crystal-spired towers, gate, road, plaza. `citadel`: two storeys. Marks: `gate`, `plaza`, `courtyard`.',
   // stage
   followSpot: 'A follow-spot on one fish slot (0 = first of the cast); -1 off. House lights drop with it.',
-  spotStrength: 'How hard the spots are on and how far the house lights fall. House lights dim only lit fish\'s key/fill (to 40% at full) and fishAmbient; reflections, glow, flat fish and the unlit floor/scenery keep theirs, and a `-` blackout only puts out the spots.',
+  spotStrength: 'How hard the spots are and how far the house lights fall: lit fish\'s key/fill (to 40%) and fishAmbient dim; glow, reflections and scenery keep theirs. A `-` blackout puts out only the spots.',
   spotColor: 'Colour of the single `followSpot`.',
   spotShadow: 'The spotted fish\'s shadow in its pool. 0 none, 1 true size.',
-  spotRig: 'Up to three spots: `slot[/color][*radius]`. `0/#ff8ad0*26, 1/#7fdcff`. They are a, b, c in order. Overrides followSpot.',
+  spotRig: 'Up to three spots: `slot[/color][*radius]` follows a fish, `@mark` stands on a mark (`@mic` lights whoever steps up). They are a, b, c in order. Overrides followSpot.',
   spotCues: 'A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` (`-` = blackout). Spots cross-fade at each cue.',
-  vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio on the open stage) or a script of beats. A floor creature cast as an actor stays on the floor. Grammar below.',
+  vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio·openmic on the open stage) or a script of beats. A floor creature cast as an actor stays on the floor. Grammar below.',
 };
 
 export const GRAMMAR = `
@@ -163,7 +166,7 @@ fishMix   id[:count][@style][*size], …        100:2@drift, 257:1, seahorse:3, 
           id = a minted token (1–512) or a breed (betafish angelfish seahorse seaturtle). Minted fish are
           individuals: a count casts DISTINCT neighbours. Bundled creatures (a count is copies): shark
           crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot. *size scales that token over its
-          breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase.
+          breed's own size. Styles: loop school drift hover patrol bottom surface follow pair chase audience.
 propMix   crystal[#id][:count][@habit][/palette][*size], …      crystal:3@druse/rainbow, crystal:1@spire/cyan*6
           habits lotus spire druse scatter coral · palettes env rainbow blue hotpink purple seafoam yellow orange cyan white glass
 floraMix  species[:weight], …                              kelp:3, whip, seapen · staghorn:2, brain, anemone:2, clam
@@ -179,17 +182,18 @@ pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 
 geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
 geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
-spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
+spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
-vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
+vignette  beats separated by |, cues by comma; actors a b c d are fish slots 0 1 2 3
           [<sec>s:] actor =mark  be there, no travel (a later beat's = snaps at its start)    actor >mark  swim there
           actor @mark | @actor   face it    a b circle mark  each named actor rings it, back to its spot by the beat's end; others stay put
           actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus only: a cloud of ink)
           dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
+          Fish cast @audience sit out front facing the stage: they laugh as each talk ends and applaud each bow.
           Marks outdoors: ${Object.keys(OPEN_MARKS).join(' ')} — plus the world's own:
           home1 home1in … (geodeHomes), gate plaza courtyard (landmark), hub (paths), fountain (fountain).
           Marks indoors (interior: geode): ${Object.keys(INTERIOR_MARKS).join(' ')}
@@ -257,6 +261,12 @@ export const RECIPES: readonly Recipe[] = [
       fishMix: '100:2,257:1', fishGlow: 0.5, bodyWiggle: 0.3, marineSnow: 0.5, cameraDistance: 185, cameraElevation: 13, cameraAzimuth: 0 },
   },
   {
+    id: 'open-mic', label: 'Open mic', what: 'A comedy club: a host brings three comic dolphins to the mic in turn; a seated crowd laughs and applauds.',
+    params: { ...ALIVE, ...STAGE, floorColor: '#1a1210', vignette: 'openmic', stageSet: 'club', spotRig: '@mic/#ffc890*26', spotCues: VIGNETTE_CUES.openmic!, spotStrength: 0.3,
+      fishMix: 'dolphin:4, dori:2@audience*0.7, crab:2@audience*0.6, octopus:1@audience*0.7, babyfish:5@audience', dolphinCast: 'showman, drifter, bigguy, host',
+      signs: 'neon@back/#ff4fa0:OPEN MIC', finish: 0.6, cameraDistance: 125, cameraElevation: 12, cameraAzimuth: 0 },
+  },
+  {
     id: 'follow-spot', label: 'Follow-spot', what: 'One performer crosses a dark stage in a beam, its shadow in the pool under it.',
     params: { ...ALIVE, ...STAGE, followSpot: 0, spotStrength: 0.9, fishMix: '257:1@patrol,100:4@drift', swimSpeed: 0.6, swimVariance: 0.4, bodyWiggle: 0.3, pathShape: 'crossing', fishGlow: 0.5, marineSnow: 0.5,
       cameraDistance: 190, cameraElevation: 14, cameraAzimuth: 0 },
@@ -272,7 +282,7 @@ export const RECIPES: readonly Recipe[] = [
       cameraDistance: 120, cameraElevation: 6, cameraAzimuth: 0, autoRotate: 1 },
   },
   {
-    id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a reef: tangs that look back, blowfish that puff and flirt, an octopus that changes colour and inks, a crab. A slow orbit.',
+    id: 'reef-characters', label: 'Reef characters', what: 'The bundled characters on a reef: tangs that look back, blowfish that puff and flirt, an octopus that inks, a crab.',
     params: { ...ALIVE, environment: 'reef', fishMix: 'dori:3,blowfish:2,octopus:1,crab:1', floraDensity: 0.6, marineSnow: 0.3, finish: 0.5, swimSpeed: 0.7,
       signs: 'plank@left:"Mind the crabs", ring@right:Lifeguard',
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
@@ -287,7 +297,7 @@ export const RECIPES: readonly Recipe[] = [
       cameraDistance: 110, cameraElevation: 8, cameraAzimuth: 15, autoRotate: 0.3 },
   },
   {
-    id: 'dot-delivers', label: 'Dot delivers', what: 'Dot the courier walks to a neighbour\'s door and knocks; a blowfish comes out, they bow and chat, Dot spins for joy and walks home. The camera rides beside it.',
+    id: 'dot-delivers', label: 'Dot delivers', what: 'Dot the courier knocks at a neighbour\'s door; a blowfish comes out, they bow and chat, Dot spins for joy and walks home.',
     params: { ...ALIVE, geodeHomes: 3, paths: 0.6, fountain: 'geode', streetLamps: 0.5, floraDensity: 0.08, fishMix: 'dot:1,blowfish:1,babyfish:3',
       vignette: '3s: a =fountain, b =home1in | 7s: a >home1 @home1 | 4s: a @home1 hop | 5s: b >home1 @a, a @b | 5s: a @b bow, b @a nod | 6s: a @b talk, b @a nod | 6s: b @a talk, a @b peek | 4s: a @b spin | 5s: a @b wiggle, b @a hop | 5s: b >home1in, a @b nod | 7s: a >fountain',
       cameraFollow: 0, followDistance: 55, followAngle: 130 },
@@ -352,6 +362,9 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     else push('spotCues', parseSpotCues(str('spotCues'), spots).problems);
   }
   const world = worldMarks(params);
+  for (const s of rig.spots) {
+    if (s.mark && !(s.mark in OPEN_MARKS) && !(s.mark in world)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
+  }
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
@@ -449,18 +462,18 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   const spot = Math.round(num('followSpot', -1));
   if (rig.length && set('followSpot')) out.push({ path: 'followSpot', also: ['spotRig'], message: 'ignored: a spotRig replaces the single followSpot' });
   else if (spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
-  for (const s of rig) if (s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
+  for (const s of rig) if (!s.mark && s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
   if (str('vignette')) {
     const v = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
     const { actors } = v;
-    if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abc'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
+    if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abcd'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
     // A breed's own gesture (an octopus's ink) on an actor of another breed does nothing.
     const slotBreeds = expandFishMixSlots(mix, 3).map((sl) => sl.breed);
     for (const [g, breeds] of Object.entries(BREED_GESTURES) as [string, readonly string[]][]) {
       for (let a = 0; a < actors; a++) {
         if (!v.beats.some((b) => b.actors[a]?.gesture === g)) continue;
         const breed = slotBreeds[a] ?? 'fish';
-        if (!breeds.includes(breed)) out.push({ path: 'vignette', also: ['fishMix'], message: `"${'abc'[a]} ${g}" does nothing: ${g} is the ${breeds.join('/')}'s own, and actor ${'abc'[a]} (slot ${a}) is a ${breed}` });
+        if (!breeds.includes(breed)) out.push({ path: 'vignette', also: ['fishMix'], message: `"${'abcd'[a]} ${g}" does nothing: ${g} is the ${breeds.join('/')}'s own, and actor ${'abcd'[a]} (slot ${a}) is a ${breed}` });
       }
     }
   }

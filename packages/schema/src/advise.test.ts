@@ -24,6 +24,46 @@ describe('adviseSpec', () => {
     }
   });
 
+  describe('giant-entity (F24)', () => {
+    const emoji = (size: [number, number], extra: Partial<SaverSpec> = {}): SaverSpec => ({
+      schemaVersion: 1, id: 'giant', label: 'Giant', ...extra,
+      layers: [{ count: 4, key: 'fish', size, sprite: { kind: 'emoji', glyphs: ['🐟'] }, motion: { type: 'drift', speed: [0.02, 0.05] } }],
+    });
+    const giant = (spec: SaverSpec, vp?: { width: number; height: number }) => adviseSpec(spec, vp).filter((w) => w.code === 'giant-entity');
+
+    it('flags px-scale emoji sizes in a viewport-unit spec', () => {
+      const g = giant(emoji([20, 40]));
+      expect(g).toHaveLength(1);
+      expect(g[0]!.path).toBe('layers[0]');
+      expect(g[0]!.message).toContain("'fish'");
+      expect(g[0]!.message).toMatch(/up to \d{5}px/);
+      expect(g[0]!.message).toContain('1080px viewport');
+    });
+
+    it('stays quiet for normal viewport and px sizes, and for big shaped sprites', () => {
+      expect(giant(emoji([0.03, 0.06]))).toEqual([]);
+      expect(giant(emoji([30, 60], { units: 'px' }))).toEqual([]);
+      const glow: SaverSpec = {
+        schemaVersion: 1, id: 'glow', label: 'Glow',
+        layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.8, 0.8], color: '#334455', soft: true }, alpha: [0.3, 0.3], position: { x: 0.5, y: 0.5 }, motion: { type: 'static' } }],
+      };
+      expect(giant(glow)).toEqual([]);
+    });
+
+    it('flags a px glyph larger than the viewport under units: px', () => {
+      expect(giant(emoji([1200, 1400], { units: 'px' }))).toHaveLength(1);
+    });
+
+    it('reads an explicit px font on a text sprite, rescaled like the renderer', () => {
+      const text = (font: string): SaverSpec => ({
+        schemaVersion: 1, id: 't', label: 'T',
+        layers: [{ count: 1, sprite: { kind: 'text', strings: ['HI'], color: '#ffffff', font }, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' } }],
+      });
+      expect(giant(text('bold 1400px monospace'))).toHaveLength(1);
+      expect(giant(text('bold 48px monospace'))).toEqual([]);
+    });
+  });
+
   it('warns when a layer is painted its own background colour', () => {
     // The failure `invisible-layer` cannot catch: full radius, full alpha, and
     // still unseeable because the colour matches the plate behind it.
@@ -647,12 +687,18 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
       expect(b.h).toBeGreaterThan(0);
       expect(b.h).toBeLessThan(1);
     }
-    // Same fire, same boxes when the layers declare a role.
+    // Same fire, same boxes when both layers declare they must be read.
     const declared = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.3, { role: 'read' }, 'title'), block('Body copy under it', 0.1, 0.3, { role: 'read' }, 'body')],
+    }).filter((x) => x.code === 'text-overlap');
+    expect(declared[0]!.boxes).toEqual(o.boxes);
+    // Text declared as texture is never judged for overlap (F146, X807).
+    const texture = adviseSpec({
       ...vp,
       layers: [block('Title of the talk', 0.1, 0.3, { role: 'read' }, 'title'), block('Body copy under it', 0.1, 0.3, { role: 'atmosphere' }, 'body')],
     }).filter((x) => x.code === 'text-overlap');
-    expect(declared[0]!.boxes).toEqual(o.boxes);
+    expect(texture).toEqual([]);
   });
 
   it('a list of text sprites is judged per row, worst row wins, one advisory per layer', () => {

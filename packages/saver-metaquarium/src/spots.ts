@@ -7,7 +7,9 @@
  *   spotRig   `slot[/color][*radius]`, comma-separated, at most three.
  *             `0/#fff2cf, 1/#ff67bc*24, 2/#49cfff` — the rig's spots are then
  *             called a, b, c in order (which are also a vignette's actors, if
- *             the rig follows slots 0 1 2).
+ *             the rig follows slots 0 1 2). `@mark` stands a spot on one of
+ *             the stage's marks instead (`@mic/#ffc890*26`): whoever steps on
+ *             it is lit — a host, then each comic in turn.
  *   spotCues  `8s:a, 8s:b, 12s:a+b, 6s:-` — a looping sheet. `-` is a blackout
  *             on the spots (house lights stay down: it is still a show). Empty
  *             means every spot in the rig is up all the time.
@@ -17,7 +19,8 @@ export const MAX_SPOTS = 3;
 /** Seconds a spot takes to come up or go out at a cue. */
 export const SPOT_FADE = 1.4;
 
-export interface SpotSpec { slot: number; color: string; radius: number }
+/** `slot` -1 with `mark`: a spot that stands on a mark instead of following a fish. */
+export interface SpotSpec { slot: number; mark?: string; color: string; radius: number }
 export interface SpotCue { t0: number; dur: number; on: boolean[] }
 export interface SpotSheet { cues: SpotCue[]; duration: number; problems: string[] }
 
@@ -28,17 +31,22 @@ export function parseSpotRig(value: string): { spots: SpotSpec[]; problems: stri
   for (const raw of value.split(',').map(s => s.trim()).filter(Boolean)) {
     // `#rgb` or `#rrggbb` only — the two forms three's Color reads; any other
     // length it warns about and leaves the colour as it was.
-    const m = /^(\d{1,2})(?:\/(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})))?(?:\*(\d+(?:\.\d+)?))?$/.exec(raw);
-    if (!m) { problems.push(`"${raw}" is not slot[/color][*radius]`); continue; }
+    const m = /^(?:(\d{1,2})|@([a-z][a-z0-9]{0,15}))(?:\/(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})))?(?:\*(\d+(?:\.\d+)?))?$/.exec(raw);
+    if (!m) { problems.push(`"${raw}" is not slot[/color][*radius] or @mark[/color][*radius]`); continue; }
     if (spots.length >= MAX_SPOTS) { problems.push(`more than ${MAX_SPOTS} spots — "${raw}" dropped`); continue; }
     // One spot per performer: a second entry on the same slot would stack
     // two pools on one fish and leave the rig a letter short.
-    const slot = Math.min(23, Number(m[1]));
-    if (spots.some(spot => spot.slot === slot)) { problems.push(`slot ${slot} is already spotted — "${raw}" dropped`); continue; }
+    const mark = m[2];
+    const slot = mark ? -1 : Math.min(23, Number(m[1]));
+    if (mark ? spots.some(spot => spot.mark === mark) : spots.some(spot => spot.slot === slot)) {
+      problems.push(`${mark ? `mark ${mark}` : `slot ${slot}`} is already spotted — "${raw}" dropped`);
+      continue;
+    }
     spots.push({
       slot,
-      color: m[2] ?? DEFAULT_COLORS[spots.length]!,
-      radius: Math.min(60, Math.max(12, m[3] ? Number(m[3]) : 28)),
+      ...(mark ? { mark } : {}),
+      color: m[3] ?? DEFAULT_COLORS[spots.length]!,
+      radius: Math.min(60, Math.max(12, m[4] ? Number(m[4]) : 28)),
     });
   }
   return { spots, problems };

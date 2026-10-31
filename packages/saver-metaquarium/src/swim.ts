@@ -16,7 +16,7 @@
 
 export type SwimStyle =
   | 'loop' | 'school' | 'drift' | 'hover' | 'patrol' | 'bottom' | 'surface'
-  | 'follow' | 'pair' | 'chase';
+  | 'follow' | 'pair' | 'chase' | 'audience';
 
 /** How a fish relates to another fish. `none` is every pre-relationship
  *  style. A bonded fish rides the plan of the nearest preceding unbonded fish
@@ -81,6 +81,9 @@ export const SWIM_STYLES: readonly SwimStyleSpec[] = [
   { name: 'follow', label: 'Follower', speedMul: 1, band: 'free', bobAmp: 1.2, bobHz: 0.5, formation: false, travel: 1, bond: 'follow' },
   { name: 'pair', label: 'Pair', speedMul: 0.8, band: 'free', bobAmp: 2.5, bobHz: 0.35, formation: false, travel: 1, bond: 'pair' },
   { name: 'chase', label: 'Chaser', speedMul: 1, band: 'free', bobAmp: 1, bobHz: 0.6, formation: false, travel: 1, bond: 'chase' },
+  // A seat in a vignette's audience (vignette.ts crowdPose): the script places it, out front facing the
+  // stage. With no vignette playing there is no show to watch, and it hovers.
+  { name: 'audience', label: 'Audience', speedMul: 0.55, band: 'free', bobAmp: 4, bobHz: 0.3, formation: false, travel: 0.12 },
 ];
 
 /**

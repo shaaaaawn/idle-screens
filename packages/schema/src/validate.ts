@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type SpriteSpec, type ValidationResult } from './types';
-import { applyDeltasShared, canonicalSpecPath, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
+import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
@@ -279,9 +279,47 @@ function normalizeColors(spec: unknown): void {
   }
 }
 
+/** Sprite kinds whose entity size is the layer's `size` (simulate.ts buildEntities). */
+const LAYER_SIZED_SPRITES = new Set(['emoji', 'text']);
+/** What sizes every other sprite kind, for the "sprite.size is ignored" warning. */
+const SPRITE_SIZE_FIELD: Record<string, string> = {
+  circle: 'radius', ring: 'radius', polygon: 'radius', streak: 'length', stroke: 'length',
+  rect: 'width', bar: 'length and thickness', textBlock: 'fontSize',
+};
+const SPRITE_SIZE_MISPLACED = "'size' belongs on the layer, not inside sprite — move it up one level";
+
+/**
+ * Repair (F24): `size` misplaced inside an emoji/text sprite. It sits naturally
+ * next to `glyphs`, and the renderer only reads `layer.size`, so it used to be
+ * silently dropped and every entity fell back to the default size. For
+ * emoji/text the intent is unambiguous — same field, same units — so when the
+ * layer has no `size` of its own the value is moved up, with a
+ * `misplaced-property` warning so the author learns the placement. Mutates the
+ * spec in place, like `normalizeColors`; runs before validation so the moved
+ * value is range-checked as `layers[i].size`. Every other case (layer.size
+ * already set, a kind that doesn't read layer.size) is left alone and warned
+ * about by `validateLayer`.
+ */
+function aliasSpriteSize(spec: unknown): SpecWarning[] {
+  const out: SpecWarning[] = [];
+  if (!isObj(spec) || !Array.isArray(spec.layers)) return out;
+  spec.layers.forEach((layer, i) => {
+    if (!isObj(layer) || !isObj(layer.sprite)) return;
+    const sp = layer.sprite;
+    if (sp.size === undefined || !LAYER_SIZED_SPRITES.has(sp.kind as string) || layer.size !== undefined) return;
+    layer.size = sp.size;
+    delete sp.size;
+    out.push({ path: `layers[${i}].sprite.size`, code: 'misplaced-property', message: `${SPRITE_SIZE_MISPLACED} (applied as layers[${i}].size this time)` });
+  });
+  return out;
+}
+
 export function validateSpec(spec: unknown): ValidationResult {
   normalizeColors(spec);
-  return validateSpecCore(spec);
+  const repaired = aliasSpriteSize(spec);
+  const result = validateSpecCore(spec);
+  if (repaired.length > 0) result.warnings = [...repaired, ...(result.warnings ?? [])];
+  return result;
 }
 
 /**
@@ -776,6 +814,22 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   if (layer.size !== undefined && (!isRange(layer.size) || layer.size[0] <= 0)) {
     err(`${path}.size`, rangeMsg(spec));
   }
+  // F24: a `size` still inside the sprite here was not aliased by `validateSpec`
+  // (or this is the pure `ignoredPropertyPaths` path). One warning, worded for
+  // the case — `validateSprite` skips the key so it never doubles up.
+  if (isObj(layer.sprite) && layer.sprite.size !== undefined) {
+    const kind = layer.sprite.kind as string;
+    if (LAYER_SIZED_SPRITES.has(kind)) {
+      warn(`${path}.sprite.size`, 'misplaced-property', layer.size !== undefined
+        ? `${SPRITE_SIZE_MISPLACED} — layer.size is also set, so the layer's value wins and sprite.size is ignored`
+        : SPRITE_SIZE_MISPLACED);
+    } else {
+      const field = SPRITE_SIZE_FIELD[kind];
+      warn(`${path}.sprite.size`, 'unknown-property', field
+        ? `unknown sprite property 'size' — will be ignored; a ${kind} sprite is sized by its ${field}`
+        : `unknown sprite property 'size' — will be ignored`);
+    }
+  }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
 
@@ -959,7 +1013,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         const variants = sp.kind === 'text' && Array.isArray(sp.strings) ? sp.strings.length
           : sp.kind === 'emoji' && Array.isArray(sp.glyphs) ? sp.glyphs.length
             : sp.kind === 'bar' && Array.isArray(sp.values) ? sp.values.length : null;
-        if (variants !== null && variants !== layer.count) {
+        // `role: 'atmosphere'` text is texture: labels that cycle or run out are the look (X807).
+        const atmosphere = sp.kind === 'text' && sp.role === 'atmosphere';
+        if (variants !== null && variants !== layer.count && !atmosphere) {
           warn(`${path}.count`, 'list-length-mismatch', `count is ${layer.count} but the sprite carries ${variants} ${sp.kind === 'bar' ? 'values' : 'variants'} — a ${lay.type} layout reads them in order, so they cycle or go unused`);
         }
       }
@@ -1337,6 +1393,9 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
   }
 
   for (const k of unknownKeys(sprite, knownSet)) {
+    // `size` is kind-dependent (aliased for emoji/text, ignored elsewhere), so
+    // it is warned about in `validateLayer`, which can see `layer.size`.
+    if (k === 'size') continue;
     if (LAYER_PROPS_ON_SPRITE.has(k)) {
       warn(`${path}.${k}`, 'misplaced-property', `'${k}' belongs on the layer, not inside sprite — move it up one level`);
     } else {
@@ -1845,7 +1904,7 @@ export function validateSequence(seq: unknown): ValidationResult {
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
-          message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+          message: `segments ${i}→${i + 1} differ structurally (${describeStructuralDifferences(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec)}): morph will fall back to cut`,
         });
       } else if (s.scene.timeline === undefined && (next as Record<string, unknown> & { scene: Record<string, unknown> }).scene.timeline === undefined
         && morphNothingMorphable(s.scene as unknown as SaverSpec, (next as Record<string, unknown>).scene as unknown as SaverSpec, { textCrossfade: s.transition.text === 'crossfade' || s.transition.text === 'dip' })) {
@@ -1871,7 +1930,7 @@ export function validateSequence(seq: unknown): ValidationResult {
     if (sq.loop !== true) why = 'the sequence does not loop';
     else if (last < 1) why = 'there is only one segment';
     else if (lastTr?.type !== 'morph') why = 'the last segment declares no morph transition';
-    else if (structuralSignature(sq.segments[last]!.scene) !== structuralSignature(sq.segments[0]!.scene)) why = `segment ${last} and segment 0 differ structurally`;
+    else if (structuralSignature(sq.segments[last]!.scene) !== structuralSignature(sq.segments[0]!.scene)) why = `segment ${last} and segment 0 differ structurally (${describeStructuralDifferences(sq.segments[last]!.scene, sq.segments[0]!.scene)})`;
     else if (morphChainRoot(sq, last) !== 0) why = `the lap is not one morph chain (segment ${morphChainRoot(sq, last)} starts a new chain), so the wrap would jump seeds`;
     if (why || !canWrapMorph(sq)) {
       warnings.push({ path: 'wrapMorph', code: 'wrap-morph-inactive', message: `wrapMorph has no effect: ${why ?? 'the wrap cannot morph'} — the wrap stays a cut` });

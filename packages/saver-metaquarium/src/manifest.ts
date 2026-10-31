@@ -257,6 +257,10 @@ export const METAQUARIUM_PARAMS = {
    *  homes, the castle, pyramids, wild geodes, lamps — so it stands on the
    *  sand instead of floating over it. 0 is none. */
   sceneryShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The plants' cubes darken where they meet each other and the sand — the
+   *  corner shading every voxel renderer has — so a coral reads solid instead
+   *  of as flat cut-outs. Baked once, the first frame it is on; every tier. 0 is off. */
+  voxelAO: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** A creature that comes too close to the camera dissolves (an ordered
    *  dither by depth) instead of being cut by the lens: at 1 it is whole
    *  beyond about a fish and a half and gone inside about half that. 0 is off. */
@@ -434,6 +438,13 @@ export const METAQUARIUM_PARAMS = {
    *  fountain home1…, or centre left right front back), facing the front; an LED board
    *  scrolls a long line. Empty = none. */
   signs: { type: 'string', default: '', ease: 'step' },
+  /** The open-mic set (club.ts): `club` is a brick back wall, a mic on a stand at the `mic` mark and a
+   *  stool; `mic` the stand alone. The `openmic` vignette is written for it, with an `@audience` out front. */
+  stageSet: { type: 'enum', default: 'none', options: ['none', 'club', 'mic'], ease: 'step' },
+  /** EXPERIMENTAL. The dolphins' cast — comic personas, in the order the dolphins come in fishMix:
+   *  `showman, drifter, bigguy` (dolphin-comics.ts). Each its own look (skin, finish, shirt, prop) and
+   *  act (tempo, size of gesture, slouch, lean, lids). Unknown names, and dolphins past the list: classic. */
+  dolphinCast: { type: 'string', default: '', ease: 'step' },
   /** How unstable the lit signs' power is (neon and LED boards): 0 steady; higher, more
    *  hum, stutters, a dead row or tube, a slipped row, now and then a reboot. Each sign
    *  has its own supply — most steady, some dodgy. Flash-safe at any setting. */
