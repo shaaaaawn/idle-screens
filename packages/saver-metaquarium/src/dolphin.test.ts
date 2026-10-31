@@ -440,7 +440,8 @@ describe('dolphin: banked turns and breaches', () => {
       for (let t = 0.05; t < 400; t += 0.05) {
         const now = dolphinLeapAhead(index, t);
         // d(ahead)/dt > -1: its speed along the route is (1 + that) × cruising.
-        expect((now - before) / 0.05, `fish ${index} at ${t}`).toBeGreaterThan(-0.7);
+        // Even two leaps' give-backs overlapping leave it going forward.
+        expect((now - before) / 0.05, `fish ${index} at ${t}`).toBeGreaterThan(-0.92);
         before = now;
       }
     }
