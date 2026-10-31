@@ -130,20 +130,25 @@ describe('vignette ink (X440)', () => {
 });
 
 describe('the served guide stays readable whole', () => {
-  // idle-server serves this package's recipes, grammar and param docs as /savers/metaquarium.md and caps the whole
-  // page at 40,000 bytes (saver-guides.test.ts: a fetch tool reads it whole). That cap only runs in idle-server, after
-  // a release — so a param added here could push the served guide over and break the server sync. This is the
-  // engine's share, estimated the way saver-guides.ts lays it out. Measured 2026-10-31: share 34,208 bytes served as
-  // 39,391 (the server's header and markdown add ~5.2 KB), so 34,500 keeps the page under 40,000 with ~300 to spare.
-  // Over budget? Tighten docs and recipe prose (as 0802e97 did) — don't raise this without raising the server's cap.
-  it('keeps the recipes, grammar and param docs within their budget', () => {
+  // idle-server serves this package as two pages, each capped at 40,000 bytes so a fetch tool reads it whole
+  // (idle-server saver-guides.test.ts; that cap only runs there, after a release, so a param added here could break the
+  // server sync). /savers/metaquarium.md: recipes, grammar and an INDEX of every param (name and values, no prose).
+  // /savers/metaquarium/params.md: one line of doc per param. These are the engine's shares, estimated the way
+  // saver-guides.ts lays them out (idle-server #352). Measured 2026-10-31: the guide served at 24.4 KB, the params page
+  // at 20.9 KB. The guide's budget keeps it under the server's 36,000 headroom test with its ~5.2 KB header.
+  // Over budget? Tighten prose — don't raise these without raising the server's caps.
+  it('keeps the guide (recipes, grammar, the param index) within its budget', () => {
     const recipes = RECIPES.reduce((n, r) => n + r.id.length + r.label.length + r.what.length + JSON.stringify(r.params).length + 24, 0);
-    const params = Object.entries(PARAM_DOCS).reduce((n, [k, v]) => n + k.length + v.length + 22, 0);
-    const share = recipes + GRAMMAR.length + params;
-    expect(share).toBeLessThanOrEqual(ENGINE_GUIDE_BUDGET);
+    const index = Object.keys(PARAM_DOCS).reduce((n, k) => n + k.length + 26, 0); // `name` (values) ·
+    expect(recipes + GRAMMAR.length + index).toBeLessThanOrEqual(ENGINE_GUIDE_BUDGET);
+  });
+  it('keeps the params page (a line of doc per param) within its budget', () => {
+    const params = Object.entries(PARAM_DOCS).reduce((n, [k, v]) => n + k.length + v.length + 30, 0);
+    expect(params).toBeLessThanOrEqual(ENGINE_PARAMS_BUDGET);
   });
 });
-const ENGINE_GUIDE_BUDGET = 34_500;
+const ENGINE_GUIDE_BUDGET = 30_000;
+const ENGINE_PARAMS_BUDGET = 38_500;
 
 describe('choreography in the guide', () => {
   it('a bad sheet is advised, token by token; a sheet without starfish says so', () => {
