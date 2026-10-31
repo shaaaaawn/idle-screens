@@ -23,6 +23,13 @@ describe('choreography: the sheet', () => {
   it('a sheet with no actor is everyone’s', () => {
     expect([...parseChoreography('4:march, 4:jacks', MOVES).lines.keys()]).toEqual(['*']);
   });
+
+  it('parses a cue with a long run of spaces after the move (CodeQL polynomial ReDoS), the same as a short one', () => {
+    const long = parseChoreography(`0.5:march${' '.repeat(20000)}>right`, MOVES);
+    const short = parseChoreography('0.5:march >right', MOVES);
+    expect(long.lines.get('*')).toEqual(short.lines.get('*'));
+    expect(long.problems).toEqual(short.problems);
+  });
   it('a bad token is a problem and is dropped, never fatal', () => {
     const { lines, problems } = parseChoreography('a: 4:moonwalk, x:march, 0:jacks, 4:kick >nowhere ?, 4:reach', MOVES);
     expect(lines.get(0)!.cues.map((c) => c.move)).toEqual(['kick', 'reach']);
