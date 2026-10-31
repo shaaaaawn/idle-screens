@@ -8,6 +8,7 @@ import {
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
+import { patchRoomFade } from './nearfade';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, type FloraStem, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import type { StoneStyle } from './stone';
@@ -32,6 +33,7 @@ import { buildSigns } from './signs';
 import { supplyLevel } from './sign-supply';
 import type { SignEntry } from './sign-mix';
 import { OPEN_MARKS } from './vignette';
+import { buildStageSet, type StageSet } from './club';
 
 export interface SceneryOptions {
   rocks: number;
@@ -70,6 +72,8 @@ export interface SceneryOptions {
   lamps?: number;
   /** Signs (the `signs` DSL, parsed): beside the world's marks, or in the open. */
   signs?: readonly SignEntry[];
+  /** The open-mic set (`stageSet`, club.ts): a brick back wall, a mic on a stand, a stool. */
+  stageSet?: StageSet;
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -121,8 +125,13 @@ export interface Scenery {
   stems: FloraStem[];
   /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
   floraMaterials: Material[];
+  /** The plants' one mesh (voxel-ao.ts bakes its occlusion the first frame `voxelAO` is on), and the ground they were grown on. */
+  flora: Mesh | null;
+  floraGround: (x: number, z: number) => number;
   /** The wild geodes' material, which takes the light field too. */
   geodeMaterials: Material[];
+  /** The stage set's (club.ts): they take the spot and crystal light like the geodes. */
+  stageMaterials: Material[];
   /** Where the fish are this frame (x, y, z, reach): the garden answers them (flora.ts). */
   setFish(fish: ReadonlyArray<{ x: number; y: number; z: number; r: number }>): void;
   /** Crystal colonies that burst out of the rocks — REAL clusters, for the
@@ -557,6 +566,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     }
     counts.pyramids = pyr.sites.length;
   }
+  // The stage set before the signs, so a sign never stands on the mic.
+  const stageSet = opts.stageSet && !opts.interior ? buildStageSet(opts.stageSet, terrain) : null;
+  if (stageSet) {
+    group.add(stageSet.group);
+    obstacles.push(...stageSet.obstacles);
+    counts.stageSet = 1;
+  }
   // Signs, once everything they stand beside has a place: off the paths, the
   // doorsteps and the lamps, beside their mark. Fish go round them.
   let signHalos: Array<{ x: number; y: number; z: number; color: string; size: number }> = [];
@@ -976,7 +992,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   particles(false, counts.snow);
   // Closed solids draw front faces only — half the fragment work of the
   // DoubleSide everything used to wear; only the open geode throat needs both.
-  batch(group, shellParts, 'geode-room', FrontSide);
+  const shell = batch(group, shellParts, 'geode-room', FrontSide);
+  if (shell) patchRoomFade(shell.material as Material);
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
   const stoneGround = stoneTop(boulders);
@@ -997,7 +1014,9 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], cover: coverPaint, rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
+    flora: plants, floraGround: terrain,
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
+    stageMaterials: stageSet?.materials ?? [],
     setFish(fish) {
       const n = Math.min(fish.length, MAX_FLORA_FISH);
       for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);

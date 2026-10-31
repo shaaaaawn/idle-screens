@@ -21,7 +21,7 @@ describe('swim styles', () => {
     // A literal is the only thing here that fails when someone renames a
     // style out from under the scenes already published with it.
     expect([...SWIM_STYLE_NAMES].sort()).toEqual(
-      ['bottom', 'chase', 'drift', 'follow', 'hover', 'loop', 'pair', 'patrol', 'school', 'surface'],
+      ['audience', 'bottom', 'chase', 'drift', 'follow', 'hover', 'loop', 'pair', 'patrol', 'school', 'surface'],
     );
     // `auto` is a manifest option, not a style: it resolves per fish.
     expect([...(METAQUARIUM_PARAMS.swimStyle.options ?? [])].sort())

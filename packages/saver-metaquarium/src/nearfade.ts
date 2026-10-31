@@ -70,3 +70,41 @@ export function patchNearFade(material: Material): boolean {
     shader.fragmentShader = FRAG_PARS + shader.fragmentShader.replace('#include <clipping_planes_fragment>', FRAG);
   });
 }
+
+/**
+ * A room's crystal at the lens. An interior is a geode lined with crystal and
+ * the camera stands inside it, so a great point growing off the wall beside
+ * the lens can fill a third of the frame (bedtime's dollhouse view did: a flat
+ * purple slab, the whole piece long). Each lining crystal carries its centre
+ * and reach (`aMqFade`, interior.ts); one whose nearest point comes within
+ * (gone, whole) of the lens dissolves WHOLE, by the same dither, so a still
+ * camera never leaves half a crystal stippled across the room. The dome, floor
+ * and furniture carry no reach and never fade. Always on: nothing of the
+ * lining is meant to be seen that close.
+ */
+export const ROOM_FADE = { value: new Vector2(8, 12) };
+
+const ROOM_VERT_PARS = 'attribute vec4 aMqFade;\nvarying float vMqRoomNear;\n';
+const ROOM_VERT = `#include <project_vertex>
+  vMqRoomNear = aMqFade.w > 0.0 ? length((modelViewMatrix * vec4(aMqFade.xyz, 1.0)).xyz) - aMqFade.w : 1e6;`;
+const ROOM_FRAG_PARS = /* glsl */ `
+uniform vec2 uMqRoomFade;
+varying float vMqRoomNear;
+float mqRoomBayer2(vec2 a) { a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }
+float mqRoomBayer4(vec2 p) { return mqRoomBayer2(0.5 * p) * 0.25 + mqRoomBayer2(p) + 1.0 / 32.0; }
+`;
+const ROOM_FRAG = /* glsl */ `#include <clipping_planes_fragment>
+  {
+    float mqRoomK = smoothstep(uMqRoomFade.x, uMqRoomFade.y, vMqRoomNear);
+    if (mqRoomK < 1.0 && mqRoomBayer4(gl_FragCoord.xy) >= mqRoomK) discard;
+  }`;
+
+/** Patch a room's material with the crystal fade (true when it took the patch now). */
+export function patchRoomFade(material: Material): boolean {
+  return stackPatch(material, 'mq-room-fade', (shader) => {
+    if (!shader.vertexShader.includes('#include <project_vertex>') || !shader.fragmentShader.includes('#include <clipping_planes_fragment>')) return;
+    shader.uniforms.uMqRoomFade = ROOM_FADE;
+    shader.vertexShader = ROOM_VERT_PARS + shader.vertexShader.replace('#include <project_vertex>', ROOM_VERT);
+    shader.fragmentShader = ROOM_FRAG_PARS + shader.fragmentShader.replace('#include <clipping_planes_fragment>', ROOM_FRAG);
+  });
+}

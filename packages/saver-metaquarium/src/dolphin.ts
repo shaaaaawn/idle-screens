@@ -31,6 +31,7 @@
  */
 import { AnimationMixer, Matrix4, Quaternion, Vector3, type AnimationAction, type AnimationClip, type Object3D } from 'three';
 import { fishHash } from './swim';
+import type { DolphinAct } from './dolphin-comics';
 import type { Gesture, Vignette } from './vignette';
 
 export const DOLPHIN_MOMENTS = ['chatter', 'nod', 'shake', 'spin', 'flip', 'wave', 'bubble'] as const;
@@ -245,6 +246,8 @@ export interface DolphinInput {
   leap?: { phase: LeapPhase; w: number } | null;
   /** 0..1: how far it stands up for a character beat (dolphinUpright). */
   upright?: number;
+  /** Its act, as a comic (dolphin-comics.ts): tempo, size of gesture, slouch, lean, lids. */
+  act?: DolphinAct;
 }
 
 export interface DolphinState {
@@ -478,8 +481,10 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   const g = inp.gesture && DOLPHIN_GESTURE_CLIP[inp.gesture.name] ? inp.gesture : null;
   const own = inp.actor ? { moment: null, weight: 0, into: 0 } : dolphinMoment(index, t);
   const moment: DolphinMoment | null = g ? DOLPHIN_GESTURE_CLIP[g.name]! : own.moment;
-  const mw = g ? clamp(g.weight, 0, 1) : own.weight;
-  const into = g ? g.at : own.into;
+  const style = inp.act;
+  // A comic's gestures at its own tempo and size (dolphin-comics.ts): a deadpan's small, a showman's quick.
+  const mw = (g ? clamp(g.weight, 0, 1) : own.weight) * Math.min(1, style?.energy ?? 1);
+  const into = (g ? g.at : own.into) * (style?.tempo ?? 1);
   // A one-shot held longer than its clip plays again (a beat may be long), but a flip or a roll plays once.
   // A flip or a roll once, never looped: a second turn could be cut off mid-air when the beat ends.
   const once = moment === 'flip' || moment === 'spin';
@@ -507,9 +512,11 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
     weights[n] += lw;
   }
   if (moment) weights[moment] = mw;
-  // A blink over the clips that leave the eyes alone (the moments squint and blink on their own).
+  // A blink over the clips that leave the eyes alone (the moments squint and blink on their own); a drowsy
+  // comic's lids hang part way between blinks (the blink clip held shut, at that weight).
   const bl = dolphinBlink(index, t);
-  weights.blink = bl !== null ? 1 - mw : 0;
+  const lids = clamp(style?.lids ?? 0, 0, 0.8);
+  weights.blink = bl !== null ? 1 - mw : lids * (1 - mw);
 
   const phase = beat * DOLPHIN_STROKE * p.tempo;
   const times = {} as Record<DolphinClip, number>;
@@ -519,7 +526,7 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
   times.hover = posMod(t * p.tempo, D.hover);
   times.burst = posMod(t, D.burst);
   if (moment) times[moment] = clamp(mt, 0, D[moment] - 1e-4);
-  times.blink = bl ?? 0;
+  times.blink = bl ?? (lids > 0 ? 0.11 : 0);
   for (const n of DOLPHIN_CLIPS) {
     const a = rig.actions[n];
     a.time = times[n];
@@ -544,8 +551,11 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
     rig.spine[0].rotateX(UPRIGHT.nod * up * VENTRAL[0]);
     const talking = moment === 'chatter' ? mw : 0;
     const breathe = 0.5 + 0.5 * Math.sin(t * 0.9 + index * 1.7);
-    const c = up * (UPRIGHT.curl + UPRIGHT.curlTalk * talking + UPRIGHT.curlVary * breathe);
+    const c = up * (UPRIGHT.curl + UPRIGHT.curlTalk * talking + UPRIGHT.curlVary * breathe + (style?.slouch ?? 0));
     UPRIGHT_SHARE.forEach((sh, i) => { if (sh && rig.spine[i]) rig.spine[i]!.rotateX(c * sh * VENTRAL[i]!); });
+    // A comic's lean: its body off to one side, its head tipped back against it.
+    const lean = (style?.lean ?? 0) * up;
+    if (lean) { rig.spine[1]?.rotateZ(lean); rig.spine[0].rotateZ(-lean * 0.6); }
   }
 
   // Its own bubble (a vignette's `peek` too): let go at the puff.

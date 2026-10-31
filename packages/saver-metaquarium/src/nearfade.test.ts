@@ -1,6 +1,6 @@
 import { MeshBasicMaterial, MeshLambertMaterial, ShaderLib, ShaderMaterial, type Material } from 'three';
 import { describe, expect, it } from 'vitest';
-import { NEAR_FADE, bayer4, nearFadeRange, patchNearFade } from './nearfade';
+import { NEAR_FADE, ROOM_FADE, bayer4, nearFadeRange, patchNearFade, patchRoomFade } from './nearfade';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { PARAM_DOCS } from './guide';
 
@@ -52,5 +52,17 @@ describe('nearFade', () => {
     const r = compile(raw, { uniforms: {}, vertexShader: 'void main(){}', fragmentShader: 'void main(){}' });
     expect(r.uniforms.uMqNearFade).toBeUndefined();
     expect(r.fragmentShader).toBe('void main(){}');
+  });
+
+  it('dissolves a room crystal at the lens whole, by its own reach; untagged geometry never fades', () => {
+    const m = new MeshBasicMaterial({ vertexColors: true });
+    expect(patchRoomFade(m)).toBe(true);
+    expect(patchRoomFade(m)).toBe(false);
+    const s = compile(m, { uniforms: {}, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader });
+    expect(s.uniforms.uMqRoomFade).toBe(ROOM_FADE);
+    // One value per crystal (its centre's distance less its reach), so every fragment of it shares the dither step.
+    expect(s.vertexShader).toMatch(/aMqFade\.w > 0\.0 \? length\(\(modelViewMatrix \* vec4\(aMqFade\.xyz, 1\.0\)\)\.xyz\) - aMqFade\.w : 1e6/);
+    expect(s.fragmentShader).toMatch(/mqRoomBayer4\(gl_FragCoord\.xy\) >= mqRoomK\) discard/);
+    expect(ROOM_FADE.value.x).toBeLessThan(ROOM_FADE.value.y);
   });
 });
