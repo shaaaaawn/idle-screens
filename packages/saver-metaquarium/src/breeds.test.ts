@@ -461,6 +461,36 @@ describe('bundled breeds (breeds/README.md)', () => {
     joins(ends('mambo', 'first'), ['mambo', 'sway', 'lead_twirl', 'twirl', 'dip_lead', 'dip_follow', 'lift_lead', 'lift_fly']);
   });
 
+  it('starfish: its arms bend — every joint blended across two bones — and its coat carries baked occlusion', async () => {
+    const doc = await bundledDoc('starfish');
+    const root = doc.getRoot();
+    const joints = root.listSkins()[0]!.listJoints().map((n) => n.getName());
+    let blended = 0, shaded = 0, darker = 0;
+    const pairs = new Set<string>();
+    for (const mesh of root.listMeshes()) for (const p of mesh.listPrimitives()) {
+      const name = p.getMaterial()!.getName();
+      const j = p.getAttribute('JOINTS_0')!, w = p.getAttribute('WEIGHTS_0')!;
+      for (let i = 0; i < j.getCount(); i++) {
+        const ws = w.getElement(i, []) as number[], js = j.getElement(i, []) as number[];
+        const on = ws.map((x, k) => [x, joints[js[k]!]!] as const).filter(([x]) => x > 0.05);
+        if (on.length > 1) { blended++; pairs.add(on.map(([, b]) => b).sort().join('+')); }
+      }
+      const c = p.getAttribute('COLOR_0');
+      if (/Color$/.test(name)) {
+        expect(c, name).toBeTruthy();
+        shaded++;
+        for (let i = 0; i < c!.getCount(); i++) if ((c!.getElement(i, []) as number[])[0]! < 0.95) darker++;
+      } else expect(c, `${name} is drawn as it is`).toBeFalsy();
+    }
+    expect(shaded).toBe(2); // PrimaryColor and SecondaryColor
+    expect(darker).toBeGreaterThan(100); // the dome's steps, the arm roots, the bumps' feet
+    expect(blended).toBeGreaterThan(500);
+    // Each arm hands over at all three of its joints: the disc's rim, then each cut.
+    for (let n = 0; n < 5; n++) for (const pair of [`arm${n}.1+body`, `arm${n}.1+arm${n}.2`, `arm${n}.2+arm${n}.3`]) expect(pairs.has(pair), pair).toBe(true);
+    // The eyes never blend: they ride their bones.
+    expect([...pairs].some((x) => x.includes('eye.'))).toBe(false);
+  });
+
   it('starfish: the committed source is what its generator draws (breeds/rig/starfish-model.mjs)', async () => {
     // @ts-expect-error -- a plain ESM script beside the rig, no types
     const model = await import('../breeds/rig/starfish-model.mjs') as { voxels: () => [number, number, number, string][] };

@@ -4,16 +4,18 @@ Rig and animate the starfish: breeds/source/starfish.glb in, breeds/rig/starfish
     blender -b -P breeds/rig/starfish.py        (from packages/saver-metaquarium)
 
 The model is drawn by rig/starfish-model.mjs, in our designer's style, and
-this script treats it as it treats theirs: never edited, every face weighted
-1.0 to one rigid part (common.py has the machinery). It lies in the XY plane
-on z = 0, faces -Y, its left +X; voxel centres sit at (2i, 2j, 2k + 1).
+this script never edits it. Its eyes ride their bones rigidly; everything else
+is weighted by where it lies (`weigh`, `arm_weights`): the disc, or along its
+arm, handed over across each joint so an arm bends instead of creasing. It lies
+in the XY plane on z = 0, faces -Y, its left +X; disc voxel centres sit at
+(2i, 2j, 2k + 1), and each arm's cubes on a grid of its own along it.
 
     body    the disc (r ≤ 2.9 voxels) with the smile set in its top
     eye.L/R the eyes on top of the disc, pupils and all; they blink
     armN.1  each arm (N = 0..4, at 36° + 72°·N from the front toward the left)
-    armN.2  in three rigid links, cut across the arm at 4.5 and 7.5 voxels
-    armN.3  out. Hinges sit on the arm's underside, so curling up closes
-            each joint's seam rather than opening it.
+    armN.2  in three links, jointed across the arm at 4.5 and 7.5 voxels
+    armN.3  out, each joint blended over ±SOFT. Hinges sit on the arm's
+            underside, so curling up closes each joint rather than opening it.
 
 Clips (30 fps; the tank sets their times, never update(dt)):
 
@@ -55,8 +57,8 @@ from mathutils import Quaternion, Vector
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
-    Pose, apply_pose, bake, begin, build_armature, env, export, in_scene, lattice, load_source, out_path, segment,
-    track,
+    Pose, apply_pose, bake, base_name, begin, build_armature, env, export, in_scene, knots, lattice, load_source,
+    out_path, track,
 )
 
 DISC_R = 2.9
@@ -77,18 +79,52 @@ def lift_axis(n):
     return direction(n).cross(Vector((0, 0, 1)))
 
 
-def bone_of(x, y, z, mat):
-    i, j, k = x / 2, y / 2, round((z - 1) / 2)
-    if k == 3:
-        return 'eye.L' if i > 0 else 'eye.R'
-    r = math.hypot(i, j)
-    if r <= DISC_R:
-        return 'body'
-    th = math.degrees(math.atan2(i, -j)) % 360
+SOFT = 0.9           # voxels either side of a joint that its bend spreads over
+ARM_BAND = 2.6       # voxels across an arm's axis: farther out, a vertex is the disc's
+
+
+def arm_weights(co):
+    """A vertex's weights by where it lies (voxel units): the disc's, or along its arm, handed over across each
+    joint (the disc's rim and the two cuts) over ±SOFT, so a curl bends the arm instead of creasing it.
+    Every face carries its own vertices; two faces meeting at a corner get the same weights there by position
+    alone, so no crack can open."""
+    x, y = co.x / 2, co.y / 2
+    r = math.hypot(x, y)
+    th = math.degrees(math.atan2(x, -y)) % 360
     n = round((th - 36) / 72) % 5
-    along = r * math.cos(math.radians(th) - ANGLES[n])
-    link = 1 if along <= CUTS[0] else 2 if along <= CUTS[1] else 3
-    return f'arm{n}.{link}'
+    rel = math.radians(th) - ANGLES[n]
+    along, across = r * math.cos(rel), abs(r * math.sin(rel))
+    if across > ARM_BAND:
+        return {'body': 1.0}
+    return knots(along, [(DISC_R - SOFT, 'body'), (DISC_R + SOFT, f'arm{n}.1'),
+                         (CUTS[0] - SOFT, f'arm{n}.1'), (CUTS[0] + SOFT, f'arm{n}.2'),
+                         (CUTS[1] - SOFT, f'arm{n}.2'), (CUTS[1] + SOFT, f'arm{n}.3')])
+
+
+def weigh(meshes):
+    """Every vertex its weights: the eyes rigid on their bones (an eye is an EYES- face on top of the disc, behind
+    the smile), everything else by arm_weights. Not segment(): its one-part-per-vertex rule cannot hold where the
+    importer joins the corners of an arm's angled cubes to the disc's, and the bends are blended here anyway.
+    Returns vertices per bone (a blended vertex counts once, for its heaviest) and how many are blended."""
+    counts, blended = {}, 0
+    for o in meshes:
+        mats = list(o.get('rigMaterials') or [base_name(m.name) for m in o.data.materials])
+        eye = {}
+        for f in o.data.polygons:
+            if mats[f.material_index].startswith('EYES') and f.center.z > 5.9 and f.center.y > -1.5:
+                for i in f.vertices:
+                    eye[i] = 'eye.L' if f.center.x > 0 else 'eye.R'
+        groups = {g.name: g for g in o.vertex_groups}
+        for v in o.data.vertices:
+            w = {eye[v.index]: 1.0} if v.index in eye else arm_weights(v.co)
+            for name, x in w.items():
+                if name not in groups:
+                    groups[name] = o.vertex_groups.new(name=name)
+                groups[name].add([v.index], x, 'REPLACE')
+            top = max(w, key=w.get)
+            counts[top] = counts.get(top, 0) + 1
+            blended += len(w) > 1
+    return counts, blended
 
 
 def bone_table():
@@ -573,8 +609,11 @@ def main():
         begin('starfish')
         meshes = load_source('starfish')
         pitch, phase = lattice(meshes)
-        assert (pitch, phase) == (2.0, (1.0, 1.0, 0.0)), (pitch, phase)
-        counts = segment(meshes, bone_of, pitch, phase, by_point=True)
+        # The disc is on the lattice; each arm is laid on a grid of its own, a hair low (starfish-model.mjs), so
+        # only the cube's size is a constant here.
+        assert pitch == 2.0, (pitch, phase)
+        counts, blended = weigh(meshes)
+        counts['blended vertices'] = blended
         rig = build_armature('Starfish', meshes, bone_table())
         keyed = {}
         for pb in rig.pose.bones:
@@ -584,7 +623,8 @@ def main():
             if pb.name == 'body':
                 keyed[pb.name].append('location')
         clips = bake(rig, 'starfish', CLIPS, apply_pose, LOOPS, keyed)
-        out = export(rig, out_path('starfish'), {'mqStride': STRIDE, 'mqWalkStride': WALK_STRIDE, 'mqFeet': TIP_FRONT})
+        out = export(rig, out_path('starfish'), {'mqStride': STRIDE, 'mqWalkStride': WALK_STRIDE, 'mqFeet': TIP_FRONT},
+                     colors=True)  # the coat's baked occlusion (starfish-model.mjs aoAt)
         return {'faces_per_bone': counts, 'bones': len(rig.data.bones), 'clips': clips, 'out': out,
                 'bytes': os.path.getsize(out)}
 
