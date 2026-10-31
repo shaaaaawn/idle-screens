@@ -128,3 +128,19 @@ describe('vignette ink (X440)', () => {
     expect(p).toEqual([{ path: 'vignette', also: ['fishMix'], message: '"b ink" does nothing: ink is the octopus\'s own, and actor b (slot 1) is a dori' }]);
   });
 });
+
+describe('the served guide stays readable whole', () => {
+  // idle-server serves this package's recipes, grammar and param docs as /savers/metaquarium.md and caps the whole
+  // page at 40,000 bytes (saver-guides.test.ts: a fetch tool reads it whole). That cap only runs in idle-server, after
+  // a release — so a param added here could push the served guide over and break the server sync. This is the
+  // engine's share, estimated the way saver-guides.ts lays it out. Measured 2026-10-31: share 34,208 bytes served as
+  // 39,391 (the server's header and markdown add ~5.2 KB), so 34,500 keeps the page under 40,000 with ~300 to spare.
+  // Over budget? Tighten docs and recipe prose (as 0802e97 did) — don't raise this without raising the server's cap.
+  it('keeps the recipes, grammar and param docs within their budget', () => {
+    const recipes = RECIPES.reduce((n, r) => n + r.id.length + r.label.length + r.what.length + JSON.stringify(r.params).length + 24, 0);
+    const params = Object.entries(PARAM_DOCS).reduce((n, [k, v]) => n + k.length + v.length + 22, 0);
+    const share = recipes + GRAMMAR.length + params;
+    expect(share).toBeLessThanOrEqual(ENGINE_GUIDE_BUDGET);
+  });
+});
+const ENGINE_GUIDE_BUDGET = 34_500;

@@ -74,7 +74,7 @@ describe('tilt-shift (in the finish)', () => {
 
   it('is off by default and documented', () => {
     expect(METAQUARIUM_PARAMS.tiltShift).toMatchObject({ type: 'number', default: 0, min: 0, max: 1 });
-    expect(PARAM_DOCS.tiltShift).toMatch(/miniature/);
+    expect(PARAM_DOCS.tiltShift).toMatch(/model/);
   });
 
   it('adds its own three-step blur only when on, and composites over the canvas', () => {
