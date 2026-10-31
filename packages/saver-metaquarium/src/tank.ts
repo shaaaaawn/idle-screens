@@ -3845,7 +3845,11 @@ class TankInstance implements SaverInstance {
       if (dolphin && f.rig!.dolphin) {
         // Its bank in a hard turn, in place of a fish's lean (dolphin.ts dolphinBank); then a breach's height.
         if (!act) f.group.rotateZ(dolphin.bank - pose.roll);
-        if (dLeap) f.group.position.y += dLeap.y - y;
+        if (dLeap) {
+          f.group.position.y += dLeap.y - y;
+          // The chase camera looks at where it is drawn, so it tilts up and watches the breach through the surface.
+          if (f.index === followSlot) this.followAt.y += dLeap.y - y;
+        }
         const viewer = followPov && f.index === followSlot ? null : this.viewer(followSlot);
         if (viewer && dolphin.face > 0.01) {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
@@ -4034,7 +4038,7 @@ class TankInstance implements SaverInstance {
         // The shell a snail wears as drawn (`snailShell`, dressSnail): checkable without pixels (X491).
         ...(f.rig?.snail ? { shell: f.rig.snail.shell.style || null } : {}),
         ...(oState ? { doing: oState.doing, ...(oLook ? { looking: oLook.at, offViewer: oLook.offViewer, lids: oLook.lids, pupilRoll: oLook.pupilRoll, bodyRoll: oLook.bodyRoll } : {}) }
-          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper, turnPerL: Math.round((pose.turn ?? 0) * 1000) / 1000 } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
+          : floor ? { doing: floor.doing } : angler ? { doing: angler.doing } : angel ? { doing: angel.doing, temper: angel.temper, bend: Math.round(angel.bend * 100) / 100 } : turtle ? { doing: turtle.doing, temper: turtle.temper, steer: Math.round(turtle.steer * 100) / 100 } : seahorse ? { doing: seahorse.doing, temper: seahorse.temper, curl: Math.round(seahorse.curl * 100) / 100, ...(hs ? { hold: { kind: hold?.kind ?? 'rest', phase: hs.phase, reach: Math.round(hs.reach * 100) / 100, grip: Math.round(hs.grip * 100) / 100, err: Math.round(holdErr * 1000) / 1000 } } : {}) } : beta ? { doing: beta.doing, temper: beta.temper, spread: Math.round(beta.spread * 100) / 100 } : hacker ? { doing: hacker.doing } : shark ? { doing: shark.doing } : dolphin ? { doing: dolphin.doing, temper: dolphin.temper, turnPerL: Math.round((pose.turn ?? 0) * 1000) / 1000, bank: Math.round(dolphin.bank * 100) / 100 } : baby ? { doing: baby.doing } : tang ? { doing: tang.doing, ...(look ? { looking: look.at, offViewer: look.offViewer } : {}) }
           : puffer ? { doing: puffer.doing, puff: Math.round(puffer.puff * 100) / 100, ...(pLook ? { looking: pLook.at, offViewer: pLook.offViewer, lids: pLook.lids, flirt: pLook.flirt } : {}) }
  : {}),
       });

@@ -300,12 +300,12 @@ export function dolphinBank(turn: number): { roll: number; curl: number } {
 export type LeapPhase = 'run' | 'air' | 'dive';
 export const LEAP = {
   /** Seconds climbing to the surface, in the air, and diving back. */
-  run: 1.6, air: 1.3, dive: 1.8,
+  run: 2.2, air: 1.3, dive: 1.8,
   /** The arc's height above the surface, in body lengths. */
   height: 0.45,
   /** Extra cruising per second while it runs and flies (the push along the route), and seconds to give it back.
    *  The push sets the arc's angle (its rise against its run): with less it left the water near vertical. */
-  boost: 4, giveBack: 26,
+  boost: 3, giveBack: 30,
   /** The soft max's width (units): how smoothly it leaves its route for the curve. */
   soft: 15,
   /** Seconds between leaps, by temperament (and the first comes early, so a tank shows one). */
@@ -357,13 +357,14 @@ const rampArea = (x: number, e: number): number => {
 
 /**
  * Seconds of cruising it is AHEAD of its route at `t` (the tank adds that much travel; 0 between leaps).
- * Each leap pushes it on by `boost` from a third of its run to halfway down its dive (eased in and out
- * over 0.6 s), then gives it all back over `giveBack` — at most ~0.65 of its cruising speed, so it slows
+ * Each leap pushes it on by `boost` from the start of its run to its re-entry (eased in and out
+ * over 0.6 s), then gives it all back over `giveBack` — at most ~0.45 of its cruising speed (two overlapping, ~0.9), so it slows
  * after a breach but never swims backwards. Leaps' pushes add, so one that starts before the last has
  * been given back never jumps.
  */
 export function dolphinLeapAhead(index: number, t: number): number {
-  const a = LEAP.run * 0.3, b = LEAP.run + LEAP.air + LEAP.dive * 0.5, e = 0.6;
+  // From the run's start (a push that came late left it climbing near vertical: measured 80°).
+  const a = 0, b = LEAP.run + LEAP.air, e = 0.6;
   const full = LEAP.boost * (b - a - e);
   let ahead = 0;
   for (const start of leapsBefore(index, t, LEAP_LEN + LEAP.giveBack + 1)) {
@@ -383,13 +384,16 @@ export function dolphinLeap(index: number, t: number, surface: number, routeY: n
   const l = dolphinLeapAt(index, t);
   if (!l) return null;
   const vy = (4 * LEAP.height * L) / LEAP.air, g = (2 * vy) / LEAP.air;
+  // The run ACCELERATES up: its climb builds from 0.4 of the exit speed to all of it at the surface (a
+  // straight line at the exit speed made the whole run a near-vertical rocket).
+  const acc = (0.6 * vy) / LEAP.run;
   const curve = (u: number): number => {
-    if (u < LEAP.run) return surface - vy * (LEAP.run - u);
+    if (u < LEAP.run) { const w = LEAP.run - u; return surface - vy * w + 0.5 * acc * w * w; }
     if (u <= LEAP.run + LEAP.air) { const a = u - LEAP.run; return surface + vy * a - 0.5 * g * a * a; }
     return surface - vy * (u - LEAP.run - LEAP.air);
   };
   // In and out over half a second at the window's ends, where the curve is far below anyway.
-  const fade = (u: number): number => smooth(u / 0.5) * (1 - smooth((u - LEAP_LEN) / 0.5));
+  const fade = (u: number): number => smooth(u / 0.8) * (1 - smooth((u - LEAP_LEN) / 0.5));
   const yAt = (u: number): number => {
     const c = curve(u), d = c - routeY, k = LEAP.soft;
     // smax(route, curve) = (route + curve + √((curve − route)² + k²)) / 2: the higher, a soft corner between.
