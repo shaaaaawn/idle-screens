@@ -33,7 +33,7 @@ const TAG = 'mq-voxel-ao-v1';
 export const VOXEL_AO = { value: 0 };
 
 /** How dark each level of occlusion is (0 open .. 3 a full inside corner), at voxelAO 1. */
-export const AO_LEVELS = [0, 0.22, 0.4, 0.56] as const;
+export const AO_LEVELS = [0, 0.3, 0.5, 0.66] as const;
 
 /**
  * Boxes as a flat list, cx cy cz hx hy hz per box (centre, half-extents), and a
@@ -91,7 +91,7 @@ function key(x: number, y: number, z: number): number {
 export interface OcclusionOptions {
   /** The ground's height under (x, z): vertices within `groundReach` of it darken toward it. */
   ground?: (x: number, z: number) => number;
-  /** How far above the ground its occlusion reaches, in world units (default: two median voxels). */
+  /** How far above the ground its occlusion reaches, in world units (default: three median voxels). */
   groundReach?: number;
 }
 
@@ -151,7 +151,7 @@ function medianReach(boxes: ArrayLike<number>): number {
   const hs: number[] = [];
   for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 512))) hs.push(boxes[i * 6 + 4]!);
   hs.sort((a, b) => a - b);
-  return 4 * hs[hs.length >> 1]!;
+  return 6 * hs[hs.length >> 1]!;
 }
 
 /**
