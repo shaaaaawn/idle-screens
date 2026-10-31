@@ -141,11 +141,21 @@ function analyzeChannel(
   };
 }
 
+/**
+ * WCAG 2.3.1's general-flash luminance pair: a change of at least this much
+ * relative luminance (0..1, linear light) counts as a transition...
+ */
+export const FLASH_SWING_THRESHOLD = 0.1;
+/** ...only while the darker of the two levels is below this. */
+export const FLASH_DARK_MAX = 0.8;
+/** More than this many flashes in any one-second window fails. */
+export const FLASH_MAX_PER_SECOND = 3;
+
 /** Analyze a per-tile luminance timeline for WCAG 2.3.1 flash safety. */
 export function analyzeFlashes(samples: FlashSample[], opts: FlashOptions = {}): FlashReport {
-  const swing = opts.swingThreshold ?? 0.1;
-  const darkMax = opts.darkMax ?? 0.8;
-  const limit = opts.maxFlashesPerSecond ?? 3;
+  const swing = opts.swingThreshold ?? FLASH_SWING_THRESHOLD;
+  const darkMax = opts.darkMax ?? FLASH_DARK_MAX;
+  const limit = opts.maxFlashesPerSecond ?? FLASH_MAX_PER_SECOND;
   const areaThreshold = opts.areaThreshold ?? 0.25;
   const redSwing = opts.redSwingThreshold ?? 0.2;
 

@@ -3,7 +3,8 @@
 The declarative, agent-authorable screensaver format compiled by
 `@idle-screens/schema`. A spec describes a saver as **data** — a background plus
 layers of moving sprites — which `compileSaver()` turns into a seeded,
-deterministic, flash-safe `SaverPlugin`. There is no code in a spec: no
+deterministic `SaverPlugin` with bounded motion and work (see Safety
+invariants for what is guaranteed, and what is checked at publish). There is no code in a spec: no
 scripting, no network access, no DOM access.
 
 - **Machine-readable schema:** [`saver-spec.schema.json`](./saver-spec.schema.json)
@@ -58,13 +59,20 @@ live steers), `rock`, `life.stagger`, `reveal.rise`, `textBlock.number`, the
 
 ## Safety invariants
 
-These hold **by construction** — no spec can violate them:
+Three kinds of promise, kept apart so that none is claimed for more than it
+covers: what the format guarantees by construction, what is checked when a
+scene is published, and what nothing checks.
+
+**By construction.** The validator rejects any spec that breaks these, and
+`compileSaver()` refuses an invalid spec:
 
 1. **No flash primitive.** The background is static (drift is floored at 10 s
    — for a gradient's stop positions and for a `field`'s domain travel alike,
    the only way either changes over time) and entities are bounded sprites,
-   so a compiled spec cannot strobe the full field. Provable by sampling any
-   compiled spec through `@idle-screens/validator`.
+   so no single field switches the whole frame from one frame to the next.
+   This is about primitives, not pictures: several timeline keys together,
+   or a regular pattern in motion, can still flicker, which is what the
+   publish checks below are for.
 2. **Pulse/grow/cycle are bounded.** Breathing amplitude is capped and periods
    floored at 500 ms (2 Hz — under the WCAG 3 Hz flash threshold). Every entity
    gets its own seeded phase — and with `pulse.wave`, a position-derived phase —
@@ -74,7 +82,8 @@ These hold **by construction** — no spec can violate them:
    them. `clock` deliberately removes the per-entity phase, so the validator
    floors a clocked layer's periods at 1000 ms (1 Hz) instead — a layer in
    unison breathes, it never flashes. `emit` events are floored at one per
-   second per entity and always ride a smooth envelope, never a cut.
+   second per entity and always ride a smooth envelope, never a cut. Distinct
+   timeline key times on one path sit ≥ 200 ms apart (see Timeline).
 3. **Motion is bounded.** Speeds are capped (4000 px/sec; warp at 1.5
    depth-units/sec; orbit at 180 deg/sec; path laps at ≥ 2 s).
 4. **Work is bounded.** ≤ 36 layers, ≤ 400 entities per layer, ≤ 800 total,
@@ -84,6 +93,44 @@ These hold **by construction** — no spec can violate them:
    (compiled savers expose `renderFrame(t, seed)`). With `ghosting`, seeks
    replay a bounded fixed-step warm-up so even the accumulated smear is
    reproducible.
+
+**Checked at publish.** Properties of the whole picture that no per-field
+rule can promise. Each is an exported, deterministic check that a host
+runs before it accepts a scene, and refuses on; none is part of
+`validateSpec` or `compileSaver`, which run on every screen. A spec drawn
+without them carries none of these guarantees.
+
+6. **Timeline flashes** (`timelineFlashReport`, WCAG 2.3.1): paint keys on
+   several paths that combine into more than 3 flashes a second over a
+   quarter of the screen. See Timeline for the method and its sample budget.
+7. **Spatial patterns** (`patternHazardReport`, ITU-R BT.1702-3 Annex 1):
+   more than five light-dark pairs of regular stripes (parallel, radial,
+   curved, or rows of repeated elements such as dots) whose light and dark
+   differ by a flash-level 0.1 relative luminance with the darker side under
+   0.8, covering more than **40 %** of the frame while still, or more than
+   **25 %** while it spins, rocks, orbits, bounces, wanders, follows a path,
+   pulses, grows, emits, cycles or is keyed by the timeline. A pattern that
+   only flows one way (`drift` without `bob` or `bidirectional`, `rise`
+   without `sway`, `warp`) is judged as still, and is refused when the
+   stripes crossing a point make more than 3 light-dark cycles a second
+   (speed ÷ pitch) over 25 % of the frame. The scene is drawn by the
+   analytic perception raster at 216 cells on the short side and sampled at
+   t = 5 s and up to five points where timeline keys settle.
+
+**Not checked.** Nothing measures these; an author has to:
+
+- Fast motion of large shapes other than regular stripes. Speeds are capped,
+  but a big, bright shape sweeping across a dark frame is not analysed for
+  flashes (the flash check reads timeline paint keys only).
+- Stripes finer than about 8 px at 1080p (1/135 of the short side), which
+  the pattern raster averages to grey, and stripes coarser than 0.15 of the
+  short side, which it does not count as a pattern. Text (`text`,
+  `textBlock`) is left out of the pattern check: its glyphs are not drawn.
+- A pattern that appears only between the sampled times, or only on a
+  viewport other than the one checked (1920×1080 unless the host passes
+  another), and a pattern formed only where a sequence's bed and segment
+  overlap when each is checked on its own.
+- Saturated-red flashes, beyond the validator's approximate red check.
 
 ## Validation semantics
 
