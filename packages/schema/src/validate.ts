@@ -3,6 +3,7 @@ import { applyDeltasShared, canonicalSpecPath, morphNothingMorphable, readSpecPa
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
+import { scalarWanted } from './validate-hints';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -215,16 +216,6 @@ function echo(v: unknown): string {
 
 /** A message for a field that takes a [min,max] range ("must be a [min,max] range …"). */
 const RANGE_WANTED = /^must be a \[min,max\] range/;
-/**
- * A message for a field that takes one number: the scalar-only messages
- * ("…, not a [min,max] range"), and plain bounds ("must be > 0", "must be
- * 0..1", "must be a number of ms") with no bracket notation in them, which
- * would mean the field takes a pair or a range.
- */
-const SCALAR_ONLY = /not a \[min,max\] range/;
-const SCALAR_BOUND = /^must be (?:>|an? (?:positive |single |finite |whole )?(?:number|integer)\b|between -?\d|-?\d[\d.]*\.\.-?[\d.]+(?: \(|$))/;
-const scalarWanted = (m: string): boolean => SCALAR_ONLY.test(m) || (!m.includes('[') && SCALAR_BOUND.test(m));
-
 /**
  * The received value and the fix, appended to a shape error (F142): a scalar
  * where a [min,max] range belongs (`got 0.018; write [0.018, 0.018]`), a
