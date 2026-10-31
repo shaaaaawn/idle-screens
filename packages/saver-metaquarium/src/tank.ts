@@ -69,7 +69,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
-import { CAST_LEADS, castPose, ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
+import { CAST_LEADS, castPose, lastStepChange, ORBIT_FOV, shotBlendAt, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
@@ -988,6 +988,8 @@ class TankInstance implements SaverInstance {
   private followState: { slot: number; x: number; y: number; z: number } | null = null;
   /** Named shots: the pose scratch, and the landmark `macro` frames (picked once per azimuth). */
   private readonly shotScratch: ShotPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: ORBIT_FOV };
+  /** Where the shot a `shotBlend` is leaving would stand now. */
+  private readonly blendScratch: ShotPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: ORBIT_FOV };
   private landmark: { x: number; y: number; z: number; size: number } | null = null;
   private landmarkKey = '';
   private readonly spotLevel = [0, 0, 0];
@@ -2021,16 +2023,49 @@ class TankInstance implements SaverInstance {
       this.landmarkKey = `${this.clusters.length}|${this.num('cameraAzimuth')}`;
       this.landmark = pickLandmark(this.clusters.map((c) => ({ x: c.x, y: c.y + c.height, z: c.z, size: Math.max(c.height, c.radius * 2) })), this.num('cameraAzimuth'));
     }
-    const p = shotPose(name, {
-      azimuth, elevation: this.num('cameraElevation'), distance: this.num('cameraDistance'),
-      ceiling: this.ceiling ? this.ceiling.position.y : null,
-      floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0,
-      landmark: this.landmark,
-    }, this.shotScratch);
+    const p = shotPose(name, this.shotInput(azimuth), this.shotScratch);
     this.camera.position.set(p.x, p.y, p.z);
     this.camera.lookAt(p.tx, p.ty, p.tz);
     // Follow keeps the classic lens.
     const fov = this.num('cameraFollow') >= 0 ? ORBIT_FOV : p.fov;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+  }
+
+  /** What every named shot is placed from: the author's angles and distance, the water's bounds, the macro landmark. */
+  private shotInput(azimuth: number): Parameters<typeof shotPose>[1] {
+    return {
+      azimuth, elevation: this.num('cameraElevation'), distance: this.num('cameraDistance'),
+      ceiling: this.ceiling ? this.ceiling.position.y : null,
+      floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0,
+      landmark: this.landmark,
+    };
+  }
+
+  /**
+   * `shotBlend` (seconds): a change of named shot eases instead of cutting.
+   * After the fish loop (so `cast` can be placed on either side of it): the
+   * camera is already where the new shot puts it; within `shotBlend` of the
+   * change (lastStepChange on the track, so a frame is still a function of
+   * t), it stands part way back toward where the old shot would have put it
+   * NOW — position, aim and lens, smootherstep. The follow camera is not blended.
+   */
+  private blendShot(t: number): void {
+    const blend = this.num('shotBlend');
+    if (!(blend > 0) || !this.track) return;
+    const ch = lastStepChange(this.track, 'shot', t);
+    if (!ch) return;
+    const k = shotBlendAt((t - ch.at) / 1000, blend);
+    if (k >= 1) return;
+    const from = (SHOT_NAMES as readonly string[]).includes(ch.from) ? ch.from as ShotName : 'orbit';
+    const to = this.shotScratch;
+    const target = { x: to.tx, y: to.ty, z: to.tz, fov: to.fov, px: this.camera.position.x, py: this.camera.position.y, pz: this.camera.position.z };
+    const azimuth = this.num('cameraAzimuth') + this.turned;
+    const a = from === 'cast' ? this.castPoseNow(this.blendScratch) : shotPose(from, this.shotInput(azimuth), this.blendScratch);
+    if (!a) return;
+    const mix = (x: number, y: number): number => x + (y - x) * k;
+    this.camera.position.set(mix(a.x, target.px), mix(a.y, target.py), mix(a.z, target.pz));
+    this.camera.lookAt(mix(a.tx, target.x), mix(a.ty, target.y), mix(a.tz, target.z));
+    const fov = mix(a.fov, target.fov);
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
   }
 
@@ -2042,6 +2077,15 @@ class TankInstance implements SaverInstance {
    * Until a lead is placed it keeps the hero stand placeShot gave it.
    */
   private placeCastShot(): void {
+    const p = this.castPoseNow(this.shotScratch);
+    if (!p) return;
+    this.camera.position.set(p.x, p.y, p.z);
+    this.camera.lookAt(p.tx, p.ty, p.tz);
+    if (this.camera.fov !== p.fov) { this.camera.fov = p.fov; this.camera.updateProjectionMatrix(); }
+  }
+
+  /** Where `cast` would stand now (into `out`), sightline cleared; null with no lead placed. */
+  private castPoseNow(out: ShotPose): ShotPose | null {
     const pts: { x: number; y: number; z: number }[] = [];
     let body = 0;
     for (const f of this.fish) {
@@ -2053,16 +2097,14 @@ class TankInstance implements SaverInstance {
     const p = castPose(pts, body, {
       azimuth: this.num('cameraAzimuth') + this.turned, elevation: this.num('cameraElevation'), scale: this.num('cameraDistance') / 110,
       ceiling, floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0, reach: BOUNDS.radius * 2.2,
-    }, this.shotScratch);
-    if (!p) return;
+    }, out);
+    if (!p) return null;
     const c = clearSightline({
       target: { x: p.tx, y: p.ty, z: p.tz }, camera: { x: p.x, y: p.y, z: p.z }, height: this.sightHeight(),
       minBack: Math.max(30, body * 1.5), amount: 1, ceiling,
     });
     p.x = c.x; p.y = c.y; p.z = c.z;
-    this.camera.position.set(p.x, p.y, p.z);
-    this.camera.lookAt(p.tx, p.ty, p.tz);
-    if (this.camera.fov !== p.fov) { this.camera.fov = p.fov; this.camera.updateProjectionMatrix(); }
+    return p;
   }
 
   /** A fish's body length against a minted fish, now: its breed's nominal
@@ -3988,6 +4030,7 @@ class TankInstance implements SaverInstance {
     const followFish = followPov ? this.fish[followSlot] : undefined;
     const followEye = followFish && followFish.eye > 0 ? followFish.eye * followFish.baseScale * this.fishSizeAt(followSlot) : 0;
     if (followSlot < 0 && this.str('shot') === 'cast') this.placeCastShot();
+    if (followSlot < 0) this.blendShot(t);
     this.placeFollowCamera(followSlot, followBack, followPov, followLen, followEye);
     this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
     this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);

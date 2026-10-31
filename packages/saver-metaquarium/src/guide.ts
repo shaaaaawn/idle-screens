@@ -36,6 +36,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraElevation: 'Degrees above the floor. 8–15 is eye level with the fish; 40+ looks down on a castle.',
   cameraDistance: 'Distance from the tank centre. 80 is a close-up, 170–220 a village, 300+ a landmark.',
   shot: 'A named framing: `orbit` (default), `hero` (three-quarter), `front` (level, long lens), `low` (among the plants, looking up), `top` (the floor as a map), `surface` (the water\'s underside), `macro` (close on the nearest landmark), `cast` (frames the leads — the mix\'s first three slots — wherever they swim, as close as their spread allows; the shot for a few characters). Azimuth and autoRotate turn it; distance scales it.',
+  shotBlend: 'Seconds a change of `shot` takes, 0–12 (default 0 = a cut): the camera moves from the old framing to the new, eased. 3–6 for a slow push from a wide to `cast`.',
   cameraFollow: 'Ride with one fish (cast slot, 0 = first); -1 is the orbit camera. Orbit params are ignored while following. Pair with `followSpot` on the same slot for a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
   followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye and the fish is hidden; a floor walker (Dot, crab, octopus, snail, starfish) sees from its own head height.',
