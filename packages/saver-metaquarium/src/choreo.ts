@@ -81,7 +81,8 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
     // a comma that starts a new `<beats>:` cue splits; the one in `>side,depth` does not
     for (const raw of body.split(/,\s*(?=(?:\d+(?:\.\d+)?|\.\d+)\s*:)/).map((s) => s.trim()).filter(Boolean)) {
       if (cues.length >= MAX_CUES) { problems.push(`more than ${MAX_CUES} cues on one line; the rest are dropped`); break; }
-      const m = /^(\d+(?:\.\d+)?|\.\d+)\s*:\s*([a-z][a-z_]*)\s*(.*)$/.exec(raw);
+      // No `\s*` before the rest: it and `(.*)` could both take the same spaces (CodeQL polynomial ReDoS); the rest is trimmed below.
+      const m = /^(\d+(?:\.\d+)?|\.\d+)\s*:\s*([a-z][a-z_]*)(.*)$/.exec(raw);
       if (!m) { problems.push(`"${raw}" is not <beats>:<move>`); continue; }
       const beats = Number(m[1]);
       if (!(beats > 0)) { problems.push(`"${raw}": a cue needs some beats`); continue; }
