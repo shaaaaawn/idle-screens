@@ -273,6 +273,10 @@ export const METAQUARIUM_PARAMS = {
    *  where the shot aims — `cast`: the leads), softer with distance from it.
    *  High tier only. 0 is none. */
   depthOfField: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Ambient occlusion: the water's light reaches less into crevices —
+   *  between voxels, under ledges, where a fish meets the sand — from the
+   *  frame's own depth. High tier only. 0 is none. */
+  ambientOcclusion: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Bright light rolls off instead of clipping: shafts, glare and glow that
    *  stack past white ease into it with their hue kept, so a fish in a beam
    *  stays a fish. The brightest seventh of the range is compressed a little.
