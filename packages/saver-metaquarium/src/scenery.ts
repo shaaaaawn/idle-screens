@@ -32,6 +32,7 @@ import { buildSigns } from './signs';
 import { supplyLevel } from './sign-supply';
 import type { SignEntry } from './sign-mix';
 import { OPEN_MARKS } from './vignette';
+import { buildStageSet, type StageSet } from './club';
 
 export interface SceneryOptions {
   rocks: number;
@@ -70,6 +71,8 @@ export interface SceneryOptions {
   lamps?: number;
   /** Signs (the `signs` DSL, parsed): beside the world's marks, or in the open. */
   signs?: readonly SignEntry[];
+  /** The open-mic set (`stageSet`, club.ts): a brick back wall, a mic on a stand, a stool. */
+  stageSet?: StageSet;
   bubbles: number;
   /** `live`: the vents emit on the slot-cycle lifecycle (bubbles.ts) instead of the classic puffs. */
   bubbleStyle?: 'classic' | 'live';
@@ -123,6 +126,8 @@ export interface Scenery {
   floraMaterials: Material[];
   /** The wild geodes' material, which takes the light field too. */
   geodeMaterials: Material[];
+  /** The stage set's (club.ts): they take the spot and crystal light like the geodes. */
+  stageMaterials: Material[];
   /** Where the fish are this frame (x, y, z, reach): the garden answers them (flora.ts). */
   setFish(fish: ReadonlyArray<{ x: number; y: number; z: number; r: number }>): void;
   /** Crystal colonies that burst out of the rocks — REAL clusters, for the
@@ -556,6 +561,13 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
       group.add(mesh);
     }
     counts.pyramids = pyr.sites.length;
+  }
+  // The stage set before the signs, so a sign never stands on the mic.
+  const stageSet = opts.stageSet && !opts.interior ? buildStageSet(opts.stageSet, terrain) : null;
+  if (stageSet) {
+    group.add(stageSet.group);
+    obstacles.push(...stageSet.obstacles);
+    counts.stageSet = 1;
   }
   // Signs, once everything they stand beside has a place: off the paths, the
   // doorsteps and the lamps, beside their mark. Fish go round them.
@@ -998,6 +1010,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], cover: coverPaint, rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
+    stageMaterials: stageSet?.materials ?? [],
     setFish(fish) {
       const n = Math.min(fish.length, MAX_FLORA_FISH);
       for (let i = 0; i < n; i++) floraFish.value[i]!.set(fish[i]!.x, fish[i]!.y, fish[i]!.z, fish[i]!.r);
