@@ -298,13 +298,20 @@ export const RECIPES: readonly Recipe[] = [
   {
     id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast — a turtle, a blowfish, an octopus, a few tangs, a crab — framed close wherever they swim, in soft shafts of light, each fish over its own shadow. The polished look in one recipe.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'reef', fishMix: 'seaturtle:1@patrol, blowfish:1, octopus:1@bottom, dori:5@school, crab:1', floraDensity: 0.45, marineSnow: 0.3,
-      swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, fishAmbient: 0.5, caustics: 0.6, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
+      swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.5, fishAmbient: 0.5, caustics: 0.6, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
   },
   {
     id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish and baby fish hover together under drifting jellyfish lanterns, a shark slides through, every outline caught in a thin edge of light.',
     params: { ...ALIVE, ...CINEMATIC, finish: 0.75, environment: 'abyss', fishMix: 'glowfish:2@hover, babyfish:1@hover, shark:1@patrol, babyfish:2, hackerfish:1',
-      propMix: 'crystal:2@druse/cyan, crystal:1@spire/hotpink', fishLook: 'neon', fishGlow: 0.8, fishRim: 0.9, marineSnow: 0.5, swimSpeed: 0.5, skyLanterns: 0.6, skyHeight: 0.35,
+      propMix: 'crystal:2@druse/cyan, crystal:1@spire/hotpink', fishLook: 'neon', fishGlow: 0.8, fishRim: 0.9, sceneryShadows: 1, marineSnow: 0.5, swimSpeed: 0.5, skyLanterns: 0.6, skyHeight: 0.35,
       shot: 'cast', cameraElevation: 8, autoRotate: 0.4 },
+  },
+  {
+    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex leave their front doors, meet in the middle of a sunlit village of weathered stone homes, and go home again — seen from high up through a tilt-shift lens, so the village reads as a model on a table.',
+    params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
+      fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
+      vignette: '4s: a =home1in, b =home2in, c =home3in | 6s: a >home1 peek | 7s: a >centre, b >home2 | 7s: b >centre @a, a @b | 6s: a @b talk, b @a nod | 7s: c >home3 hop, a @c, b @c | 8s: c >centre | 9s: a b c circle centre | 6s: a @b bow, b @c bow, c @a bow | 7s: a >home1, b >home2, c >home3 | 6s: a >home1in, b >home2in, c >home3in | 5s: a rest, b rest, c rest',
+      fishRim: 0.3, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.6, tiltShift: 0.55, shot: 'orbit', cameraDistance: 165, cameraElevation: 30, autoRotate: 0.5 },
   },
 ];
 
