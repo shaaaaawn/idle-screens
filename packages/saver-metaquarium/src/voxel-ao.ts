@@ -19,7 +19,8 @@
  *
  * Worked out once per geometry, the first frame `voxelAO` is on (a reef is
  * hundreds of thousands of vertices; at 0 it costs nothing). Applied as a
- * multiply on the vertex colour, so it holds on every tier: the basic tier
+ * multiply on the surface colour, blended across each face from its corners,
+ * so it holds on every tier: the basic tier
  * gets none of the screen-space passes, and this is the one that still reads
  * there.
  */
@@ -27,7 +28,7 @@
 import { BufferAttribute, type BufferGeometry, type Material } from 'three';
 import { stackPatch } from './hooks';
 
-const TAG = 'mq-voxel-ao-v1';
+const TAG = 'mq-voxel-ao-v2';
 
 /** 0..1 — `voxelAO`. Written by the tank each frame. */
 export const VOXEL_AO = { value: 0 };
@@ -163,25 +164,70 @@ export function bakeVoxelOcclusion(geometry: BufferGeometry, opts: OcclusionOpti
   const boxes = geometry.userData.mqBoxes as ArrayLike<number> | undefined;
   const pos = geometry.getAttribute('position');
   if (!boxes || !pos || geometry.userData.mqOccBaked) return false;
-  geometry.setAttribute('aMqOcc', new BufferAttribute(voxelOcclusion(pos.array, new BoxField(boxes), opts), 1));
+  const { corners, uv } = faceCorners(pos.array, voxelOcclusion(pos.array, new BoxField(boxes), opts));
+  geometry.setAttribute('aMqOcc', new BufferAttribute(corners, 4));
+  geometry.setAttribute('aMqOccUV', new BufferAttribute(uv, 2));
   geometry.userData.mqOccBaked = true;
   delete geometry.userData.mqBoxes;
   return true;
 }
 
+/**
+ * Per-vertex occlusion interpolated across a quad's two triangles shows their
+ * shared diagonal: two dark corners facing each other leave a hard diagonal
+ * band across the face, plain on a big face at the lens. So each vertex
+ * carries its face's four corner values (`aMqOcc`: (−,−) (+,−) (+,+) (−,+)
+ * along the face's two axes) and which corner it is (`aMqOccUV`), and the
+ * fragment blends them bilinearly — what voxel renderers do for smooth light.
+ * A vertex outside any quad keeps 0s: its corner (0, 0) reads 0.
+ */
+export function faceCorners(pos: ArrayLike<number>, occ: Float32Array): { corners: Float32Array; uv: Float32Array } {
+  const count = occ.length, corners = new Float32Array(count * 4), uv = new Float32Array(count * 2);
+  const p = (v: number, a: number): number => pos[v * 3 + a]!;
+  for (let f = 0; f + 6 <= count; f += 6) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let v = f; v < f + 6; v += 1) for (let a = 0; a < 3; a += 1) { lo[a] = Math.min(lo[a]!, p(v, a)); hi[a] = Math.max(hi[a]!, p(v, a)); }
+    const ext = [hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!];
+    const flat = ext.indexOf(Math.min(...ext));
+    const [ua, ub] = [0, 1, 2].filter((a) => a !== flat) as [number, number];
+    if (!(ext[ua]! > 0) || !(ext[ub]! > 0)) continue;
+    const c = [0, 0, 0, 0];
+    const at = (v: number): [number, number] => [p(v, ua) > (lo[ua]! + hi[ua]!) / 2 ? 1 : 0, p(v, ub) > (lo[ub]! + hi[ub]!) / 2 ? 1 : 0];
+    for (let v = f; v < f + 6; v += 1) { const [u, w] = at(v); c[w ? (u ? 2 : 3) : (u ? 1 : 0)] = occ[v]!; }
+    for (let v = f; v < f + 6; v += 1) {
+      corners.set(c, v * 4);
+      const [u, w] = at(v); uv[v * 2] = u; uv[v * 2 + 1] = w;
+    }
+  }
+  return { corners, uv };
+}
+
 const VERT_PARS = /* glsl */ `
-  attribute float aMqOcc;
-  uniform float uMqVoxelAO;
+  attribute vec4 aMqOcc;
+  attribute vec2 aMqOccUV;
+  varying vec4 vMqOcc;
+  varying vec2 vMqOccUV;
 `;
 const VERT = /* glsl */ `#include <color_vertex>
-  // A geometry without the bake reads 0 here: no occlusion.
-  vColor.rgb *= 1.0 - ${AO_LEVELS[3].toFixed(2)} * uMqVoxelAO * aMqOcc;`;
+  vMqOcc = aMqOcc; vMqOccUV = aMqOccUV;`;
+const FRAG_PARS = /* glsl */ `
+  uniform float uMqVoxelAO;
+  varying vec4 vMqOcc;
+  varying vec2 vMqOccUV;
+`;
+const FRAG = /* glsl */ `#include <color_fragment>
+  {
+    // Bilinear over the face's four corners; a geometry without the bake reads corner (0, 0) = 0.
+    float mqOcc = mix(mix(vMqOcc.x, vMqOcc.y, vMqOccUV.x), mix(vMqOcc.w, vMqOcc.z, vMqOccUV.x), vMqOccUV.y);
+    diffuseColor.rgb *= 1.0 - ${AO_LEVELS[3].toFixed(2)} * uMqVoxelAO * mqOcc;
+  }`;
 
 /** Patch a vertex-coloured material to take the occlusion (true when it took the patch now). */
 export function patchVoxelAO(material: Material): boolean {
   return stackPatch(material, TAG, (shader) => {
-    if (!shader.vertexShader.includes('#include <color_vertex>')) return;
+    if (!shader.vertexShader.includes('#include <color_vertex>') || !shader.fragmentShader.includes('#include <color_fragment>')) return;
     shader.uniforms.uMqVoxelAO = VOXEL_AO;
     shader.vertexShader = VERT_PARS + shader.vertexShader.replace('#include <color_vertex>', VERT);
+    shader.fragmentShader = FRAG_PARS + shader.fragmentShader.replace('#include <color_fragment>', FRAG);
   });
 }
