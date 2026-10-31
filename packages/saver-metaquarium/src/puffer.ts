@@ -237,6 +237,9 @@ export interface PufferInput {
   pace: number;
   /** A vignette's `puff`, cued: seconds into the gesture and its envelope (0..1). It gulps itself round, holds, and lets go. */
   puffCue?: { at: number; weight: number } | null;
+  /** Acting in a vignette: it plays the script, not its own act schedule (a shy turn or a pirouette would turn it away
+   *  from where the script faces it). It hovers, and puffs only on cue. */
+  acting?: boolean;
 }
 
 export interface PufferState {
@@ -270,10 +273,10 @@ function bubbleOf(index: number, a: PufferActNow): PufferState['bubble'] {
 
 /** Sets the clips for `t`; `beat` is the distance swum. */
 export function pufferFrame(rig: PufferRig, t: number, index: number, beat: number, inp: PufferInput): PufferState {
-  const a = pufferAct(index, t);
+  const a: PufferActNow = inp.acting ? { act: null, weight: 0, into: 0, cycle: 0 } : pufferAct(index, t);
   const D = rig.durations;
   for (const n of PUFFER_CLIPS) set(rig, n, 0, 0);
-  let puff = pufferPuff(index, t);
+  let puff = inp.acting ? 0 : pufferPuff(index, t);
   // A cued puff takes the dial (and the gulps while it fills) whatever the schedule is doing
   const cue = inp.puffCue && inp.puffCue.weight > 0 ? inp.puffCue : null;
   if (cue) puff = Math.max(puff, cue.weight);

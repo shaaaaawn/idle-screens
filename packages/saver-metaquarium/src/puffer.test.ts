@@ -260,3 +260,16 @@ describe('a cued puff', () => {
     expect(pufferFrame(rig, t, 2, 0, { pace: 0, puffCue: { at: 0.3, weight: 0 } }).puff).toBe(calm.puff);
   });
 });
+
+describe('a blowfish acting in a vignette', () => {
+  it('plays the script, not its schedule: no act turns it away, and it puffs only on cue', () => {
+    const { rig } = rigged();
+    for (let t = 0; t < 120; t += 0.37) {
+      const s = pufferFrame(rig, t, 3, 0, { pace: 0, acting: true });
+      expect(s.act).toBeNull();
+      expect(s.face).toBe(0);
+      expect(s.puff).toBe(0);
+    }
+    expect(pufferFrame(rig, 10, 3, 0, { pace: 0, acting: true, puffCue: { at: 0.3, weight: 0.9 } }).puff).toBeCloseTo(0.9, 9);
+  });
+});

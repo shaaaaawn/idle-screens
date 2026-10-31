@@ -3780,7 +3780,7 @@ class TankInstance implements SaverInstance {
       }) : null;
       // A blowfish (puffer.ts): its puff, its act, the clips for both.
       const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, {
-        pace: speed * styleSpeed * style.travel, puffCue: act?.gesture?.name === 'puff' ? { at: act.gesture.at, weight: act.gesture.weight } : null,
+        pace: speed * styleSpeed * style.travel, puffCue: act?.gesture?.name === 'puff' ? { at: act.gesture.at, weight: act.gesture.weight } : null, acting: !!act,
       }) : null;
       // A hiccuping baby's speed, for the momentum its bubble leaves with.
       if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
