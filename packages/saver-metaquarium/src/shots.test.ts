@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickLandmark, SHOT_NAMES, shotBearing, shotPose, type ShotInput, type ShotPose } from './shots';
+import { CAST_FOV, castPose, pickLandmark, SHOT_NAMES, shotBearing, shotPose, type ShotInput, type ShotPose } from './shots';
 import { METAQUARIUM_PARAMS } from './manifest';
 import { PARAM_DOCS } from './guide';
 
@@ -64,5 +64,40 @@ describe('shotBearing (X438)', () => {
     expect(shotBearing('orbit', 350, 20)).toBe(10); // wraps
     expect(shotBearing('orbit', 0, -30)).toBe(330);
     expect(shotBearing('hero', 0, 0)).toBe(332); // the hero shot swings 28° off
+  });
+});
+
+describe('cast shot', () => {
+  const base = { azimuth: 0, elevation: 15, scale: 1, ceiling: 150, floor: () => 0, reach: 264 };
+  const out = (): ShotPose => ({ x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, fov: 0 });
+
+  it('aims at the leads\' middle and stands back as far as their spread needs', () => {
+    const tight = castPose([{ x: 10, y: 40, z: 0 }, { x: 30, y: 40, z: 0 }], 16, base, out())!;
+    expect([tight.tx, tight.ty, tight.tz]).toEqual([20, 40, 0]);
+    expect(tight.fov).toBe(CAST_FOV);
+    const wide = castPose([{ x: -60, y: 40, z: 0 }, { x: 100, y: 40, z: 0 }], 16, base, out())!;
+    const back = (p: ShotPose): number => Math.hypot(p.x - p.tx, p.y - p.ty, p.z - p.tz);
+    expect(back(wide)).toBeGreaterThan(back(tight));
+    expect(back(tight)).toBeGreaterThanOrEqual(45 - 1e-9);
+  });
+
+  it('moves continuously as the leads swim (no snap when one wanders off)', () => {
+    let prev: ShotPose | null = null, worst = 0;
+    for (let k = 0; k <= 200; k++) {
+      const x = -40 + k; // one lead swims 200 units while the others hold
+      const p = castPose([{ x: 0, y: 40, z: 0 }, { x: 10, y: 45, z: 10 }, { x, y: 50, z: -20 }], 16, base, out())!;
+      if (prev) worst = Math.max(worst, Math.hypot(p.x - prev.x, p.y - prev.y, p.z - prev.z));
+      prev = p;
+    }
+    expect(worst).toBeLessThan(3);
+  });
+
+  it('stays in the tank and in the water, and has nothing to frame without fish', () => {
+    const far = castPose([{ x: -110, y: 40, z: -110 }, { x: 110, y: 40, z: 110 }], 40, { ...base, scale: 3.6 }, out())!;
+    expect(Math.hypot(far.x, far.z)).toBeLessThanOrEqual(264 + 1e-9);
+    expect(far.y).toBeLessThanOrEqual(144);
+    const low = castPose([{ x: 0, y: -5, z: 0 }], 16, { ...base, floor: () => 20 }, out())!;
+    expect(low.ty).toBe(28);
+    expect(castPose([], 16, base, out())).toBeNull();
   });
 });
