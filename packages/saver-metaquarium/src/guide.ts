@@ -217,8 +217,8 @@ const NIGHT = { fogColor: '#0a0a1a', fogNear: 120, fogFar: 700 } as const;
 const STAGE = { fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, autoRotate: 0 } as const;
 /** Every recipe is close enough to see a face: eyes alive (an opt-in, like every look param). */
 const ALIVE = { eyeLife: 1 } as const;
-/** The polished light: highlights roll off, shafts are volume, fish carry a rim and never slice the lens, the frame is graded. */
-const CINEMATIC = { highlights: 1, raySoftness: 1, nearFade: 1, finish: 0.6 } as const;
+/** The polished look: highlights roll off, shafts are volume, nothing slices the lens, corners darken, the frame is graded. */
+const CINEMATIC = { highlights: 1, raySoftness: 1, nearFade: 1, voxelAO: 1, fishAO: 1, finish: 0.6 } as const;
 
 export const RECIPES: readonly Recipe[] = [
   {
@@ -292,7 +292,7 @@ export const RECIPES: readonly Recipe[] = [
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
   },
   {
-    id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
+    id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance aerobics in unison, an instructor in front.',
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
   },
   {
@@ -307,23 +307,23 @@ export const RECIPES: readonly Recipe[] = [
       cameraFollow: 0, followDistance: 55, followAngle: 130 },
   },
   {
-    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',
+    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, feelers pool green on the sand, the camera beside one.',
     params: { ...ALIVE, ...NIGHT, fogColor: '#060612', floorColor: '#141020', fishMix: 'snail:6', snailShell: 'glow', floraDensity: 0.2, marineSnow: 0.3, finish: 0.6,
       cameraFollow: 1, followDistance: 40, followAngle: 140 },
   },
   {
-    id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast framed close wherever it swims, in soft shafts, each fish over its shadow. The polished look.',
+    id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast framed close wherever it swims, in soft shafts, each fish over its shadow.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'reef', fishMix: 'seaturtle:1@patrol, blowfish:1, octopus:1@bottom, dori:5@school, crab:1', floraDensity: 0.45, marineSnow: 0.3,
       swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.5, fishAmbient: 0.5, caustics: 0.6, depthOfField: 0.4, ambientOcclusion: 0.8, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
   },
   {
-    id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish under jellyfish lanterns, a shark sliding through, every outline rimmed in light.',
+    id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish under jellyfish lanterns, a shark sliding through, outlines rimmed in light.',
     params: { ...ALIVE, ...CINEMATIC, finish: 0.75, environment: 'abyss', fishMix: 'glowfish:2@hover, babyfish:1@hover, shark:1@patrol, babyfish:2, hackerfish:1',
       propMix: 'crystal:2@druse/cyan, crystal:1@spire/hotpink', fishLook: 'neon', fishGlow: 0.8, fishRim: 0.9, sceneryShadows: 1, marineSnow: 0.5, swimSpeed: 0.5, skyLanterns: 0.6, skyHeight: 0.35,
       shot: 'cast', cameraElevation: 8, autoRotate: 0.4 },
   },
   {
-    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes, seen high through a tilt-shift lens: a model village.',
+    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes, seen through a tilt-shift lens.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', floorKind: 'flat', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
       fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 8s: a >centre, b >centre @a | 6s: a @b talk, b @a nod | 8s: c >centre, a @c, b @c | 9s: a b c circle centre | 8s: a >home1in, b >home2in, c >home3in',
