@@ -121,6 +121,10 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** Light shafts as light in the water rather than sheets of it: their sides
+   *  melt, faint filaments run down them, their feet fade into the floor.
+   *  0 is the classic flat cone. */
+  raySoftness: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Caustics: the net of light a rippled surface throws on the floor, rocks,
    *  plants and fish — sharp near the surface, broad and dim deep down,
    *  brightest on faces that look up. 0 compiles the stock programs. */
@@ -235,6 +239,11 @@ export const METAQUARIUM_PARAMS = {
    *  banding, and restrained bloom on high-end devices. 0 draws straight to
    *  the screen as before; the low tier never runs it. */
   finish: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Bright light rolls off instead of clipping: shafts, glare and glow that
+   *  stack past white ease into it with their hue kept, so a fish in a beam
+   *  stays a fish. The brightest seventh of the range is compressed a little.
+   *  0 draws as before; mid and high tiers on WebGL2. */
+  highlights: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Metallic plates read as metal (a generated chrome matcap — reflection
    *  with no environment map and no lights). `off` is non-metallic instead —
    *  still lit under `fishLighting: 'lit'`; pair with `fishLighting: 'flat'`

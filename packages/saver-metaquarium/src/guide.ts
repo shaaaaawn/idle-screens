@@ -45,6 +45,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
+  highlights: 'Bright light rolls off instead of clipping, 0–1 (default 0): a fish in a god ray stays a fish, bright water keeps its blue. Bright rooms (reef, ice, lagoon) want it; pairs with `finish`. Mid/high tiers.',
   fishUrl: 'The single model used when `fishMix` is empty: ipfs://, https://assets.idlescreens.com/, or a URL on the page\'s own origin. Any other host is refused and the default fish swims.',
   fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled creatures: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace (swimSpeed does not hurry them): crab (climbs rocks, forages, pinches, waves), starfish (walks upright too; dances with `starfishDance`), snail (very slow; hides in its shell). `dot` (experimental) is Dot the courier, a box on two legs with a screen face; `dolphin` (experimental) chatters, flips and blows bubbles. Both act out vignette gestures. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel. Only the page\'s own origin or the shipped copy is used.',
@@ -91,6 +92,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   floorKind: 'Floor shape: `auto` follows the environment, `flat`, or terrain `dunes`, `ridges`, `basin`, `shelf` (the town on a terraced plateau), `trench` (a deep channel across the front), `terraces` (tiers behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Light shafts from the surface, within device budget: 5 on the high tier, 2 on standard, none on the lowest tier in a room with a water surface (reef, kelp, ice, lagoon; abyss, vent and universe keep 2). Where dropped, perceiveChannel reads room.rayStrength 0.',
+  raySoftness: 'Shafts as volume, not sheets, 0–1 (default 0): the sides melt, faint filaments run down them, their feet fade into the floor. 1 for anything cinematic.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',

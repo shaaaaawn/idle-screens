@@ -76,6 +76,7 @@ import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
+import { HighlightPass, canHoldHighlights } from './highlights';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
@@ -578,16 +579,20 @@ export function buildRays(count: number, color: string, y: number, strength: num
     depthWrite: false,
     blending: AdditiveBlending,
     side: DoubleSide,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, uSoft: { value: 0 }, ...causticUniforms() },
     vertexShader: `
       uniform float uTime;
       attribute float aPhase;
       varying float vY;
       varying vec3 vW;
       varying float vPhase;
+      varying vec3 vN;
+      varying float vU;
       void main() {
         vY = uv.y;
+        vU = uv.x;
         vPhase = aPhase;
+        vN = mat3(modelMatrix) * normal;
         vec4 w = modelMatrix * vec4(position, 1.0);
         // A slow, small sway about the shaft's source end (uv.y = 1): about
         // 0.03 rad, its own phase and a different period each way, so the
@@ -600,10 +605,12 @@ export function buildRays(count: number, color: string, y: number, strength: num
       }`,
     fragmentShader: `
       ${CAUSTIC_FUNCS}
-      uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime; uniform float uSoft;
       varying float vY;
       varying vec3 vW;
       varying float vPhase;
+      varying vec3 vN;
+      varying float vU;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone — each shaft on its own
@@ -614,6 +621,19 @@ export function buildRays(count: number, color: string, y: number, strength: num
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
         float a = fade * uStrength * 0.13 * breathe;
+        // raySoftness: light in a volume, not a sheet. Through a round shaft
+        // the path in the light is longest down its middle and nothing at its
+        // rim — |N.V| is that profile — so the sides melt instead of ending in
+        // a ruled edge, and the cone's facets go with them. 1.55 keeps about
+        // the light it had. Faint filaments run down it (light through a
+        // moving surface is never even), and its foot fades longer into the floor.
+        if (uSoft > 0.0) {
+          float facing = abs(dot(normalize(vN), normalize(cameraPosition - vW)));
+          float tau = 6.2831853;
+          float streak = 0.78 + 0.22 * sin(vU * tau * 7.0 + vPhase * 2.0) * sin(vU * tau * 3.0 - vPhase + uTime * 0.05);
+          float foot = smoothstep(0.0, 0.5, vY) / max(smoothstep(0.0, 0.3, vY), 1e-3);
+          a *= mix(1.0, 1.55 * pow(facing, 1.5) * streak * min(foot, 1.0), uSoft);
+        }
         // With caustics on, a shaft is the same rippled light that lands on
         // the floor: brighter where the net focuses at the surface above this
         // streak, darker between, with slow bands running down it.
@@ -865,6 +885,11 @@ class TankInstance implements SaverInstance {
   /** The finish (finish.ts): made the first frame `finish` goes above 0 on a tier that allows it. */
   private finishPass: FinishPass | null = null;
   private finishAmount = 0;
+  /** The highlights pass (highlights.ts): made the first frame `highlights` goes above 0 on a tier and GPU that allow it. */
+  private highlightPass: HighlightPass | null = null;
+  private highlightAmount = 0;
+  /** Whether the renderer's own render has been wrapped for the post passes (it never is while both are 0). */
+  private postWrapped = false;
   private readonly motes: Points;
   private readonly moteMat: ShaderMaterial;
   /** The room. Rebuilt only when the environment inputs change — never per
@@ -1402,6 +1427,7 @@ class TankInstance implements SaverInstance {
     if (this.rayMat) {
       const s = rayStrength >= 0 ? rayStrength : this.presetRayStrength;
       this.rayMat.uniforms.uStrength!.value = s;
+      this.rayMat.uniforms.uSoft!.value = this.num('raySoftness');
       this.rayMat.visible = s > 0;
     }
   }
@@ -2080,21 +2106,33 @@ class TankInstance implements SaverInstance {
   }
 
   /**
-   * The finish wraps the renderer's own render for THIS scene only (the
-   * passes it draws go straight through), so every path that draws the tank —
-   * the loop, stills, capture — gets it, and at 0 the call is the original.
-   * Mid and high tiers only; bloom on high.
+   * The post passes wrap the renderer's own render for THIS scene only (the
+   * passes they draw go straight through), so every path that draws the tank —
+   * the loop, stills, capture — gets them, and while both are 0 the call is
+   * the original. The highlights pass draws the scene; the finish works on
+   * the canvas after it. Mid and high tiers only; bloom on high.
    */
   private updateFinish(): void {
-    const amount = this.num('finish');
     const tier = this.quality.glowLights;
-    this.finishAmount = tier >= 3 ? amount : 0;
-    if (this.finishAmount <= 0 || this.finishPass) return;
-    const pass = new FinishPass({ bloom: tier >= 4 });
-    this.finishPass = pass;
+    this.finishAmount = tier >= 3 ? this.num('finish') : 0;
+    this.highlightAmount = tier >= 3 ? this.num('highlights') : 0;
+    if (this.finishAmount > 0 && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
+    if (this.highlightAmount > 0 && !this.highlightPass) {
+      if (canHoldHighlights(this.renderer)) this.highlightPass = new HighlightPass(this.quality.antialias ? 4 : 0);
+      else this.highlightAmount = 0;
+    }
+    if (this.highlightAmount <= 0) this.highlightPass?.release();
+    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0)) return;
+    this.postWrapped = true;
     const raw = this.renderer.render.bind(this.renderer);
     this.renderer.render = (scene, camera) => {
-      if (scene === this.scene && this.finishAmount > 0) pass.render(this.renderer, raw, scene, camera, this.finishAmount);
+      // Only the tank's own frame for the canvas: the passes' quads, the mirror, stills and captures go straight through.
+      if (scene !== this.scene || this.renderer.getRenderTarget() !== null) { raw(scene, camera); return; }
+      const hl = this.highlightAmount > 0 ? this.highlightPass : null;
+      const fin = this.finishAmount > 0 ? this.finishPass : null;
+      if (hl && fin) fin.renderFrom(this.renderer, raw, hl.draw(this.renderer, raw, scene, camera), this.finishAmount, this.highlightAmount);
+      else if (hl) hl.render(this.renderer, raw, scene, camera, this.highlightAmount);
+      else if (fin) fin.render(this.renderer, raw, scene, camera, this.finishAmount);
       else raw(scene, camera);
     };
   }
@@ -4360,6 +4398,7 @@ class TankInstance implements SaverInstance {
   dispose(): void {
     this.disposed = true;
     this.finishPass?.dispose();
+    this.highlightPass?.dispose();
     this.mirror?.dispose();
     this.stop();
     for (const f of this.fish) {
