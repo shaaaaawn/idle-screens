@@ -69,7 +69,7 @@ import {
   formationExtent, formationSlot, swimStyleOf, type FormationShape, type SwimStyleSpec, autoStyleFor, formationBreathe, idleSway, fitBreath } from './swim';
 import { maneuverAt, maneuverSpecOf } from './maneuver';
 import { avoidFrame, crowding, type AvoidBody, type Crowding } from './avoid';
-import { ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
+import { CAST_LEADS, castPose, ORBIT_FOV, pickLandmark, shotAzimuthOffset, SHOT_NAMES, shotBearing, shotPose, type ShotName, type ShotPose } from './shots';
 import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
@@ -2028,6 +2028,37 @@ class TankInstance implements SaverInstance {
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
   }
 
+  /**
+   * `shot: cast` (shots.ts castPose), once the fish have moved this frame: the
+   * leads (the first slots of the mix), aimed at their middle, as far back as
+   * their spread needs, and out of the scenery's way (sightline.ts: a castle
+   * wall or a home between the camera and the leads pulls it in or lifts it).
+   * Until a lead is placed it keeps the hero stand placeShot gave it.
+   */
+  private placeCastShot(): void {
+    const pts: { x: number; y: number; z: number }[] = [];
+    let body = 0;
+    for (const f of this.fish) {
+      if (!f || !f.group.visible || f.index >= CAST_LEADS) continue;
+      pts.push(f.group.position);
+      body = Math.max(body, FISH_LENGTH * this.fishSizeAt(f.index));
+    }
+    const ceiling = this.ceiling ? this.ceiling.position.y : null;
+    const p = castPose(pts, body, {
+      azimuth: this.num('cameraAzimuth') + this.turned, elevation: this.num('cameraElevation'), scale: this.num('cameraDistance') / 110,
+      ceiling, floor: (x, z) => this.floorHeightAt?.(x, z) ?? 0, reach: BOUNDS.radius * 2.2,
+    }, this.shotScratch);
+    if (!p) return;
+    const c = clearSightline({
+      target: { x: p.tx, y: p.ty, z: p.tz }, camera: { x: p.x, y: p.y, z: p.z }, height: this.sightHeight(),
+      minBack: Math.max(30, body * 1.5), amount: 1, ceiling,
+    });
+    p.x = c.x; p.y = c.y; p.z = c.z;
+    this.camera.position.set(p.x, p.y, p.z);
+    this.camera.lookAt(p.tx, p.ty, p.tz);
+    if (this.camera.fov !== p.fov) { this.camera.fov = p.fov; this.camera.updateProjectionMatrix(); }
+  }
+
   /** A fish's body length against a minted fish, now: its breed's nominal
    *  size × its token's `*size` × its own seeded spread (`sizeVariance`) ×
    *  `fishSize`. Everything that spaces fish in body lengths reads this. */
@@ -3930,6 +3961,7 @@ class TankInstance implements SaverInstance {
     // Riding in a floor walker: its own eye height, as big as it is drawn (pov.ts).
     const followFish = followPov ? this.fish[followSlot] : undefined;
     const followEye = followFish && followFish.eye > 0 ? followFish.eye * followFish.baseScale * this.fishSizeAt(followSlot) : 0;
+    if (followSlot < 0 && this.str('shot') === 'cast') this.placeCastShot();
     this.placeFollowCamera(followSlot, followBack, followPov, followLen, followEye);
     this.viewerAt.copy(this.camera.position); this.viewerSeen = true;
     this.burps?.update(tSec, this.ceiling ? this.ceiling.position.y - 1 : Infinity);
