@@ -44,6 +44,11 @@ export function faceOf([a, b, c]) {
   const axis = [0, 1, 2].reduce((best, i) => (Math.abs(n[i]) > Math.abs(n[best]) ? i : best), 0);
   if (Math.abs(n[axis]) / L < 0.999) return null; // not a voxel face
   const [ua, va] = [0, 1, 2].filter((i) => i !== axis);
+  // Square to the lattice, too: half a voxel face is a right triangle whose legs run along the axes. A face
+  // flat to an axis but turned in its plane (a starfish arm laid on a grid of its own) has none — taken
+  // for one, its bounding box was merged in its place, and its glowing tips came out as broken wings.
+  const legs = [[a, b], [b, c], [c, a]].filter(([p, q]) => Math.abs(p[ua] - q[ua]) < 1e-5 || Math.abs(p[va] - q[va]) < 1e-5).length;
+  if (legs < 2) return null;
   const us = [a[ua], b[ua], c[ua]], vs = [a[va], b[va], c[va]];
   return { axis, sign: Math.sign(n[axis]), plane: a[axis], ua, va, u0: Math.min(...us), u1: Math.max(...us), v0: Math.min(...vs), v1: Math.max(...vs) };
 }
