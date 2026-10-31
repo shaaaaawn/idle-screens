@@ -2,7 +2,7 @@ import { AnimationClip, AnimationMixer, Bone, Group, type Object3D, type Skinned
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import {
-  BANK, BUBBLE_AT, DOLPHIN_CATCH, dolphinBank, dolphinLeap, dolphinLeapAhead, dolphinLeapAt, dolphinLeapStart, dolphinTurn, LEAP, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
+  BANK, BUBBLE_AT, DOLPHIN_CATCH, DOLPHIN_CHARACTER, dolphinBank, dolphinUpright, UPRIGHT, dolphinLeap, dolphinLeapAhead, dolphinLeapAt, dolphinLeapStart, dolphinTurn, LEAP, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
   dolphinGaze, dolphinHold, dolphinLook, dolphinMoment, dolphinPersonality, MOMENT_LENGTH, PUPIL_SLIDE, pupilSlide, rigDolphin,
   type DolphinRig,
 } from './dolphin';
@@ -463,5 +463,50 @@ describe('dolphin: banked turns and breaches', () => {
     // In and out of its route with no step: its height moves smoothly from the run's start to the dive's end.
     for (let u = 0.02; u < LEAP.run + LEAP.air + LEAP.dive; u += 0.02) expect(Math.abs(at(u).y - at(u - 0.02).y), `u ${u}`).toBeLessThan(4);
     expect(at(0.01).y).toBeCloseTo(routeY, 0);
+  });
+});
+
+describe('dolphin: standing up as a character', () => {
+  it('stands for a character beat once it has arrived, stays up between bits, swims flat to move and for a flip', () => {
+    const v = parseVignette('3s: a =left | 3s: a >centre | 3s: a talk | 2s: a nod | 2s: b talk | 2s: a bow | 3s: a >left | 2s: a hop', OPEN_MARKS);
+    expect(v.problems).toEqual([]);
+    const up = (t: number) => dolphinUpright(v, 0, t);
+    expect(up(1)).toBe(0);                 // at its first mark, no gesture
+    expect(up(4.5)).toBe(0);               // travelling
+    expect(up(7.5)).toBeGreaterThan(0.99); // talking
+    expect(up(10)).toBeGreaterThan(0.99);  // nodding
+    expect(up(12)).toBeGreaterThan(0.99);  // listening to b, where it stands: still up
+    expect(up(14)).toBeGreaterThan(0.99);  // its bow
+    expect(up(16.5)).toBeLessThan(0.01);   // walking off
+    // Once up, it stays up while it stays put — after a short heckle too, until its next move.
+    const w = parseVignette('3s: a =left | 2s: a talk | 3s: b talk | 3s: a >right', OPEN_MARKS);
+    expect(dolphinUpright(w, 0, 6)).toBeGreaterThan(0.99);
+    expect(dolphinUpright(w, 0, 7.0)).toBeGreaterThan(0.99); // it lies down over the 0.7 s before it moves off
+    expect(up(18)).toBe(0);                // a flip is a dolphin thing
+    // Eased: no step anywhere.
+    for (let t = 0; t < v.duration; t += 0.02) expect(Math.abs(up(t + 0.02) - up(t)), `t ${t}`).toBeLessThan(0.05);
+    expect(DOLPHIN_CHARACTER.has('hop')).toBe(false);
+  });
+
+  it('standing, it tips its head toward its chest: its nose drops toward its belly', async () => {
+    const b = Buffer.from((await BUNDLED_BREEDS.dolphin!()).default, 'base64');
+    const g = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+    const rig = rigDolphin(g.scene, g.animations)!;
+    const noseY = (upright: number): number => {
+      dolphinFrame(rig, 30, 0, 0, { pace: 0, flurry: 0, actor: true, upright });
+      g.scene.updateMatrixWorld(true);
+      let best = -Infinity, y = 0;
+      const v3 = new Vector3();
+      g.scene.traverse((o) => {
+        const m = o as SkinnedMesh;
+        if (!m.isSkinnedMesh) return;
+        const p = m.geometry.getAttribute('position');
+        for (let i = 0; i < p.count; i++) { m.getVertexPosition(i, v3).applyMatrix4(m.matrixWorld); if (v3.z > best) { best = v3.z; y = v3.y; } }
+      });
+      return y;
+    };
+    // In its own frame the belly is down: the nose sits lower standing than not (before the tank pitches it up).
+    // The head's sign is CURL_SHARE's, so this also holds a hard turn's curl to bending the head belly-ward.
+    expect(noseY(1)).toBeLessThan(noseY(0) - UPRIGHT.nod * 3);
   });
 });
