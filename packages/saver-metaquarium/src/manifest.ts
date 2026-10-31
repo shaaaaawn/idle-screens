@@ -34,7 +34,8 @@ export const METAQUARIUM_PARAMS = {
   followDistance: { type: 'number', default: 45, min: 0, max: 160, ease: 'smooth' },
   /** Where round the followed fish the chase camera stands, degrees: 0 behind
    *  it (the default), 90 at its side, 180 in front looking back at its face
-   *  — a hackerfish's screen, a crab's smile. */
+   *  — a hackerfish's screen, a crab's smile. A choreographed dancer is framed
+   *  from its stage's front instead, so a spin turns the dancer, not the shot. */
   followAngle: { type: 'number', default: 0, min: -180, max: 180, ease: 'smooth' },
   /** Keep the followed fish in view (sightline.ts): when a home, a wall, a lamp
    *  or a kelp stand comes between it and the chase camera, the camera rises a
@@ -42,6 +43,15 @@ export const METAQUARIUM_PARAMS = {
    *  a game camera's spring arm does — eased, never a snap. 0 (default) is the
    *  plain chase camera; 1 the full arm. Not the fish's-eye view (it has none). */
   followAvoid: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The chase camera's height over the followed fish's feet, in its body
+   *  lengths. -1 (default) rides a little above it, looking at its middle;
+   *  set, the camera stands at that height aimed at its feet — 0.1–0.3 on a
+   *  long lens is a shot of a walker's feet, the floor behind them. */
+  followHeight: { type: 'number', default: -1, min: -1, max: 3, ease: 'smooth' },
+  /** The chase camera's lens: degrees of view, top to bottom. 0 (default) is
+   *  the orbit camera's 55; 20–30 is a long lens — flatter and tighter, from
+   *  further back. */
+  followLens: { type: 'number', default: 0, min: 0, max: 90, ease: 'smooth' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },

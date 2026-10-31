@@ -18,7 +18,18 @@ describe('choreography: the sheet', () => {
     expect(lines.get('*')!.cues[0]).toMatchObject({ beats: 2.5, move: 'march', to: [1, -0.5], face: 90 });
   });
   it('anything after a cue that is not a modifier is named', () => {
-    expect(parseChoreography('4:march, x:jacks', MOVES).problems[0]).toMatch(/"x:jacks" is not >to/);
+    expect(parseChoreography('4:march, y:jacks', MOVES).problems[0]).toMatch(/"y:jacks" is not >to/);
+    expect(parseChoreography('4:march, x:jacks', MOVES).problems[0]).toMatch(/x:jacks/); // read as a speed, and refused
+  });
+  it('a speed plays the move faster or slower, within reason', () => {
+    const { lines, problems } = parseChoreography('4:march x2, 4:sway x0.5, 4:walk x99, 4:jacks xfast', MOVES);
+    expect(lines.get('*')!.cues.map((c) => c.rate)).toEqual([2, 0.5, 4, undefined]);
+    expect(problems[0]).toMatch(/speed "fast" is not a multiple/);
+  });
+  it('a pose holds a fraction of the move; anything else is named', () => {
+    const { lines, problems } = parseChoreography('4:rise =0.4, 4:jacks =0.25, 4:kick =1.5, 4:spin =', MOVES);
+    expect(lines.get('*')!.cues.map((c) => c.pose)).toEqual([0.4, 0.25, undefined, undefined]);
+    expect(problems.join(' ')).toMatch(/pose "1.5" is not a fraction/);
   });
   it('a sheet with no actor is everyone’s', () => {
     expect([...parseChoreography('4:march, 4:jacks', MOVES).lines.keys()]).toEqual(['*']);

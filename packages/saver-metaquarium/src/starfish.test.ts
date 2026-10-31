@@ -452,6 +452,45 @@ describe('a choreographed starfish (choreo.ts)', () => {
     const centre = starfishFrame(rig, input(5, 0, dance('4:lie >centre', 4 - 1e-9, { x: 6, z: 2, cx: 0, cz: 0 })), blank());
     expect([centre.focusX, centre.focusZ].map((v) => +v.toFixed(6))).toEqual([0, 0]);
   });
+  it('a walk that travels steps as far as it goes; in place it keeps its own pace', () => {
+    const rig = rigged();
+    // 4 beats from home to two spacings right: the clip has run exactly the ground covered, in strides
+    for (const b of [1, 2, 3.5]) {
+      const out = starfishFrame(rig, input(5, 0, dance('4:walk >right', b)), blank());
+      const moved = Math.hypot(out.focusX - starfishFrame(rigged(), input(5, 0, dance('4:walk >right', 0)), blank()).focusX, 0);
+      expect(rig.actions.walk.time).toBeCloseTo(((moved / (WALK_STRIDE * 0.375)) * DUR.walk!) % DUR.walk!, 6);
+    }
+    starfishFrame(rig, input(5.25, 0, dance('4:walk', 2)), blank());
+    expect(rig.actions.walk.time).toBeCloseTo(5.25 % DUR.walk!, 9); // in place: the clock
+    starfishFrame(rig, input(5, 0, dance('4:crawl >left', 2)), blank());
+    expect(rig.actions.crawl.time).toBeCloseTo(((10 / (STRIDE * 0.375)) * DUR.crawl!) % DUR.crawl!, 6); // half way: one spacing
+  });
+  it('a chase camera rides with the stage, not the spin: a dancer\'s route points to the class\'s front', () => {
+    const rig = rigged();
+    for (const b of [0.5, 1, 1.5]) {
+      const out = starfishFrame(rig, input(5, 0, dance('2:spin ~360', b, { yaw: Math.PI / 2 })), blank());
+      expect([out.tx, out.tz].map((v) => +v.toFixed(9))).toEqual([1, 0]);
+      expect(out.trailX).toBeCloseTo(out.focusX - 16.2 * 2, 9);
+    }
+  });
+  it('a pose holds its clip at that fraction, its weight where that fraction has it, and moves into the next', () => {
+    const rig = rigged();
+    const sitting = starfishFrame(rig, input(5, 0, dance('4:lie, 4:rise =0.5, 4:hold', 6)), blank());
+    expect(rig.actions.rise.time).toBeCloseTo(0.5 * DUR.rise!, 9); // held, half way up
+    const later = starfishFrame(rigged(), input(9, 0, dance('4:lie, 4:rise =0.5, 4:hold', 7)), blank());
+    expect(later.y).toBeCloseTo(sitting.y, 9); // still: the pose does not move on
+    starfishFrame(rig, input(5, 0, dance('4:jacks =0.25, 4:jacks', 3.9)), blank());
+    expect(weight(rig, 'jacks')).toBe(1); // the same clip: it cuts to the next on the half beat, not a frozen carry-on
+    starfishFrame(rig, input(5, 0, dance('4:jacks =0.25, 4:jacks', 3.6)), blank());
+    expect(rig.actions.jacks.time).toBeCloseTo(0.25 * DUR.jacks!, 9);
+  });
+  it('a speed runs the clip that many times as fast: footwork on the eighths', () => {
+    const rig = rigged();
+    starfishFrame(rig, input(5, 0, dance('4:march x2', 1.5)), blank());
+    expect(rig.actions.march.time).toBeCloseTo((3 / 4) * DUR.march!, 9); // a beat and a half in: three beats of the bar
+    starfishFrame(rig, input(5.25, 0, dance('4:walk x2', 2)), blank());
+    expect(rig.actions.walk.time).toBeCloseTo((5.25 * 2) % DUR.walk!, 9); // in place: the clock, twice as fast
+  });
   it('turns, faces the camera and leaps', () => {
     const rig = rigged();
     const half = starfishFrame(rig, input(5, 0, dance('4:spin ~360', 2)), blank());
