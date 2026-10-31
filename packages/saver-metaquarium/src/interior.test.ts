@@ -101,4 +101,24 @@ describe('room scale (X447)', () => {
     expect(roomScale(0.6)).toBe(ROOM_MIN_SCALE);
     expect(roomScale(1.3)).toBe(1.3);
   });
+
+  it('tags each lining crystal with its centre and reach, and nothing else', () => {
+    const g = room().room[0]!;
+    const fade = g.getAttribute('aMqFade'), pos = g.getAttribute('position');
+    expect(fade.itemSize).toBe(4);
+    expect(fade.count).toBe(pos.count);
+    let tagged = 0;
+    for (let i = 0; i < fade.count; i += 1) {
+      const w = fade.getW(i);
+      if (w <= 0) continue;
+      tagged += 1;
+      // The vertex lies inside its crystal's sphere.
+      const d = Math.hypot(pos.getX(i) - fade.getX(i), pos.getY(i) - fade.getY(i), pos.getZ(i) - fade.getZ(i));
+      expect(d).toBeLessThanOrEqual(w);
+    }
+    // 36 vertices a crystal; the dome and the furniture carry none.
+    expect(tagged % 36).toBe(0);
+    expect(tagged).toBeGreaterThan(0);
+    expect(tagged).toBeLessThan(fade.count);
+  });
 });

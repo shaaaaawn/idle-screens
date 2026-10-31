@@ -257,6 +257,10 @@ export const METAQUARIUM_PARAMS = {
    *  homes, the castle, pyramids, wild geodes, lamps — so it stands on the
    *  sand instead of floating over it. 0 is none. */
   sceneryShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** The plants' cubes darken where they meet each other and the sand — the
+   *  corner shading every voxel renderer has — so a coral reads solid instead
+   *  of as flat cut-outs. Baked once, the first frame it is on; every tier. 0 is off. */
+  voxelAO: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** A creature that comes too close to the camera dissolves (an ordered
    *  dither by depth) instead of being cut by the lens: at 1 it is whole
    *  beyond about a fish and a half and gone inside about half that. 0 is off. */

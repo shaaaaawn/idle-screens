@@ -8,6 +8,7 @@ import {
 import { accentOf, emittersOf, growCluster, HABIT_LENGTH, measureShards, type Cluster, type CrystalHabit, type CrystalRng, type Emitter } from './crystals';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { batch, FrontSide } from './scenery-paint';
+import { patchRoomFade } from './nearfade';
 import { buildFlora, FLORA_COLOR, FLORA_LAMP_EMISSIVE, FLORA_PARS, MAX_FLORA_FISH, MQ_FISH_GLSL, type FloraSpecies, type FloraStem, FLORA_SWAY, FLORA_VERTEX, SPORE_VERTEX } from './flora';
 import { buildGeode, GEODE_HABITS } from './geode';
 import type { StoneStyle } from './stone';
@@ -124,6 +125,9 @@ export interface Scenery {
   stems: FloraStem[];
   /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
   floraMaterials: Material[];
+  /** The plants' one mesh (voxel-ao.ts bakes its occlusion the first frame `voxelAO` is on), and the ground they were grown on. */
+  flora: Mesh | null;
+  floraGround: (x: number, z: number) => number;
   /** The wild geodes' material, which takes the light field too. */
   geodeMaterials: Material[];
   /** The stage set's (club.ts): they take the spot and crystal light like the geodes. */
@@ -988,7 +992,8 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
   particles(false, counts.snow);
   // Closed solids draw front faces only — half the fragment work of the
   // DoubleSide everything used to wear; only the open geode throat needs both.
-  batch(group, shellParts, 'geode-room', FrontSide);
+  const shell = batch(group, shellParts, 'geode-room', FrontSide);
+  if (shell) patchRoomFade(shell.material as Material);
   batch(group, interiors, 'geode-interiors');
   batch(group, details, 'voxel-furnishings', FrontSide);
   const stoneGround = stoneTop(boulders);
@@ -1009,6 +1014,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     setSurface(y) { bubbleSurface = y; },
     group, counts, vents, emitters: homeLights, moving: movingOut, marks, paths: [...(network?.segments ?? []), ...plaza], cover: coverPaint, rockClusters,
     floraMaterials: plants ? [plants.material as Material] : [],
+    flora: plants, floraGround: terrain,
     geodeMaterials: geodeMesh ? [geodeMesh.material as Material] : [],
     stageMaterials: stageSet?.materials ?? [],
     setFish(fish) {
