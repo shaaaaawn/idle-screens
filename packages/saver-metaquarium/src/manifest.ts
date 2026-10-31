@@ -246,6 +246,10 @@ export const METAQUARIUM_PARAMS = {
    *  of floating in front of the floor. 0 is none (floor walkers always
    *  have theirs). */
   fishShadows: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
+  /** Seconds a fish takes to dissolve into the water when it first arrives
+   *  (its model loads a few seconds into a scene), instead of popping in.
+   *  0 (default) pops. */
+  fishFadeIn: { type: 'number', default: 0, min: 0, max: 3, ease: 'step' },
   /** A creature that comes too close to the camera dissolves (an ordered
    *  dither by depth) instead of being cut by the lens: at 1 it is whole
    *  beyond about a fish and a half and gone inside about half that. 0 is off. */
