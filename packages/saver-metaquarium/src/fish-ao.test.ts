@@ -1,4 +1,5 @@
-import { BufferAttribute, BufferGeometry, Color, Group, Matrix4, Mesh, MeshLambertMaterial, ShaderLib, type Material } from 'three';
+import { BufferAttribute, BufferGeometry, Color, Group, Matrix4, Mesh, MeshLambertMaterial, ShaderLib, ShaderMaterial, type Material } from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { describe, expect, it } from 'vitest';
 import { bakeFishOcclusion, FISH_AO, fishOcclusion, patchFishAO, voxelStep, type FishPart } from './fish-ao';
 import { CubeWriter } from './scenery-paint';
@@ -78,5 +79,37 @@ describe('fish occlusion', () => {
     (coat as Material).onBeforeCompile(s as never, null as never);
     expect(s.uniforms.uMqFishAO).toBe(FISH_AO);
     expect(s.fragmentShader).toMatch(/diffuseColor\.rgb \*= 1\.0 - 0\.62 \* uMqFishAO \* vMqFishOcc;/);
+  });
+
+  it('reads indexed geometry, as a GLB carries it, the same as unrolled', () => {
+    const cells: Array<[number, number, number]> = [[-1, 0, 0], [0, 0, 0], [1, 0, 0], [0, 1, 0]];
+    const flat = part(cells), g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(new Float32Array(flat.pos), 3));
+    const indexed = mergeVertices(g);
+    const occIdx = fishOcclusion([{ pos: indexed.getAttribute('position').array, index: indexed.index!.array }])[0]!;
+    // A shared vertex takes the darkest of its faces; the step at the head's foot is dark either way.
+    expect(Math.max(...occIdx)).toBeCloseTo(Math.max(...fishOcclusion([flat])[0]!), 5);
+  });
+
+  it('gives no occlusion to a mesh with no axis-aligned faces', () => {
+    const tilted = { pos: [0, 0, 0, 1, 0.3, 0, 0, 1, 0.7], index: null };
+    expect(Array.from(fishOcclusion([tilted])[0]!)).toEqual([0, 0, 0]);
+  });
+
+  it('bakes only the meshes still missing it, and leaves shader materials without the chunks alone', () => {
+    const fish = new Group();
+    const geo = (cells: Array<[number, number, number]>): BufferGeometry => { const g = new BufferGeometry(); g.setAttribute('position', new BufferAttribute(new Float32Array(part(cells).pos), 3)); return g; };
+    const done = new Mesh(geo([[0, 0, 0]]), new MeshLambertMaterial()), late = new Mesh(geo([[0, 1, 0]]), new MeshLambertMaterial());
+    done.geometry.userData.mqFishOcc = true;
+    fish.add(done, late);
+    expect(bakeFishOcclusion(fish)).toBe(true);
+    expect(done.geometry.getAttribute('aMqFishOcc')).toBeUndefined();
+    expect(late.geometry.getAttribute('aMqFishOcc')).toBeDefined();
+    const raw = new ShaderMaterial({ vertexShader: 'void main(){}', fragmentShader: 'void main(){}' }); raw.userData.mqFish = true;
+    patchFishAO(raw);
+    const r = { uniforms: {} as Record<string, unknown>, vertexShader: 'void main(){}', fragmentShader: 'void main(){}' };
+    raw.onBeforeCompile(r as never, null as never);
+    expect(r.uniforms.uMqFishAO).toBeUndefined();
+    expect(bakeFishOcclusion(new Group())).toBe(false);
   });
 });
