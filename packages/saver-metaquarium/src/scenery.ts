@@ -114,6 +114,9 @@ export interface Scenery {
   moving: Emitter[];
   /** Plant tips and the room their sway sweeps: what the shoal keeps above (canopy.ts). */
   canopyTips: CanopyTip[];
+  /** What stands on the floor — rocks, homes, the castle, pyramids, wild geodes, lamps, the town's props:
+   *  its foot (x, y, z), its radius and height. Where `sceneryShadows` lays a shadow. */
+  footprints: ReadonlyArray<{ x: number; y: number; z: number; r: number; h: number }>;
   /** Kelp and sea-whip stalk a seahorse's tail can hold (flora.ts `stemAt` says where each is at t). */
   stems: FloraStem[];
   /** The plants' own material (not the lamps'): what takes the light field (flora-light.ts). */
@@ -1002,6 +1005,7 @@ export function buildScenery(clusters: readonly Cluster[], rng: CrystalRng,
     },
     stems: field.stems,
     canopyTips: field.tips.map((l) => ({ x: l.x, z: l.z, y: l.y + 2 * s, r: 6 * s + swayReach(l.y - l.root) * Math.max(1, l.flex) })),
+    footprints: obstacles.map((o) => ({ ...o })),
     drawCalls: group.children.length,
     triangles: group.children.reduce((n, o) => o instanceof Mesh
       ? n + o.geometry.getAttribute('position').count / 3 : n, 0),

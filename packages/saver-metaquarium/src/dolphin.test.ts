@@ -1,10 +1,12 @@
-import { AnimationClip, Bone, Group, Vector3, VectorKeyframeTrack } from 'three';
+import { AnimationClip, AnimationMixer, Bone, Group, type Object3D, type SkinnedMesh, Vector3, VectorKeyframeTrack } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import {
   BUBBLE_AT, DOLPHIN_CATCH, dolphinTurn, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
   dolphinGaze, dolphinHold, dolphinLook, dolphinMoment, dolphinPersonality, MOMENT_LENGTH, PUPIL_SLIDE, pupilSlide, rigDolphin,
   type DolphinRig,
 } from './dolphin';
+import { BUNDLED_BREEDS } from './breeds';
 import { actorTravel } from './dot';
 import { GESTURES, OPEN_MARKS, parseVignette, poseOf } from './vignette';
 
@@ -274,5 +276,94 @@ describe('dolphin: its eyes', () => {
     expect(dr.z).toBeCloseTo(-0.1 * PUPIL_SLIDE.back, 6);
     // Riding in its eye (no viewer): it watches where it is going.
     expect(dolphinLook(rig, 10, 0, { doing: 'chatter', into: 1 }, null)).toBe('ahead');
+  });
+});
+
+/**
+ * The real model, measured against the real animal (Fish 1998, J Exp Biol 201: Tursiops; Fish's
+ * kinematic regressions; the NOAA Fisheries side profile). Shape is judged as SHAPE — a cartoon may
+ * be plumper than life — so these pin where it goes wrong, not how fat it is.
+ */
+describe('dolphin: the real model, against the real animal', () => {
+  const load = async (): Promise<{ scene: Object3D; animations: AnimationClip[] }> => {
+    const b = Buffer.from((await BUNDLED_BREEDS.dolphin!()).default, 'base64');
+    return new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+  };
+  /** Every bind-pose vertex, in the model's frame (nose toward +z). */
+  const points = (scene: Object3D): Vector3[] => {
+    scene.updateMatrixWorld(true);
+    const out: Vector3[] = [];
+    scene.traverse((o) => {
+      const m = o as SkinnedMesh;
+      if (!m.isMesh) return;
+      const p = m.geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) out.push(new Vector3().fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld));
+    });
+    return out;
+  };
+
+  it('a tail stock that is a keel, deep into the flukes; flukes a quarter-ish of its length across', async () => {
+    const pts = points((await load()).scene);
+    const z0 = Math.min(...pts.map((p) => p.z)), z1 = Math.max(...pts.map((p) => p.z)), L = z1 - z0;
+    /** Depth and width of what lies in a slab at fraction f back from the nose. */
+    const slab = (f: number) => {
+      const z = z1 - f * L, s = pts.filter((p) => Math.abs(p.z - z) < L * 0.012);
+      return { depth: Math.max(...s.map((p) => p.y)) - Math.min(...s.map((p) => p.y)), width: Math.max(...s.map((p) => p.x)) - Math.min(...s.map((p) => p.x)) };
+    };
+    // Narrowing from the dorsal back, then a KEEL into the flukes: one cube thin, four deep. (A round
+    // thin stalk there read as a stick, the dolphin as a swordfish.)
+    for (const f of [0.73, 0.79]) expect(slab(f).width / slab(f).depth, `f ${f}`).toBeLessThan(0.7);
+    for (const f of [0.82, 0.85]) {
+      const { depth, width } = slab(f);
+      expect(width / depth, `f ${f}`).toBeLessThan(0.4);
+      expect(depth / L, `f ${f}`).toBeGreaterThan(0.08);
+    }
+    // The taper behind the dorsal runs smoothly: no step between the body and the stock.
+    const d = [0.65, 0.72, 0.79, 0.85].map((f) => slab(f).depth);
+    for (let i = 1; i < d.length; i++) expect(d[i]! / d[i - 1]!, `taper ${i}`).toBeGreaterThan(0.7);
+    // The flukes: span 0.25 L in life (a cartoon's a little more), widest in the last eighth.
+    const tail = pts.filter((p) => p.z < z0 + L * 0.12);
+    const span = Math.max(...tail.map((p) => p.x)) - Math.min(...tail.map((p) => p.x));
+    expect(span / L).toBeGreaterThan(0.24);
+    expect(span / L).toBeLessThan(0.33);
+  });
+
+  it('strokes from the flukes: tip heave ~0.2 of its length, the head near still, harder in a burst', async () => {
+    const g = await load();
+    const pts = points(g.scene), z0 = Math.min(...pts.map((p) => p.z)), z1 = Math.max(...pts.map((p) => p.z)), L = z1 - z0;
+    // The tips: the vertices furthest forward and furthest back, followed through the skin.
+    let nose: [SkinnedMesh, number] | null = null, tail: [SkinnedMesh, number] | null = null, nz = -Infinity, tz = Infinity;
+    const v = new Vector3();
+    g.scene.traverse((o) => {
+      const m = o as SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      const p = m.geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld);
+        if (v.z > nz) { nz = v.z; nose = [m, i]; }
+        if (v.z < tz) { tz = v.z; tail = [m, i]; }
+      }
+    });
+    const heave = (name: string) => {
+      const clip = g.animations.find((c) => c.name === name)!;
+      const mixer = new AnimationMixer(g.scene), act = mixer.clipAction(clip);
+      act.play();
+      const ys: Array<[number, number]> = [];
+      for (let k = 0; k <= 40; k++) {
+        act.time = (clip.duration * k) / 40; mixer.update(0); g.scene.updateMatrixWorld(true);
+        const at = ([m, i]: [SkinnedMesh, number]) => m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld).y;
+        ys.push([at(nose!), at(tail!)]);
+      }
+      mixer.stopAllAction();
+      const p2p = (j: 0 | 1) => (Math.max(...ys.map((y) => y[j])) - Math.min(...ys.map((y) => y[j]))) / L;
+      return { head: p2p(0), flukes: p2p(1) };
+    };
+    const swim = heave('swim'), burst = heave('burst'), glide = heave('glide');
+    // Fish 1998: the flukes' trailing edge heaves ~0.2 L peak to peak, at every speed.
+    expect(swim.flukes).toBeGreaterThan(0.15);
+    expect(swim.flukes).toBeLessThan(0.3);
+    expect(swim.head).toBeLessThan(0.05);
+    expect(burst.flukes).toBeGreaterThan(swim.flukes);
+    expect(glide.flukes).toBeLessThan(swim.flukes);
   });
 });
