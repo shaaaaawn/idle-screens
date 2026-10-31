@@ -86,7 +86,7 @@ import { HighlightPass, canHoldHighlights } from './highlights';
 import { buildStudio, type Studio } from './studio';
 import { eyeMood, mintedLook, rigEyes, type EyeRig, type EyeState } from './eyes';
 import { rigSwimWave, waveProfile, waveState, type WaveRig, type WaveState } from './swimwave';
-import { crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
+import { CRAB_GESTURES, crabFrame, crabIdle, crabSpot, crabStart, rigCrab, type CrabOutput, type CrabRig } from './crab';
 import {
   classSpot, coupleSpot, danceBeats, rigStarfish, STARFISH_BLOOM, starfishFrame, starfishIdle, starfishSpot, starfishStart, STARFISH_MOVE_NAMES,
   type DuetRole, type StarfishDanceMode, type StarfishOutput, type StarfishRig,
@@ -3526,7 +3526,8 @@ class TankInstance implements SaverInstance {
       // Dot plays the gestures it has clips for with its own body (dot.ts).
       const ownMoves = f.rig?.beta ? (g: string): boolean => (BETA_DANCES as readonly string[]).includes(g)
         : f.rig?.dot ? (g: string): boolean => (DOT_GESTURES as readonly string[]).includes(g)
-        : f.rig?.dolphin ? (g: string): boolean => (DOLPHIN_GESTURES as readonly string[]).includes(g) : undefined;
+        : f.rig?.dolphin ? (g: string): boolean => (DOLPHIN_GESTURES as readonly string[]).includes(g)
+        : f.rig?.crab ? (g: string): boolean => CRAB_GESTURES.includes(g) : undefined;
       const act = this.vignette ? poseOf(this.vignette, f.index, tSec, ownMoves) : null;
       // A floor creature cast as an actor (a crab, a starfish, an octopus, a
       // snail) keeps its feet on the floor at the script's place: an open-stage
@@ -3632,7 +3633,7 @@ class TankInstance implements SaverInstance {
             camX: crabCamX, camZ: crabCamZ, others: crabSpots,
           }, this.crabOut)
         : null;
-      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (crabRig) crabIdle(crabRig, tSec, f.index);
+      if (crab) { px = crab.x; y = crab.y; pz = crab.z; } else if (crabRig) crabIdle(crabRig, tSec, f.index, act?.gesture ?? null);
       // A starfish crawls the floor the same way (starfish.ts).
       const starRig = f.rig?.starfish;
       const star = starRig && !act && !style.formation
@@ -3778,7 +3779,9 @@ class TankInstance implements SaverInstance {
         pace: speed * styleSpeed * style.travel, flurry: mnv.flurry + flurryBoost,
       }) : null;
       // A blowfish (puffer.ts): its puff, its act, the clips for both.
-      const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, { pace: speed * styleSpeed * style.travel }) : null;
+      const puffer = f.rig?.puffer ? pufferFrame(f.rig.puffer, tSec, f.index, beat, {
+        pace: speed * styleSpeed * style.travel, puffCue: act?.gesture?.name === 'puff' ? { at: act.gesture.at, weight: act.gesture.weight } : null,
+      }) : null;
       // A hiccuping baby's speed, for the momentum its bubble leaves with.
       if (baby?.moment === 'hiccup') this.burpFrom.copy(f.group.position);
       // Holding on: posed, faced and sized as it will be drawn, then moved so its tail's grasp is on the stem
