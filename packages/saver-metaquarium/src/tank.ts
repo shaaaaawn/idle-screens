@@ -74,6 +74,7 @@ import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { FLOOR_DETAIL, patchFloorDetail } from './floor-detail';
 import { addRimNormals, patchFishRim, setFishRim } from './rim';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
@@ -1033,6 +1034,8 @@ class TankInstance implements SaverInstance {
   /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
   private houseLevel = 1;
   private fishLightInstalled = false;
+  /** The floor's detail (floor-detail.ts): patched onto the disc and the terrain the first frame `floorDetail` is on. */
+  private floorDetailInstalled = false;
   /** The fish's rim light (rim.ts): patched onto the lit coats the first frame `fishRim` is on. */
   private fishRimInstalled = false;
   /** The near fade (nearfade.ts): patched onto the cast the first frame `nearFade` is on. */
@@ -2767,6 +2770,7 @@ class TankInstance implements SaverInstance {
     this.updateCaustics(tSec);
     this.updateFishLight();
     this.updateSceneryShadows();
+    this.updateFloorDetail();
     this.updateFishRim();
     this.updateNearFade();
 
@@ -4235,6 +4239,20 @@ class TankInstance implements SaverInstance {
     const mat = this.sceneryShadows.mesh.mesh.material as MeshBasicMaterial;
     mat.opacity = 0.4 * Math.max(0, Math.min(1, amount));
     this.sceneryShadows.mesh.mesh.visible = amount > 0;
+  }
+
+  /**
+   * The floor's detail (floor-detail.ts): ripples, sediment and a rim that
+   * fades into the fog, on the flat disc and on the terrain (a rebuilt room is
+   * a new terrain material, so it is patched on its first frame too).
+   */
+  private updateFloorDetail(): void {
+    const amount = this.num('floorDetail');
+    if (amount > 0) this.floorDetailInstalled = true;
+    if (!this.floorDetailInstalled) return;
+    FLOOR_DETAIL.value = amount;
+    patchFloorDetail(this.floorMat);
+    if (this.terrainMat) patchFloorDetail(this.terrainMat);
   }
 
   // ---- render ----

@@ -133,7 +133,7 @@ const METAQUARIUM: PanelKnowledge = {
     ['swim', ['swimStyle', 'swimSpeed', 'swimVariance', 'bodyWiggle', 'pathShape', 'lightSeek', 'fishAvoid']],
     ['formation', ['formationShape', 'formationBreathe', 'shoal', 'shoalKind', 'shoalSpeed']],
     ['maneuver', ['maneuver', 'maneuverRate', 'maneuverIntensity']],
-    ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'raySoftness', 'envProps']],
+    ['room', ['environment', 'floorKind', 'waterY', 'rayStrength', 'raySoftness', 'floorDetail', 'envProps']],
     ['world', ['rockDensity', 'rockVeins', 'geodeHomes', 'stoneStyle', 'interior', 'floraDensity', 'floraMix', 'floraPalette', 'floraLayout', 'geodes', 'geodeMix', 'geodeMineral', 'geodeLayout', 'fountain', 'streetLamps', 'townProps', 'floorCover', 'pyramids', 'pyramidMix', 'pyramidLayout', 'pyramidShow', 'pyramidBpm', 'bubbleVents', 'bubbleStyle', 'pearling', 'co2Mist', 'marineSnow', 'skyLanterns', 'skyHeight', 'horizon', 'landmark', 'paths', 'pathMaterial', 'signs', 'signFlicker']],
     ['crystals', ['propMix', 'crystalScale', 'crystalWild', 'crystalGlow', 'crystalPulse', 'crystalTint']],
     ['atmosphere', ['fogColor', 'fogNear', 'fogFar', 'water', 'waterClarity', 'waterTint', 'dither', 'floorColor', 'moteDensity', 'moteColor']],
