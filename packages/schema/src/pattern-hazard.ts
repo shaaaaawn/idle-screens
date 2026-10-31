@@ -28,9 +28,11 @@
  * side — about 5 px per cell at 1080p — and converted to linear light. Every
  * row and column is scanned for alternating light/dark extrema with the flash
  * swing as hysteresis. A run of at least {@link PATTERN_MIN_PAIRS} light (or
- * dark) stripes whose spacing changes by no more than a third (plus a cell
- * of sampling slack) from one stripe to the next is a stripe run: a radial
- * or perspective pattern still counts, a random starfield does not. Runs on
+ * dark) stripes whose positions sit on a regular lattice — each within a
+ * cell plus 15 % of the pitch of x₀ + k·p, fitted to the whole run — is a
+ * stripe run: a grating, a dot lattice's rows, and the locally regular
+ * stretches of radial, curved and perspective patterns count; a random
+ * scatter, starfield or noise texture does not, however dense. Runs on
  * scan lines up to a pitch apart, overlapping and of the same pitch, form a
  * patch, which is a pattern when it reaches {@link PATTERN_MIN_EXTENT}
  * pitches across its stripes (a grating's lines, a dot lattice's rows; not a
@@ -92,8 +94,21 @@ export const PATTERN_MOVING_AREA = 0.25;
 export const PATTERN_FLICKER_AREA = 0.25;
 /** Most sample times one check draws (t = 5 s plus timeline settle points). */
 export const PATTERN_MAX_SAMPLE_TIMES = 6;
-/** Consecutive stripe periods may differ by at most this ratio (radial and perspective patterns change gradually). */
-const PERIOD_RATIO = 4 / 3;
+/**
+ * A run's stripes are regular when they sit on a lattice x₀ + k·p: each
+ * stripe within this many cells of its lattice point, and each spacing within
+ * as many of p, plus {@link LATTICE_JITTER} of p. One cell is the raster's
+ * own quantisation (a stripe centre lands on a half cell, so a pitch of 2.4
+ * cells is sampled 2, 3, 2, 2, 3 and still sits on its lattice).
+ */
+const LATTICE_SLACK = 1;
+/**
+ * The irregularity a drawn grating carries on the raster, as a fraction of
+ * the pitch: a wide stripe crossed at a slant is a flat run of cells whose
+ * peak can land anywhere along it (measured up to 0.14 on coarse straight
+ * gratings at 30 and 45 degrees). Random scatters at 0.2 already form runs.
+ */
+const LATTICE_JITTER = 0.15;
 /**
  * Stripes coarser than this (fraction of the short side) are not counted as
  * discernible stripes. BT.1702 sets no upper bound on stripe size; this one
@@ -287,53 +302,95 @@ export interface StripeRun {
 }
 
 /**
- * Two stripe spacings (in cells) agree within `frac` of the smaller, plus one
- * cell: a pitch that is not a whole number of cells is sampled as a mix of
- * the two nearest (2.4 cells reads 2, 3, 2, 2, 3), and that quantisation is
- * not irregularity.
+ * Two runs' periods on neighbouring scan lines (in cells) agree within `frac`
+ * of the smaller, plus one cell of sampling slack. Used to link runs into a
+ * patch; whether a run is regular at all is {@link stripeRuns}' lattice test.
  */
 function similarSpacing(a: number, b: number, frac: number): boolean {
   return Math.abs(a - b) <= 1 + frac * Math.min(a, b);
 }
 
+/** How far stripes may stray from a lattice of pitch `p` cells and still be regular. */
+const latticeTolerance = (p: number): number => LATTICE_SLACK + LATTICE_JITTER * p;
+
+/**
+ * The least-squares lattice x = a + p·k through stripe positions xs[s..e]
+ * (k counted from s), and its worst misfit: a stripe off its lattice point,
+ * or a spacing off p, whichever is larger, with the index at the end of the
+ * run nearer to it.
+ */
+function latticeFit(xs: number[], s: number, e: number): { p: number; worst: number; trimStart: boolean } {
+  const n = e - s + 1;
+  let sk = 0, sx = 0, skk = 0, skx = 0;
+  for (let j = s; j <= e; j++) { const k = j - s, x = xs[j]!; sk += k; sx += x; skk += k * k; skx += k * x; }
+  const p = (n * skx - sk * sx) / (n * skk - sk * sk), a = (sx - p * sk) / n;
+  let worst = 0, at = s;
+  for (let j = s; j <= e; j++) {
+    const off = Math.abs(xs[j]! - a - p * (j - s));
+    if (off > worst) { worst = off; at = j; }
+    if (j > s) {
+      const gap = Math.abs(xs[j]! - xs[j - 1]! - p);
+      if (gap > worst) { worst = gap; at = j - s <= e - j ? j - 1 : j; }
+    }
+  }
+  return { p, worst, trimStart: at - s < e - at };
+}
+
 /**
  * The stripe runs along one scan line: maximal stretches of light extrema
- * (and separately of dark ones) whose consecutive spacings stay within
- * {@link PERIOD_RATIO} of each other, at least {@link PATTERN_MIN_PAIRS} long.
- * Counting each tone apart makes the count independent of what lies beyond
- * the pattern: six bright bars on a dark ground are six pairs whether the
- * ground at either end is a stripe or not.
+ * (and separately of dark ones), at least {@link PATTERN_MIN_PAIRS} long,
+ * whose positions sit on a regular lattice — every stripe within
+ * {@link latticeTolerance} of x₀ + k·p, and every spacing within it of p,
+ * for the p fitted to the whole run. That is what makes stripes regular: a
+ * check between neighbouring spacings only lets the spacing wander, and a
+ * dense random scatter wanders its way into long "runs" that way.
+ *
+ * A run grows while each next stripe lands where the lattice fitted to the
+ * run so far predicts; when one does not, the run closes, is checked whole
+ * against its own lattice (trimmed from the worse end until it fits) and a
+ * new run starts from the last stripe. Radial, curved and perspective
+ * patterns count wherever six or more stripes sit on a local lattice (rings
+ * and spokes do, along most scan lines); a strong chirp splits into runs too
+ * short to count. Counting each tone apart makes the count independent of
+ * what lies beyond the pattern: six bright bars on a dark ground are six
+ * pairs whether the ground at either end is a stripe or not.
  */
 export function stripeRuns(ext: Extremum[], line: number, axis: 'x' | 'y'): StripeRun[] {
   const runs: StripeRun[] = [];
   for (const light of [true, false]) {
     const idx: number[] = [];
     ext.forEach((e, i) => { if (e.light === light) idx.push(i); });
-    let start = 0;
-    const close = (end: number): void => {
-      // idx[start..end] inclusive is regular.
-      const count = end - start + 1;
-      if (count >= PATTERN_MIN_PAIRS) {
-        const xs = idx.slice(start, end + 1).map((i) => ext[i]!.x);
-        const periods = xs.slice(1).map((x, k) => x - xs[k]!).sort((a, b) => a - b);
-        const first = idx[start]!, last = idx[end]!;
-        let swing = 0, pairs = 0;
-        for (let k = Math.max(0, first - 1); k < Math.min(ext.length - 1, last + 1); k++) { swing += Math.abs(ext[k + 1]!.v - ext[k]!.v); pairs++; }
-        runs.push({ line, axis, from: xs[0]!, to: xs[xs.length - 1]!, period: periods[periods.length >> 1]!, count, light, contrast: pairs ? swing / pairs : 0 });
+    const xs = idx.map((i) => ext[i]!.x);
+    const close = (s: number, e: number): void => {
+      while (e - s + 1 >= PATTERN_MIN_PAIRS) {
+        const fit = latticeFit(xs, s, e);
+        if (fit.worst <= latticeTolerance(fit.p)) break;
+        if (fit.trimStart) s++; else e--;
       }
+      const count = e - s + 1;
+      if (count < PATTERN_MIN_PAIRS) return;
+      const periods = xs.slice(s + 1, e + 1).map((x, k) => x - xs[s + k]!).sort((a, b) => a - b);
+      const first = idx[s]!, last = idx[e]!;
+      let swing = 0, pairs = 0;
+      for (let k = Math.max(0, first - 1); k < Math.min(ext.length - 1, last + 1); k++) { swing += Math.abs(ext[k + 1]!.v - ext[k]!.v); pairs++; }
+      runs.push({ line, axis, from: xs[s]!, to: xs[e]!, period: periods[periods.length >> 1]!, count, light, contrast: pairs ? swing / pairs : 0 });
     };
-    for (let k = 1; k < idx.length; k++) {
-      if (k >= 2) {
-        const p0 = ext[idx[k - 1]!]!.x - ext[idx[k - 2]!]!.x;
-        const p1 = ext[idx[k]!]!.x - ext[idx[k - 1]!]!.x;
-        if (!similarSpacing(p0, p1, PERIOD_RATIO - 1)) {
-          // The spacing broke between idx[k-1] and idx[k]: close what ran to k-1, restart at k-1.
-          close(k - 1);
-          start = k - 1;
+    // Running sums of the least-squares fit over xs[start..j-1], k = j - start.
+    let start = 0, n = 0, sk = 0, sx = 0, skk = 0, skx = 0;
+    const add = (j: number): void => { const k = j - start, x = xs[j]!; n++; sk += k; sx += x; skk += k * k; skx += k * x; };
+    for (let j = 0; j < xs.length; j++) {
+      if (n >= 2) {
+        const p = (n * skx - sk * sx) / (n * skk - sk * sk), a = (sx - p * sk) / n;
+        const tol = latticeTolerance(p);
+        if (Math.abs(xs[j]! - a - p * (j - start)) > tol || Math.abs(xs[j]! - xs[j - 1]! - p) > tol) {
+          close(start, j - 1);
+          start = j - 1; n = sk = sx = skk = skx = 0;
+          add(j - 1);
         }
       }
+      add(j);
     }
-    if (idx.length) close(idx.length - 1);
+    if (xs.length) close(start, xs.length - 1);
   }
   return runs;
 }
@@ -397,13 +454,19 @@ function scanRaster(r: Raster): StripeRun[] {
       }
     }
     const median = (xs: number[]): number => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1]! : 0);
+    // Each patch's medians, sorted once: the patch is complete by now, and
+    // sorting it again for each of its runs made the scan quadratic in patch size.
+    const medians = new Map<number, { period: number; slant: number }>();
     for (const run of flat) {
-      const sp = span.get(find(at.get(run)!))!;
+      const root = find(at.get(run)!);
+      const sp = span.get(root)!;
       if (sp.hi - sp.lo + 1 < PATTERN_MIN_EXTENT * sp.across) continue;
+      let med = medians.get(root);
+      if (!med) medians.set(root, (med = { period: median(sp.periods), slant: median(sp.slants) }));
       // The pitch square to the stripes: the period along the line, foreshortened by their slant.
       const [along, step] = run.axis === 'x' ? [r.cellX, r.cellY] : [r.cellY, r.cellX];
-      const slant = median(sp.slants) * along;
-      run.pitch = median(sp.periods) * along * (step / Math.hypot(slant, step));
+      const slant = med.slant * along;
+      run.pitch = med.period * along * (step / Math.hypot(slant, step));
       if (run.pitch <= PATTERN_MAX_PITCH) kept.push(run);
     }
   }

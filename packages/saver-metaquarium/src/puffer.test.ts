@@ -248,3 +248,28 @@ describe('the act schedule', () => {
     for (const t of [3, 50, 777]) expect(pufferAct(5, t)).toEqual(pufferAct(5, t));
   });
 });
+
+describe('a cued puff', () => {
+  it('a vignette\'s puff fills the dial whatever the schedule, gulping while it fills', () => {
+    const { rig } = rigged();
+    const t = 1.3, calm = pufferFrame(rig, t, 2, 0, { pace: 0 });
+    const cued = pufferFrame(rig, t, 2, 0, { pace: 0, puffCue: { at: 0.3, weight: 0.95 } });
+    expect(cued.puff).toBeGreaterThanOrEqual(Math.max(calm.puff, 0.95));
+    expect(cued.doing).toBe('puffup');
+    expect(rig.actions.gulp.getEffectiveWeight()).toBeCloseTo(0.95, 9);
+    expect(pufferFrame(rig, t, 2, 0, { pace: 0, puffCue: { at: 0.3, weight: 0 } }).puff).toBe(calm.puff);
+  });
+});
+
+describe('a blowfish acting in a vignette', () => {
+  it('plays the script, not its schedule: no act turns it away, and it puffs only on cue', () => {
+    const { rig } = rigged();
+    for (let t = 0; t < 120; t += 0.37) {
+      const s = pufferFrame(rig, t, 3, 0, { pace: 0, acting: true });
+      expect(s.act).toBeNull();
+      expect(s.face).toBe(0);
+      expect(s.puff).toBe(0);
+    }
+    expect(pufferFrame(rig, 10, 3, 0, { pace: 0, acting: true, puffCue: { at: 0.3, weight: 0.9 } }).puff).toBeCloseTo(0.9, 9);
+  });
+});

@@ -9,7 +9,7 @@ import { EXAMPLE_SEQUENCES, SCHEMA_EXAMPLES } from './examples';
 import { luminanceGrid } from './perceive';
 import {
   layerPatternMotion, patternHazardReport, patternSampleTimes, stripeExtrema, stripeRuns,
-  PATTERN_MAX_SAMPLE_TIMES, PATTERN_MIN_PAIRS,
+  PATTERN_MAX_SAMPLE_TIMES, PATTERN_MIN_PAIRS, PATTERN_MOVING_AREA,
 } from './pattern-hazard';
 import type { IdleSequence, SaverSpec } from './types';
 import { validateSpec } from './validate';
@@ -53,6 +53,82 @@ const bars = (n: number, gap: number, height = 0.012): SaverSpec => scene([{
   sprite: { kind: 'rect', width: [2, 2], aspect: [height / 2, height / 2], color: '#ffffff' },
 }]);
 
+/** Concentric rings `pitchPx` apart at 1080p, out to 0.95 of a radius-1 polygon centred on the frame. */
+function rings(pitchPx: number): SaverSpec {
+  const d = pitchPx / 1080;
+  const parts: string[] = [];
+  for (let r = d; r <= 0.95; r += d) {
+    const pts = Array.from({ length: 49 }, (_, i) => `${(r * Math.cos((i / 48) * 2 * Math.PI)).toFixed(3)} ${(r * Math.sin((i / 48) * 2 * Math.PI)).toFixed(3)}`);
+    parts.push(`M ${pts.join(' L ')}`);
+  }
+  return scene([{
+    count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+    sprite: { kind: 'polygon', radius: [1, 1], color: '#ffffff', path: parts.join(' '), fill: false, stroke: { color: '#ffffff', width: d / 3 } },
+  }]);
+}
+
+/** `n` spokes radiating from the centre of a radius-1 polygon. */
+function spokes(n: number): SaverSpec {
+  const parts = Array.from({ length: n }, (_, k) => {
+    const a = (k / n) * 2 * Math.PI;
+    return `M 0 0 L ${(Math.cos(a) * 0.98).toFixed(4)} ${(Math.sin(a) * 0.98).toFixed(4)}`;
+  });
+  return scene([{
+    count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+    sprite: { kind: 'polygon', radius: [1, 1], color: '#ffffff', path: parts.join(' '), fill: false, stroke: { color: '#ffffff', width: 0.006 } },
+  }]);
+}
+
+/** Horizontal lines whose spacing grows by `growth` a line from `pitchPx` at the top: a floor in perspective. */
+function perspective(pitchPx: number, growth: number): SaverSpec {
+  const parts: string[] = [];
+  for (let y = -0.95, d = pitchPx / 2160; y <= 0.95; y += d, d *= 1 + growth) parts.push(`M -0.95 ${y.toFixed(5)} L 0.95 ${y.toFixed(5)}`);
+  return scene([{
+    count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+    sprite: { kind: 'polygon', radius: [2, 2], color: '#ffffff', path: parts.join(' '), fill: false, stroke: { color: '#ffffff', width: 4 / 2160 } },
+  }]);
+}
+
+/** A `cols` × `rows` grid of white dots. */
+const dots = (cols: number, rows: number, r: number): SaverSpec => scene([{
+  count: cols * rows, layout: { type: 'grid', columns: cols }, motion: { type: 'static' },
+  sprite: { kind: 'circle', radius: [r, r], color: '#ffffff' },
+}]);
+
+/** `layers` × `count` white discs scattered at random. */
+const scatter = (layers: number, count: number, radius: [number, number]): SaverSpec => scene(Array.from({ length: layers }, () => ({
+  count, sprite: { kind: 'circle', radius, color: '#ffffff' }, alpha: [0.5, 1], motion: { type: 'static' },
+})));
+
+/** A black-and-white noise field, `scale` features across the short side, under one small dot. */
+const noiseField = (scale: number, quantize?: number): SaverSpec => ({
+  schemaVersion: 1, id: 'f', label: 'F',
+  background: { type: 'field', scale, octaves: 3, warp: 0.4, ...(quantize ? { quantize } : {}), bands: ['#000000', '#ffffff'] },
+  layers: [{ count: 1, sprite: { kind: 'circle', radius: [0.01, 0.01], color: '#ffffff' }, motion: { type: 'static' } }],
+}) as unknown as SaverSpec;
+
+/**
+ * The scene a server smoke check (X593) previews as one frame: 36 layers of
+ * 22 drifting 24-gons, 792 in all, scattered at random, with a timeline that
+ * only resizes them. Not a grating on any seed.
+ */
+function driftingPolygons(): SaverSpec {
+  const poly = (k: number): [number, number] => [+(Math.cos((k / 24) * 6.283) * 0.987654321).toFixed(9), +(Math.sin((k / 24) * 6.283) * 0.912345678).toFixed(9)];
+  const L = 36;
+  return {
+    schemaVersion: 1, id: 'x593', label: 'x593', background: { type: 'solid', color: '#0b1026' },
+    layers: Array.from({ length: L }, (_, j) => ({
+      key: `l${j}`, count: 22,
+      sprite: { kind: 'polygon', points: Array.from({ length: 24 }, (_, k) => poly(k)), radius: [0.01, 0.03], color: '#a0d9ff' },
+      alpha: [0.3, 0.8], motion: { type: 'drift', speed: [0.01, 0.03] },
+    })),
+    timeline: {
+      loop: true, duration: 60000,
+      keys: Array.from({ length: 252 }, (_, k) => ({ t: Math.floor(k / L) * 8000 + (k % L) * 100, path: `layers.${k % L}.sprite.radius`, value: [0.01 + (k % 7) / 700, 0.03], dur: 3000 })),
+    },
+  } as unknown as SaverSpec;
+}
+
 /** Rasters are fine-grained; under coverage on a loaded machine a sweep takes seconds. */
 const HEAVY = 60_000;
 
@@ -92,6 +168,36 @@ describe('patternHazardReport: gratings and bar lists are refused', () => {
         const r = patternHazardReport(grating(pitch, { layer: { transform: { rotate } } }));
         expect(r.fails, `${pitch} px at ${rotate}°`).toBe(true);
       }
+    }
+  }, HEAVY);
+
+  it('holds the 8 px floor at in-between angles, and between whole cells at a slant', () => {
+    for (const rotate of [10, 20, 60, 75]) {
+      expect(patternHazardReport(grating(8, { layer: { transform: { rotate } } })).fails, `8 px at ${rotate}°`).toBe(true);
+    }
+    for (const pitch of [9, 10, 15, 35]) {
+      expect(patternHazardReport(grating(pitch, { layer: { transform: { rotate: 37 } } })).fails, `${pitch} px at 37°`).toBe(true);
+    }
+  }, HEAVY);
+
+  it('refuses radial, curved and dot patterns: rings, spokes and dot lattices', () => {
+    const cases: Array<[string, SaverSpec]> = [
+      ['rings 12 px', rings(12)], ['rings 20 px', rings(20)], ['rings 40 px', rings(40)],
+      ['48 spokes', spokes(48)], ['72 spokes', spokes(72)], ['120 spokes', spokes(120)],
+      ['dots 16 × 9', dots(16, 9, 0.012)], ['dots 20 × 12', dots(20, 12, 0.01)], ['dots 24 × 14', dots(24, 14, 0.008)],
+    ];
+    for (const [name, s] of cases) {
+      const r = patternHazardReport(valid(s));
+      expect(r.kind, name).toBe('pattern');
+      expect(r.area, name).toBeGreaterThan(0.8);
+    }
+  }, HEAVY);
+
+  it('refuses a floor in perspective, its spacing growing a few per cent a line', () => {
+    for (const growth of [0.02, 0.03]) {
+      const r = patternHazardReport(valid(perspective(12, growth)));
+      expect(r.kind, `${growth}`).toBe('pattern');
+      expect(r.area).toBeGreaterThan(0.9);
     }
   }, HEAVY);
 });
@@ -185,6 +291,32 @@ describe('patternHazardReport: what must not trip it', () => {
     }
   });
 
+  it('passes a random scatter of 792 drifting polygons on every seed: speckle is not a grating', () => {
+    const s = valid(driftingPolygons());
+    for (const seed of [42, 1, 7, 3, 99]) {
+      const r = patternHazardReport(s, { seed });
+      expect(r.fails, `seed ${seed}`).toBe(false);
+      expect(r.area, `seed ${seed}`).toBeLessThan(PATTERN_MOVING_AREA);
+    }
+  }, HEAVY);
+
+  it('passes random scatters from sparse to dense, and noise-field backgrounds', () => {
+    const cases: Array<[string, SaverSpec]> = [
+      // The two 800-disc scatters of 0.01–0.04 radius read as stripes over 88 % of the frame under a neighbour-only spacing rule.
+      ['100 discs', scatter(1, 100, [0.01, 0.03])], ['400 discs', scatter(1, 400, [0.01, 0.03])],
+      ['600 discs', scatter(2, 300, [0.008, 0.02])], ['800 discs', scatter(2, 400, [0.01, 0.03])],
+      ['800 large discs', scatter(2, 400, [0.015, 0.04])], ['800 small discs', scatter(2, 400, [0.006, 0.015])],
+      ['800 specks', scatter(2, 400, [0.003, 0.01])],
+      ['noise field, scale 2', noiseField(2)], ['noise field, scale 8', noiseField(8)],
+      ['noise field, scale 8, two bands', noiseField(8, 2)], ['noise field, scale 8, six bands', noiseField(8, 6)],
+    ];
+    for (const [name, s] of cases) {
+      const r = patternHazardReport(valid(s));
+      expect(r.fails, name).toBe(false);
+      expect(r.area, name).toBeLessThan(PATTERN_MOVING_AREA);
+    }
+  }, HEAVY);
+
   it('passes a row of six large objects: one pitch deep is not a pattern', () => {
     const row = scene([{
       count: 6, position: { x: 0.12, y: 0.5 }, layout: { type: 'list', direction: 'row', gap: 0.27 }, motion: { type: 'static' },
@@ -270,4 +402,78 @@ describe('stripe runs along one scan line', () => {
     for (const g of gaps) random.push(1, ...Array.from({ length: g }, () => 0));
     expect(stripeRuns(stripeExtrema(random), 0, 'x')).toEqual([]);
   });
+
+  // Six stripes at the given spacings, one cell wide, on a dark line.
+  const spaced = (gaps: number[]): number[] => {
+    const out = [0, 0];
+    for (const g of gaps) out.push(1, ...Array.from({ length: g - 1 }, () => 0));
+    out.push(1, 0, 0);
+    return out;
+  };
+
+  it('rejects spacing that wanders, though each spacing is near the one before it', () => {
+    // Each step is within a third of the last (a run under a neighbour-only rule), but the
+    // spacing doubles over the run: no lattice holds these six stripes.
+    expect(stripeRuns(stripeExtrema(spaced([20, 27, 28, 38, 41])), 0, 'x')).toEqual([]);
+    // Alternating short and long spacings are not one pitch either (the gaps' centres between them are near enough).
+    expect(stripeRuns(stripeExtrema(spaced([10, 5, 10, 6, 7])), 0, 'x').filter((r) => r.light)).toEqual([]);
+  });
+
+  it('keeps a lattice with a stripe a little off it, at a whole run and at a run edge', () => {
+    const steady = stripeRuns(stripeExtrema(spaced([21, 22, 22, 21, 22, 21, 22, 22])), 0, 'x');
+    expect(steady.some((r) => r.light && r.count === 9 && r.period === 22)).toBe(true);
+    const edge = stripeRuns(stripeExtrema(spaced([17, 22, 21, 22, 23, 22])), 0, 'x');
+    expect(edge.some((r) => r.light && r.count === 6)).toBe(true);
+  });
+});
+
+/**
+ * Whole reports, frozen. The snapshot was written by the scan as merged,
+ * before its per-patch medians were computed once instead of once per run;
+ * it must still match after any change that is meant to be a pure speed-up.
+ * It was re-frozen once, deliberately, when runs became lattice fits rather
+ * than neighbour-spacing chains: two values moved, both at a pattern's edge
+ * (the spinning disc of stripes lost one 4×4 block, 0.373 → 0.371 of the
+ * frame, and two reports name a different, equally long top run, so its
+ * contrast moved by under 0.04). Every verdict, kind, pair count and pitch
+ * stayed the same.
+ * Numbers are rounded to 12 significant digits, as the other baselines are,
+ * so a platform's last-ulp trig never fails it while a changed pitch, area or
+ * message does.
+ */
+describe('patternHazardReport: frozen reports', () => {
+  const stabilize = (v: unknown): unknown => {
+    if (typeof v === 'number') return +v.toPrecision(12);
+    if (Array.isArray(v)) return v.map(stabilize);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, stabilize(x)]));
+    return v;
+  };
+  const cases: Array<[string, SaverSpec]> = [
+    // The original repro shapes: a full-frame ≈19 px grating still, turned 0° and spinning; lime on near-black; forty bars.
+    ['grating 19 px, still', grating(19.4)],
+    ['grating 19 px, transform 0°', grating(19.4, { layer: { transform: { rotate: 0 } } })],
+    ['grating 19 px, spin 30', grating(19.4, { layer: { spin: 30 } })],
+    ['grating 19 px, spin 360', grating(19.4, { layer: { spin: 360 } })],
+    ['grating 19 px, lime on near-black', grating(19.4, { color: '#c8ff3a', bg: '#0c0a14' })],
+    ['forty bars in a list', bars(40, 0.025)],
+    // Slanted stripes: the patch's slant median is not zero.
+    ['grating 12 px, turned 37°', grating(12, { layer: { transform: { rotate: 37 } } })],
+    ['grating 30 px, turned 45°', grating(30, { layer: { transform: { rotate: 45 } } })],
+    // Patterns that pass, so every sample is scanned and the report keeps the most patterned one.
+    ['grating 30 px, radius 0.4 (under 40 %)', grating(30, { radius: 0.4 })],
+    ['grating 30 px, radius 0.4, turned 30°', grating(30, { radius: 0.4, layer: { transform: { rotate: 30 } } })],
+    ['grating 30 px, radius 0.37, spin 10 (moving rescan)', grating(30, { radius: 0.37, layer: { spin: 10 } })],
+    ['band 30 px, slow flow (flicker forecast)', band(30, 0.3, { type: 'drift', speed: [0.05, 0.05], angle: 0 })],
+    ['band 30 px, fast flow', band(30, 0.3, { type: 'drift', speed: [0.2, 0.2], angle: 0 })],
+    ['five bars', bars(5, 0.1, 0.03)],
+    ['six bars', bars(6, 0.1, 0.03)],
+  ];
+  for (const id of ['relay-board', 'rain', 'aquarium', 'lanterns', 'orrery', 'snowfall']) {
+    cases.push([`example ${id}`, SCHEMA_EXAMPLES.find((e) => e.id === id)!.spec]);
+  }
+
+  it('matches the reports the scan gave when it shipped', () => {
+    const reports = Object.fromEntries(cases.map(([name, s]) => [name, stabilize(patternHazardReport(s))]));
+    expect(reports).toMatchSnapshot();
+  }, HEAVY);
 });

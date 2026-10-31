@@ -127,3 +127,10 @@ describe('through ./manifest', () => {
     expect(manifest.describeMetaquarium({ fishMix: 'octopus:1' }).summary).toBe('an octopus in the void; still camera.');
   });
 });
+
+describe('a choreography in the anatomy', () => {
+  it('shows on the stage, with its tempo', () => {
+    const a = describeMetaquarium({ fishMix: 'starfish:2', choreography: '4:march', danceTempo: 120 });
+    expect(JSON.stringify(a.sections)).toMatch(/a starfish choreography at 120 bpm/);
+  });
+});

@@ -26,6 +26,7 @@ import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
+import { CHOREO_MARKS, parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
 import { BREED_GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
 type Value = string | number | boolean;
@@ -35,23 +36,23 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   cameraAzimuth: 'Orbit bearing in degrees. 0 looks at the village from the front.',
   cameraElevation: 'Degrees above the floor. 8–15 is eye level with the fish; 40+ looks down on a castle.',
   cameraDistance: 'Distance from the tank centre. 80 is a close-up, 170–220 a village, 300+ a landmark.',
-  shot: 'A framing: `orbit` (default), `hero` (three-quarter), `front` (level, long lens), `low` (looking up), `top` (a map), `surface` (the underside), `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
+  shot: 'A framing: `orbit`, `hero` (three-quarter), `front` (level, long lens), `low`, `top` (a map), `surface`, `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
   cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera, whose params are ignored while following. With `followSpot` on the slot, a spotlit chase.',
   followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 in front looking back at its face.',
   followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye; a floor walker sees from its own head height.',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot (stages, vignettes); 1–2 is a slow reveal. frame.state.camera.bearing: where it stands now.',
   followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises over low clutter or pulls in, eased. For walks through a village.',
-  nearFade: 'A creature at the lens dissolves instead of being sliced, 0–1. The followed fish never fades.',
+  nearFade: 'A creature at the lens dissolves, not sliced, 0–1. The followed fish never fades.',
   // cast
   fishCount: 'How many fish when `fishMix` is empty (all are `fishUrl`).',
   finish: 'A final full-screen pass: gentle grade, soft vignette, dither against banding, and restrained bloom on high-end devices (0 = none; never on the low tier).',
   tiltShift: 'Tilt-shift, 0–1: sharp through the middle, soft above and below, like a model. Mid/high tiers.',
-  depthOfField: 'Depth of field, 0–1: the subject sharp (followed fish, `cast` leads), the rest soft. High tier.',
+  depthOfField: 'Depth of field, 0–1: the subject (followed fish, `cast` leads) sharp, the rest soft. High tier.',
   ambientOcclusion: 'Ambient occlusion, 0–1: crevices darken. High tier.',
-  highlights: 'Bright light rolls off instead of clipping, 0–1: a fish in a shaft stays a fish. Bright rooms want it. Mid/high tiers.',
+  highlights: 'Bright light rolls off instead of clipping, 0–1: a fish in a shaft stays a fish. Mid/high tiers.',
   fishUrl: 'The single model used when `fishMix` is empty: ipfs://, https://assets.idlescreens.com/, or a URL on the page\'s own origin. Any other host is refused and the default fish swims.',
-  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, 257:1, seahorse:3, shark:1@patrol`. Minted breeds plus bundled: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace: crab, starfish (dances with `starfishDance`), snail. `dot` (a courier box on legs) and `dolphin` (chatters, flips, breaches; stands on its tail to act) play vignette gestures. Overrides fishCount/fishUrl.',
+  fishMix: 'The cast: `id[:count][@style]`, comma-separated: `100:2@drift, seahorse:3, shark:1@patrol`. Minted breeds plus bundled: shark crab dori glowfish babyfish hackerfish blowfish starfish octopus snail dot dolphin. Floor walkers keep their own pace: crab, starfish (dances: `starfishDance`, `choreography`), snail. `dot` (a box on legs), `dolphin` (flips, breaches) play vignette gestures. Overrides fishCount/fishUrl.',
   dracoPath: 'Where the Draco decoder lives; leave empty on a channel. Only the page\'s own origin or the shipped copy is used.',
   swimSpeed: 'Global swim speed multiplier. 0.4 is contemplative, 1 lively.',
   swimStyle: 'How the cast swims unless a fishMix entry says otherwise (`@style`). `auto` picks by breed.',
@@ -75,14 +76,16 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishGlow: 'How strongly GLOW- parts of a fish bloom and light their neighbours and the floor.',
   fishMetal: '`on` (default) gives METAL- parts a polished, reflective finish.',
   snailShell: 'Snail shells: `banded`, `pearl` (iridescent), `gold`, `glow` (a spiral breathing light; best at night); `mix` (default), each its own. Lit fish only. frame.state.fish[i].shell says which.',
-  starfishDance: 'Starfish dance: `aerobics`, a class in unison facing the camera; `freestyle`, each its own move every eight counts; `duet`, couples face to face (with `spotRig: 0/#ffd27a*26, 1/#ff8ad0*26`); `off` (default). Cast a few (`starfish:7`), `shot: front`, `autoRotate: 0`, a bright room.',
-  danceTempo: 'Beats per minute for the starfish dance (60–180, default 128). Glides on the beat.',
+  starfishDance: 'Starfish dance: `aerobics` (a class in unison), `freestyle` (a move each per eight counts), `duet` (couples), `off`. Cast a few: `starfish:7`.',
+  danceTempo: 'Dance BPM; glides on the beat.',
+  choreography: 'Starfish dance cues, on the beat (see grammar).',
   fishLook: '`neon` dresses the bundled creatures for blacklight: near-black coats, eyes (and a crab\'s mouth) glowing a neon of their own. Best in a dark room with `finish`. Default `natural`.',
   fishRim: 'A thin edge of the water\'s light round each fish, 0–1 (lit mode): dark fish on dark water. 0.6–1 in dark rooms.',
-  fishShadows: 'Soft shadows on the ground under the swimmers, 0–1: dark near the sand, faint high up.',
-  fishFadeIn: 'Seconds an arriving fish takes to dissolve in (0 = it pops in).',
-  sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes and lamps, 0–1, so nothing floats.',
-  voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1: solid coral. All tiers.',
+  fishShadows: 'Soft shadows under the swimmers, 0–1: dark near the sand, faint high up.',
+  fishAO: 'A fish\'s own corners darken, 0–1: solid fish. All tiers.',
+  fishFadeIn: 'Seconds an arriving fish takes to fade in (0 pops in).',
+  sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes, lamps, 0–1: nothing floats.',
+  voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1. All tiers.',
   swimWave: 'Fish bend as they swim: a wave nose to tail, the body curling into turns (0 = rigid wiggle). Skips the turtle, crab and fish with a skeleton; the seahorse gets fin, tail and nod instead.',
   fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
@@ -102,7 +105,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Surface light shafts, within device budget: 5 high tier, 2 standard; none on the lowest tier with a surface (abyss, vent, universe keep 2; perceiveChannel then reads 0).',
   raySoftness: 'Shafts as soft volume, not flat sheets, 0–1. 1 for anything cinematic.',
-  floorDetail: 'A seabed, not a coloured plane, 0–1: ripples, silt, grain; the floor\'s far edge fades into the fog.',
+  floorDetail: 'A seabed, not a coloured plane, 0–1: ripples, silt, grain; its far edge fades into the fog.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window to the light in a rippling mirror of the tank (0 = plain). Needs reef, kelp, ice or lagoon; for the `surface` and `low` shots. High tier mirrors the tank, mid the deep water.',
@@ -157,7 +160,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   spotColor: 'Colour of the single `followSpot`.',
   spotShadow: 'The spotted fish\'s shadow in its pool. 0 none, 1 true size.',
   spotRig: 'Up to three spots: `slot[/color][*radius]` follows a fish, `@mark` stands on a mark (`@mic` lights whoever steps up). They are a, b, c in order. Overrides followSpot.',
-  spotCues: 'A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` (`-` = blackout). Spots cross-fade at each cue.',
+  spotCues: 'Looping cues for the rig: `8s:a, 12s:a+b, 4s:-` (`-` blackout, cues ≥ 2 s). Spots cross-fade.',
   vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio·openmic on the open stage) or a script of beats. A floor creature cast as an actor stays on the floor. Grammar below.',
 };
 
@@ -184,13 +187,14 @@ geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian 
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
 spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
+choreography  [a|*:] <beats>:<move> [>to @face ~turn ^leap /lean %crouch *groove],…|…  moves ${STARFISH_MOVE_NAMES.join(' ')}
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
 vignette  beats separated by |, cues by comma; actors a b c d are fish slots 0 1 2 3
           [<sec>s:] actor =mark  be there, no travel (a later beat's = snaps at its start)    actor >mark  swim there
           actor @mark | @actor   face it    a b circle mark  each named actor rings it, back to its spot by the beat's end; others stay put
-          actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus only: a cloud of ink)
+          actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus) · puff (blowfish)
           dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Fish cast @audience sit out front facing the stage: they laugh as each talk ends and applaud each bow.
@@ -213,8 +217,8 @@ const NIGHT = { fogColor: '#0a0a1a', fogNear: 120, fogFar: 700 } as const;
 const STAGE = { fogColor: '#01030a', floorColor: '#0a1322', fogNear: 120, fogFar: 650, autoRotate: 0 } as const;
 /** Every recipe is close enough to see a face: eyes alive (an opt-in, like every look param). */
 const ALIVE = { eyeLife: 1 } as const;
-/** The polished light: highlights roll off, shafts are volume, fish carry a rim and never slice the lens, the frame is graded. */
-const CINEMATIC = { highlights: 1, raySoftness: 1, nearFade: 1, finish: 0.6 } as const;
+/** The polished look: highlights roll off, shafts are volume, nothing slices the lens, corners darken, the frame is graded. */
+const CINEMATIC = { highlights: 1, raySoftness: 1, nearFade: 1, voxelAO: 1, fishAO: 1, finish: 0.6 } as const;
 
 export const RECIPES: readonly Recipe[] = [
   {
@@ -288,7 +292,7 @@ export const RECIPES: readonly Recipe[] = [
       cameraDistance: 160, cameraElevation: 13, cameraAzimuth: 20, autoRotate: 0.6 },
   },
   {
-    id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance an aerobics routine in unison, an instructor in front.',
+    id: 'starfish-class', label: 'Starfish aerobics', what: 'Seven starfish stand up on a pale ice floor, face the camera and dance aerobics in unison, an instructor in front.',
     params: { environment: 'ice', fishMix: 'starfish:7', starfishDance: 'aerobics', danceTempo: 120, shot: 'front', autoRotate: 0 },
   },
   {
@@ -303,23 +307,23 @@ export const RECIPES: readonly Recipe[] = [
       cameraFollow: 0, followDistance: 55, followAngle: 130 },
   },
   {
-    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, the feelers pool green on the sand, and the camera rides beside one.',
+    id: 'snail-night', label: 'Snails by night', what: 'Glowing snails on a dark floor: each spiral breathes light, feelers pool green on the sand, the camera beside one.',
     params: { ...ALIVE, ...NIGHT, fogColor: '#060612', floorColor: '#141020', fishMix: 'snail:6', snailShell: 'glow', floraDensity: 0.2, marineSnow: 0.3, finish: 0.6,
       cameraFollow: 1, followDistance: 40, followAngle: 140 },
   },
   {
-    id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast framed close wherever it swims, in soft shafts, each fish over its shadow. The polished look.',
+    id: 'reef-cinematic', label: 'Reef, cinematic', what: 'A small reef cast framed close wherever it swims, in soft shafts, each fish over its shadow.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'reef', fishMix: 'seaturtle:1@patrol, blowfish:1, octopus:1@bottom, dori:5@school, crab:1', floraDensity: 0.45, marineSnow: 0.3,
       swimSpeed: 0.6, fishRim: 0.35, fishShadows: 1, sceneryShadows: 1, floorDetail: 0.5, fishAmbient: 0.5, caustics: 0.6, depthOfField: 0.4, ambientOcclusion: 0.8, shot: 'cast', cameraElevation: 12, autoRotate: 0.5 },
   },
   {
-    id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish under jellyfish lanterns, a shark sliding through, every outline rimmed in light.',
+    id: 'night-cinematic', label: 'Deep night, cinematic', what: 'The deep at night: glowfish under jellyfish lanterns, a shark sliding through, outlines rimmed in light.',
     params: { ...ALIVE, ...CINEMATIC, finish: 0.75, environment: 'abyss', fishMix: 'glowfish:2@hover, babyfish:1@hover, shark:1@patrol, babyfish:2, hackerfish:1',
       propMix: 'crystal:2@druse/cyan, crystal:1@spire/hotpink', fishLook: 'neon', fishGlow: 0.8, fishRim: 0.9, sceneryShadows: 1, marineSnow: 0.5, swimSpeed: 0.5, skyLanterns: 0.6, skyHeight: 0.35,
       shot: 'cast', cameraElevation: 8, autoRotate: 0.4 },
   },
   {
-    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes, seen high through a tilt-shift lens: a model village.',
+    id: 'village-cinematic', label: 'Village, cinematic', what: 'Dot, Puff and Hex meet in a sunlit village of stone homes, seen through a tilt-shift lens.',
     params: { ...ALIVE, ...CINEMATIC, environment: 'lagoon', floorKind: 'flat', geodeHomes: 3, stoneStyle: 'weathered', paths: 0.5, streetLamps: 0.3, floraDensity: 0.12, townProps: 'mailbox, fence',
       fishMix: 'dot:1, blowfish:1, hackerfish:1, babyfish:3', swimSpeed: 0.5, marineSnow: 0.25,
       vignette: '4s: a =home1in, b =home2in, c =home3in | 8s: a >centre, b >centre @a | 6s: a @b talk, b @a nod | 8s: c >centre, a @c, b @c | 9s: a b c circle centre | 8s: a >home1in, b >home2in, c >home3in',
@@ -353,6 +357,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   if (str('townProps')) push('townProps', parseTownProps(str('townProps')).problems);
   if (str('floorCover')) push('floorCover', parseFloorCover(str('floorCover')).problems);
   if (str('pyramidShow')) push('pyramidShow', parsePyramidShow(str('pyramidShow')).problems);
+  if (str('choreography')) push('choreography', parseChoreography(str('choreography'), STARFISH_MOVE_NAMES).problems);
   if (str('geodeMineral')) push('geodeMineral', parseGeodeMineral(str('geodeMineral')).problems);
   const rig = parseSpotRig(str('spotRig'));
   push('spotRig', rig.problems);
@@ -485,7 +490,9 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   if (dance !== 'off' && !starfishSwims) {  // no fishMix = one minted fish, never a starfish
     out.push({ path: 'starfishDance', also: ['fishMix'], message: 'no starfish in the cast to dance — add e.g. starfish:7 (slots past the cap never swim)' });
   }
-  if (set('danceTempo') && dance === 'off') out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  const choreographed = !!str('choreography').trim();
+  if (set('danceTempo') && dance === 'off' && !choreographed) out.push({ path: 'danceTempo', also: ['starfishDance'], message: 'does nothing while starfishDance is off' });
+  if (choreographed && !starfishSwims) out.push({ path: 'choreography', also: ['fishMix'], message: 'no starfish in the cast to dance it — add e.g. starfish:5' });
   // A follow slot past the cast never activates (the orbit shot stays), and is flagged above.
   if (follow < 0) {
     for (const k of ['followDistance', 'followAngle', 'followAvoid']) if (set(k)) out.push({ path: k, also: ['cameraFollow'], message: 'does nothing while cameraFollow is -1 (the orbit camera)' });

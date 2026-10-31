@@ -1,7 +1,7 @@
-import { BufferAttribute, BufferGeometry, Color, Group } from 'three';
+import { BufferAttribute, BufferGeometry, Color, Group, MeshBasicMaterial, ShaderLib, ShaderMaterial } from 'three';
 import { describe, expect, it } from 'vitest';
 import { batch, CubeWriter } from './scenery-paint';
-import { bakeVoxelOcclusion, BoxField, faceCorners, voxelOcclusion } from './voxel-ao';
+import { bakeVoxelOcclusion, BoxField, faceCorners, patchVoxelAO, VOXEL_AO, voxelOcclusion } from './voxel-ao';
 
 /** Unit cubes at integer cells: their quads (CubeWriter's winding) and their boxes. */
 function cubes(cells: Array<[number, number, number]>): { pos: number[]; boxes: number[] } {
@@ -105,5 +105,21 @@ describe('voxel occlusion', () => {
       expect(c).toEqual(Array.from(corners.subarray(0, 4)));
     }
     expect(Array.from(corners.subarray(0, 4)).filter((x) => x === 1)).toHaveLength(1);
+  });
+
+  it('patches a vertex-coloured material once: corners in, a bilinear blend on the surface colour', () => {
+    const m = new MeshBasicMaterial({ vertexColors: true });
+    expect(patchVoxelAO(m)).toBe(true);
+    expect(patchVoxelAO(m)).toBe(false);
+    const sh = { uniforms: {} as Record<string, unknown>, vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader };
+    m.onBeforeCompile(sh as never, null as never);
+    expect(sh.uniforms.uMqVoxelAO).toBe(VOXEL_AO);
+    expect(sh.vertexShader).toMatch(/vMqOcc = aMqOcc; vMqOccUV = aMqOccUV;/);
+    expect(sh.fragmentShader).toMatch(/diffuseColor\.rgb \*= 1\.0 - 0\.66 \* uMqVoxelAO \* mqOcc;/);
+    const raw = new ShaderMaterial({ vertexShader: 'void main(){}', fragmentShader: 'void main(){}' });
+    patchVoxelAO(raw);
+    const r = { uniforms: {} as Record<string, unknown>, vertexShader: 'void main(){}', fragmentShader: 'void main(){}' };
+    raw.onBeforeCompile(r as never, null as never);
+    expect(r.uniforms.uMqVoxelAO).toBeUndefined();
   });
 });

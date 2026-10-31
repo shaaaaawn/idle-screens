@@ -235,6 +235,11 @@ export function pufferHold(index: number, t: number): number {
 export interface PufferInput {
   /** How fast it is cruising relative to an ordinary fish (0 holds station). */
   pace: number;
+  /** A vignette's `puff`, cued: seconds into the gesture and its envelope (0..1). It gulps itself round, holds, and lets go. */
+  puffCue?: { at: number; weight: number } | null;
+  /** Acting in a vignette: it plays the script, not its own act schedule (a shy turn or a pirouette would turn it away
+   *  from where the script faces it). It hovers, and puffs only on cue. */
+  acting?: boolean;
 }
 
 export interface PufferState {
@@ -268,10 +273,13 @@ function bubbleOf(index: number, a: PufferActNow): PufferState['bubble'] {
 
 /** Sets the clips for `t`; `beat` is the distance swum. */
 export function pufferFrame(rig: PufferRig, t: number, index: number, beat: number, inp: PufferInput): PufferState {
-  const a = pufferAct(index, t);
+  const a: PufferActNow = inp.acting ? { act: null, weight: 0, into: 0, cycle: 0 } : pufferAct(index, t);
   const D = rig.durations;
   for (const n of PUFFER_CLIPS) set(rig, n, 0, 0);
-  const puff = pufferPuff(index, t);
+  let puff = inp.acting ? 0 : pufferPuff(index, t);
+  // A cued puff takes the dial (and the gulps while it fills) whatever the schedule is doing
+  const cue = inp.puffCue && inp.puffCue.weight > 0 ? inp.puffCue : null;
+  if (cue) puff = Math.max(puff, cue.weight);
   // The dial, always at full weight: no other clip moves what it moves.
   set(rig, 'puff', clamp(puff, 0, 0.999) * D.puff, 1);
   // What the act plays: its own clip, or for a show the gulps and the release.
@@ -287,7 +295,8 @@ export function pufferFrame(rig: PufferRig, t: number, index: number, beat: numb
   } else if (a.act === 'pout') {
     if (a.into < 0.9) { clip = 'gulp'; time = posMod(a.into - 0.15, GULP_EVERY) * (D.gulp / GULP_EVERY); }
   } else if (a.act) { clip = a.act; time = a.into; }
-  const w = clip ? a.weight : 0;
+  if (cue && cue.at < HOLD_FROM) { clip = 'gulp'; time = posMod(cue.at - 0.15, GULP_EVERY) * (D.gulp / GULP_EVERY); }
+  const w = clip ? (cue && clip === 'gulp' && cue.at < HOLD_FROM ? cue.weight : a.weight) : 0;
   const cruise = smooth((inp.pace - 0.1) / 0.5);
   const phase = t + beat * PUFFER_STROKE;
   set(rig, 'swim', posMod(phase, D.swim), (1 - w) * cruise);
@@ -295,7 +304,7 @@ export function pufferFrame(rig: PufferRig, t: number, index: number, beat: numb
   if (clip) set(rig, clip, Math.min(time, D[clip]), w);
   rig.mixer.update(0);
   const face = a.act === 'kiss' || a.act === 'wave' || a.act === 'shimmy' ? a.weight : a.act === 'shy' ? a.weight * env(a.into, 1.06, 1.3, 1.65, 2.0) : 0;
-  const doing: PufferDoing = a.act && a.weight > 0.02 ? a.act : cruise > 0.5 ? 'swim' : 'hover';
+  const doing: PufferDoing = cue ? 'puffup' : a.act && a.weight > 0.02 ? a.act : cruise > 0.5 ? 'swim' : 'hover';
   const bubble = bubbleOf(index, a);
   // A bubble's time comes back relative to now: make it the moment it left.
   if (bubble) bubble.t += t;

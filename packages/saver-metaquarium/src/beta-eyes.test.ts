@@ -5,6 +5,7 @@ import { BETA_LOOK_STYLE, betaPersonality } from './beta';
 import { BETA_EYE_BLOCKS, betaEyeCells, rigBetaEyes } from './beta-eyes';
 import { BUNDLED_BREEDS } from './breeds';
 import { mintedLook } from './eyes';
+import { patchNearFade } from './nearfade';
 
 const load = async (): Promise<{ scene: Object3D; animations: AnimationClip[] }> => {
   const b = Buffer.from((await BUNDLED_BREEDS.betafish!()).default, 'base64');
@@ -86,7 +87,7 @@ describe('betafish: the painted eyes', () => {
     });
     const rig = rigBetaEyes(scene)!;
     expect(rig.cells).toEqual([9, 9]);
-    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v4');
+    for (const m of mats) expect(m.customProgramCacheKey()).toContain('mq-beta-eyes-v5');
     const shader = { vertexShader: '#include <begin_vertex>', fragmentShader: '#include <map_pars_fragment>\n#include <map_fragment>', uniforms: {} as Record<string, { value: unknown }> };
     mats[0]!.onBeforeCompile(shader as never, undefined as never);
     expect(shader.vertexShader).toContain('vBetaP = position');
@@ -94,6 +95,23 @@ describe('betafish: the painted eyes', () => {
     rig.set([{ fwd: 3, up: -3 }, { fwd: 0.25, up: 0.5 }]);
     const gaze = shader.uniforms.uBetaGaze!.value as Array<{ x: number; y: number }>;
     expect([gaze[0]!.x, gaze[0]!.y, gaze[1]!.x, gaze[1]!.y]).toEqual([1, -1, 0.25, 0.5]);
+  });
+});
+
+describe('betafish: the eye rig stacks with the other patches', () => {
+  it('a betta rigged after nearFade keeps ONE near fade: the rig is tagged, so the next frame\'s patch is a no-op', async () => {
+    // Prod, kelp-cathedral (2026-10-31): nearFade patched, the betta's model arrived and was rigged, and the
+    // next frame's nearFade wrapped again over the rig's untagged hook: vMqNearDepth twice, no program.
+    const { scene } = await load();
+    const mats: MeshBasicMaterial[] = [];
+    scene.traverse((o) => { const m = o as Mesh; if (m.isMesh) { const mat = new MeshBasicMaterial({ map: new Texture() }); m.material = mat; mats.push(mat); } });
+    for (const m of mats) patchNearFade(m);
+    expect(rigBetaEyes(scene)).not.toBeNull();
+    for (const m of mats) expect(patchNearFade(m)).toBe(false);
+    const shader = { vertexShader: '#include <project_vertex>\n#include <begin_vertex>', fragmentShader: '#include <clipping_planes_fragment>\n#include <map_pars_fragment>\n#include <map_fragment>', uniforms: {} as Record<string, { value: unknown }> };
+    mats[0]!.onBeforeCompile(shader as never, undefined as never);
+    expect(shader.vertexShader.match(/varying float vMqNearDepth;/g)).toHaveLength(1);
+    expect(shader.vertexShader).toContain('vBetaP = position');
   });
 });
 

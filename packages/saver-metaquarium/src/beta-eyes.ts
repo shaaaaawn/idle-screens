@@ -27,6 +27,7 @@
  * nobody could see while the visible eye kept its painted pupil.)
  */
 import { ShaderChunk, Vector2, Vector4, type BufferGeometry, type Material, type Mesh, type Object3D } from 'three';
+import { stackPatch } from './hooks';
 
 /** The two eye blocks: the flank's plane (x), and the block's corner (z, y). */
 export const BETA_EYE_BLOCKS = [
@@ -191,9 +192,10 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
   };
   for (const m of all) {
     const mapped = mats.includes(m);
-    const prev = m.onBeforeCompile;
-    m.onBeforeCompile = (shader, renderer) => {
-      prev.call(m, shader, renderer);
+    // Through stackPatch, not a hand-made chain: an untagged hook made every
+    // tagged patch (nearFade, the rim, the water) see itself missing and wrap
+    // again, and a betta under nearFade failed to compile on prod.
+    stackPatch(m, `mq-beta-eyes-v5${mapped ? '' : '-seams'}`, (shader) => {
       // Every material: the eye blocks' buried side faces fold flat, out of sight (SEAMS).
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n${SEAMS}`);
       if (!mapped) return;
@@ -202,10 +204,7 @@ export function rigBetaEyes(body: Object3D): BetaEyeRig | null {
       // After the map's own declaration (the functions read it), and only where there is one.
       shader.fragmentShader = shader.fragmentShader.replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\n#ifdef USE_MAP\n${PARS}\n#endif`).replace('#include <map_fragment>',
         ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, mqBetaEyeUv( vMapUv ) )'));
-    };
-    const key = m.customProgramCacheKey.bind(m);
-    m.customProgramCacheKey = () => `${key()}|mq-beta-eyes-v4${mapped ? '' : '-seams'}`;
-    m.needsUpdate = true;
+    });
   }
   const counts = found.map((c) => c.filter(Boolean).length);
   return {
