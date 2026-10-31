@@ -140,6 +140,12 @@ export class HighlightPass {
     return this.target;
   }
 
+  /** Free the buffer (about 58 MB at the high tier) while the param is 0; the next frame remakes it. */
+  release(): void {
+    this.target?.dispose();
+    this.target = null;
+  }
+
   dispose(): void {
     this.target?.dispose();
     this.resolve.dispose();

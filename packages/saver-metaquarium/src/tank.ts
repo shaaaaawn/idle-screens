@@ -2098,6 +2098,7 @@ class TankInstance implements SaverInstance {
       if (canHoldHighlights(this.renderer)) this.highlightPass = new HighlightPass(this.quality.antialias ? 4 : 0);
       else this.highlightAmount = 0;
     }
+    if (this.highlightAmount <= 0) this.highlightPass?.release();
     if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0)) return;
     this.postWrapped = true;
     const raw = this.renderer.render.bind(this.renderer);
