@@ -120,3 +120,30 @@ describe('depth of field (in the finish)', () => {
     p.dispose();
   });
 });
+
+describe('ambient occlusion (in the finish)', () => {
+  it('is off by default and documented', () => {
+    expect(METAQUARIUM_PARAMS.ambientOcclusion).toMatchObject({ type: 'number', default: 0, min: 0, max: 1 });
+    expect(PARAM_DOCS.ambientOcclusion).toMatch(/crevices/);
+  });
+  it('reads opposite pairs of taps, so a slanted plane never darkens itself, and only with a depth', () => {
+    const p = new FinishPass({ bloom: false });
+    const src = (p as unknown as { composite: { fragmentShader: string } }).composite.fragmentShader;
+    expect(src).toMatch(/mqViewDepth\(uv \+ o\)/);
+    expect(src).toMatch(/mqViewDepth\(uv - o\)/);
+    expect(src).toMatch(/float dent = 0\.5 \* \(da \+ db\)/);
+    let target: unknown = null;
+    const r = {
+      autoClear: true,
+      getDrawingBufferSize: (v: { set: (x: number, y: number) => void }) => { v.set(640, 360); return v; },
+      getRenderTarget: () => target, setRenderTarget: (t: unknown) => { target = t; }, copyFramebufferToTexture: () => {}, clear: () => {},
+    };
+    p.ao = 1;
+    const u = (p as unknown as { composite: { uniforms: Record<string, { value: unknown }> } }).composite.uniforms;
+    p.renderFrom(r as never, (() => {}) as never, { texture: {}, depthTexture: null, width: 640, height: 360 } as never, 0.5, 0);
+    expect(u.uAo!.value).toBe(0); // no depth to read: off
+    p.renderFrom(r as never, (() => {}) as never, { texture: {}, depthTexture: {}, width: 640, height: 360 } as never, 0.5, 0);
+    expect(u.uAo!.value).toBe(1);
+    p.dispose();
+  });
+});

@@ -59,7 +59,32 @@ const COMPOSITE = /* glsl */ `
   uniform sampler2D tScene; uniform sampler2D tBloom; uniform sampler2D tTiltQ; uniform sampler2D tTiltE;
   uniform float uAmount; uniform float uBloom; uniform vec2 uRes; uniform float uHighlights; uniform float uTilt;
   uniform sampler2D tDepth; uniform float uDof; uniform float uFocus; uniform float uNear; uniform float uFar;
+  uniform float uAo; uniform float uFocal;
   #include <packing>
+  float mqViewDepth(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, uNear, uFar); }
+  // Ambient occlusion from the frame's depth alone: a pixel deeper than its neighbours on BOTH sides
+  // (within a few units of world space) sits in a crevice — between voxels, under a ledge, where a
+  // fish meets the sand — and takes less of the water's light. Pairs of opposite taps, so a plane
+  // seen at a slant (one side nearer, the other farther) averages out and never darkens itself.
+  // Six pairs on a spiral, turned per pixel (interleaved gradient noise) so the pattern does not band.
+  float mqOcclusion(vec2 uv, float d0) {
+    float R = 7.0;
+    float px = R * uFocal / max(d0, 1.0);
+    if (px < 1.5) return 0.0;
+    float spin = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float occ = 0.0;
+    for (int i = 0; i < 6; i++) {
+      float fi = float(i);
+      float a = spin + fi * 2.39996;
+      float r = px * (0.25 + 0.75 * (fi + 0.5) / 6.0);
+      vec2 o = vec2(cos(a), sin(a)) * r / uRes;
+      float da = d0 - mqViewDepth(uv + o), db = d0 - mqViewDepth(uv - o);
+      float dent = 0.5 * (da + db); // > 0: deeper than both sides
+      float near = min(da, db);      // both sides nearer, not one edge in front
+      occ += smoothstep(0.3, 2.0, dent) * smoothstep(0.0, 0.6, near) * (1.0 - smoothstep(R, 3.0 * R, max(da, db)));
+    }
+    return occ / 6.0;
+  }
   varying vec2 vUv;
   ${SHOULDER_GLSL}
   float mqLuma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -68,6 +93,10 @@ const COMPOSITE = /* glsl */ `
     // The finished frame, in display space: the grade is where "a touch of
     // contrast" means what it says, and the bloom adds like light on glass.
     vec3 g = texture2D(tScene, vUv).rgb;
+    if (uAo > 0.0) {
+      float d0 = mqViewDepth(vUv);
+      if (d0 < uFar * 0.8) g *= 1.0 - 0.55 * uAo * mqOcclusion(vUv, d0);
+    }
     // Tilt-shift: in focus through a band across the middle, softer above and
     // below it — a quarter-size blur, then an eighth — the way a lens tilted
     // against a model village sees it. Before the bloom and the grade.
@@ -117,6 +146,9 @@ export class FinishPass {
   tilt = 0;
   /** `depthOfField`, 0..1, and where it focuses (view distance) with the camera's near and far: set by the tank. Needs a depth (renderFrom with a depth texture). */
   dof = 0;
+  /** `ambientOcclusion`, 0..1 (needs a depth, as `dof` does), and the lens's focal length in pixels: set by the tank. */
+  ao = 0;
+  focal = 500;
   focus = 100;
   near = 1;
   far = 2000;
@@ -142,7 +174,7 @@ export class FinishPass {
         tScene: { value: this.frame }, tBloom: { value: this.half.texture },
         uAmount: { value: 0 }, uBloom: { value: 0 }, uRes: { value: new Vector2(1, 1) }, uHighlights: { value: 0 },
         tTiltQ: { value: this.tiltQ.texture }, tTiltE: { value: this.tiltE.texture }, uTilt: { value: 0 },
-        tDepth: { value: null }, uDof: { value: 0 }, uFocus: { value: 100 }, uNear: { value: 1 }, uFar: { value: 2000 },
+        tDepth: { value: null }, uAo: { value: 0 }, uFocal: { value: 500 }, uDof: { value: 0 }, uFocus: { value: 100 }, uNear: { value: 1 }, uFar: { value: 2000 },
       },
       vertexShader: VERT, fragmentShader: COMPOSITE, depthTest: false, depthWrite: false, toneMapped: false,
     });
@@ -201,6 +233,7 @@ export class FinishPass {
     const tilt = Math.max(0, Math.min(1, this.tilt));
     const depth = hdr?.depthTexture ?? null;
     const dof = depth ? Math.max(0, Math.min(1, this.dof)) : 0;
+    const ao = depth ? Math.max(0, Math.min(1, this.ao)) : 0;
     if (tilt > 0 || dof > 0) {
       this.pass(renderer, raw, src, this.tiltH, 0, false);
       this.pass(renderer, raw, this.tiltH, this.tiltQ, 0, false);
@@ -209,6 +242,8 @@ export class FinishPass {
     const u = this.composite.uniforms;
     u.uTilt!.value = tilt;
     u.uDof!.value = dof;
+    u.uAo!.value = ao;
+    u.uFocal!.value = this.focal;
     u.tDepth!.value = depth;
     u.uFocus!.value = Math.max(1, this.focus);
     u.uNear!.value = this.near;

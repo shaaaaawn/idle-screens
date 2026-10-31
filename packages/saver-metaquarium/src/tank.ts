@@ -50,6 +50,7 @@ import {
   CylinderGeometry,
   SphereGeometry,
   SRGBColorSpace,
+  Vector2,
   Vector3,
   WebGLRenderer,
   type AnimationClip,
@@ -896,6 +897,9 @@ class TankInstance implements SaverInstance {
   private tiltAmount = 0;
   /** `depthOfField`, as this tier allows it (high tier: the finish reads the highlights buffer's depth). */
   private dofAmount = 0;
+  /** `ambientOcclusion`, as this tier allows it (the finish reads the same depth). */
+  private aoAmount = 0;
+  private readonly focalScratch = new Vector2();
   /** The highlights pass (highlights.ts): made the first frame `highlights` goes above 0 on a tier and GPU that allow it. */
   private highlightPass: HighlightPass | null = null;
   private highlightAmount = 0;
@@ -2217,29 +2221,34 @@ class TankInstance implements SaverInstance {
     this.tiltAmount = tier >= 3 ? this.num('tiltShift') : 0;
     // Depth of field reads the frame's depth from the highlights pass's buffer: high tier, and a GPU that can hold it.
     this.dofAmount = tier >= 4 && canHoldHighlights(this.renderer) ? this.num('depthOfField') : 0;
-    if ((this.finishAmount > 0 || this.tiltAmount > 0 || this.dofAmount > 0) && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
-    if (this.finishPass) { this.finishPass.tilt = this.tiltAmount; this.finishPass.dof = this.dofAmount; }
-    if ((this.highlightAmount > 0 || this.dofAmount > 0) && !this.highlightPass) {
+    this.aoAmount = tier >= 4 && canHoldHighlights(this.renderer) ? this.num('ambientOcclusion') : 0;
+    const needDepth = this.dofAmount > 0 || this.aoAmount > 0;
+    if ((this.finishAmount > 0 || this.tiltAmount > 0 || needDepth) && !this.finishPass) this.finishPass = new FinishPass({ bloom: tier >= 4 });
+    if (this.finishPass) { this.finishPass.tilt = this.tiltAmount; this.finishPass.dof = this.dofAmount; this.finishPass.ao = this.aoAmount; }
+    if ((this.highlightAmount > 0 || needDepth) && !this.highlightPass) {
       if (canHoldHighlights(this.renderer)) this.highlightPass = new HighlightPass(this.quality.antialias ? 4 : 0);
       else this.highlightAmount = 0;
     }
-    if (this.highlightPass) this.highlightPass.withDepth = this.dofAmount > 0;
-    if (this.highlightAmount <= 0 && this.dofAmount <= 0) this.highlightPass?.release();
-    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0 && this.tiltAmount <= 0 && this.dofAmount <= 0)) return;
+    if (this.highlightPass) this.highlightPass.withDepth = needDepth;
+    if (this.highlightAmount <= 0 && !needDepth) this.highlightPass?.release();
+    if (this.postWrapped || (this.finishAmount <= 0 && this.highlightAmount <= 0 && this.tiltAmount <= 0 && !needDepth)) return;
     this.postWrapped = true;
     const raw = this.renderer.render.bind(this.renderer);
     this.renderer.render = (scene, camera) => {
       // Only the tank's own frame for the canvas: the passes' quads, the mirror, stills and captures go straight through.
       if (scene !== this.scene || this.renderer.getRenderTarget() !== null) { raw(scene, camera); return; }
       // Depth of field needs the half-float buffer for its depth: at highlights 0 the shoulder is off and it clips as the canvas would.
-      const hl = this.highlightAmount > 0 || this.dofAmount > 0 ? this.highlightPass : null;
+      const hl = this.highlightAmount > 0 || this.dofAmount > 0 || this.aoAmount > 0 ? this.highlightPass : null;
       // The finish carries tilt-shift and depth of field too, so it runs for any (its grade at `finish`, 0 = none).
-      const fin = this.finishAmount > 0 || this.tiltAmount > 0 || this.dofAmount > 0 ? this.finishPass : null;
-      if (fin && this.dofAmount > 0) {
+      const fin = this.finishAmount > 0 || this.tiltAmount > 0 || this.dofAmount > 0 || this.aoAmount > 0 ? this.finishPass : null;
+      if (fin && (this.dofAmount > 0 || this.aoAmount > 0)) {
         // Focus on what the shot is about: the followed fish, else where the shot aims (cast: the leads).
         const c = this.camera.position;
         fin.focus = this.followState ? c.distanceTo(this.followAt) : Math.hypot(c.x - this.shotScratch.tx, c.y - this.shotScratch.ty, c.z - this.shotScratch.tz);
         fin.near = this.camera.near; fin.far = this.camera.far;
+        // The lens's focal length in drawing-buffer pixels: how big a world-space radius is on screen at a depth.
+        this.renderer.getDrawingBufferSize(this.focalScratch);
+        fin.focal = (0.5 * this.focalScratch.y) / Math.tan((this.camera.fov * Math.PI) / 360);
       }
       if (hl && fin) fin.renderFrom(this.renderer, raw, hl.draw(this.renderer, raw, scene, camera), this.finishAmount, this.highlightAmount);
       else if (hl) hl.render(this.renderer, raw, scene, camera, this.highlightAmount);
