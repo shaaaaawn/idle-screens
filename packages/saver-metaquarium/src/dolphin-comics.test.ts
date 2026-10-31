@@ -25,7 +25,7 @@ const skins = (root: Object3D): MeshStandardMaterial[] => {
 
 describe('dolphin comics: a cast of characters, each still a dolphin', () => {
   it('reads a cast in order; anything it does not know is the classic dolphin', () => {
-    expect(parseDolphinCast('showman, drifter ,BIGGUY')).toEqual(['showman', 'drifter', 'bigguy']);
+    expect(parseDolphinCast('showman, drifter ,BIGGUY, host')).toEqual(['showman', 'drifter', 'bigguy', 'host']);
     expect(parseDolphinCast('showman, someone')).toEqual(['showman', 'classic']);
     expect(parseDolphinCast('')).toEqual([]);
   });
@@ -62,6 +62,13 @@ describe('dolphin comics: a cast of characters, each still a dolphin', () => {
     const box = { y: -Infinity };
     drift.props[0]!.traverse((o) => { const m = o as Mesh; if (m.isMesh) { m.geometry.computeBoundingBox(); box.y = Math.max(box.y, m.geometry.boundingBox!.max.y); } });
     expect(box.y).toBeGreaterThan(0);
+  });
+
+  it('the host is the dolphin itself in a black bow tie, at its throat', async () => {
+    const host = await dressed('host');
+    for (const m of skins(host.g.scene)) expect(m.color.getHex()).toBe(host.before.get(m.name));
+    expect(host.props.map((p) => p.name)).toEqual(['PROP-Bowtie']);
+    expect(host.props[0]!.parent?.name).toBe('body');
   });
 
   it('the big guy\'s tee is tinted into its chest on a geometry of its own (the template\'s is every dolphin\'s)', async () => {

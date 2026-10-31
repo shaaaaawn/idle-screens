@@ -125,7 +125,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fountain: 'The town square\'s fountain: `vent` (a crystal-crusted chimney glowing at the mouth) or `geode` (a geode basin on a plinth). A bubble column, a plaza, its own light, and a vignette mark `fountain`.',
   signs: 'Signs, `kind[@place][>target][/#color][*size][:text]`: `plank` on a post, `arrow` to a place, life-`ring`, lit `porthole`, `neon` lettering, scrolling `led`, each beside its place. Original words only. `neon@home1/#ff4fa0:OPEN, arrow@hub>gate:Castle`.',
   stageSet: '`club`: a brick back wall, a mic on a stand at the `mic` mark, a stool; `mic`: the stand alone. For the `openmic` vignette.',
-  dolphinCast: 'Comic dolphins, in fishMix order: `showman` (navy suit, red tie, quick), `drifter` (tan, flannel, trucker cap, slow slouch), `bigguy` (big, slate, dark tee, deadpan); else `classic`. Types, no likeness.',
+  dolphinCast: 'Comic dolphins, in fishMix order: `showman` (navy suit, red tie, quick), `drifter` (tan, flannel, trucker cap, slow slouch), `bigguy` (big, slate, dark tee, deadpan), `host` (a bow tie); else `classic`. Types, no likeness.',
   signFlicker: 'How unstable the lit signs\' power is, 0–1 (default 0.4): hums, stutters, a dead row, now and then a reboot, each sign on its own supply; 0 is steady. Flash-safe.',
   streetLamps: 'Crystal streetlamps along the paths (0–1, about 24 at 1): slate posts crowned in the nearest crystal\'s colour, a halo, light on the floor. Needs paths.',
   townProps: 'Village props, kind[:count][/style]: fence (a yard per home; driftwood coral stone crystal), mailbox (by each gate: post clam bottle; marks mailbox1…), bench[:n] (shell stone), sock[:n]. Fences and mailboxes need geodeHomes.',
@@ -155,7 +155,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   spotStrength: 'How hard the spots are and how far the house lights fall: lit fish\'s key/fill (to 40%) and fishAmbient dim; glow, reflections and scenery keep theirs. A `-` blackout puts out only the spots.',
   spotColor: 'Colour of the single `followSpot`.',
   spotShadow: 'The spotted fish\'s shadow in its pool. 0 none, 1 true size.',
-  spotRig: 'Up to three spots: `slot[/color][*radius]`. `0/#ff8ad0*26, 1/#7fdcff`. They are a, b, c in order. Overrides followSpot.',
+  spotRig: 'Up to three spots: `slot[/color][*radius]` follows a fish, `@mark` stands on a mark (`@mic` lights whoever steps up). They are a, b, c in order. Overrides followSpot.',
   spotCues: 'A looping cue sheet for the rig: `8s:a, 8s:b, 12s:a+b, 4s:-` (`-` = blackout). Spots cross-fade at each cue.',
   vignette: 'A small scene for the first 2–3 fish: a preset (tea·bedtime·seek indoors; duet·trio·openmic on the open stage) or a script of beats. A floor creature cast as an actor stays on the floor. Grammar below.',
 };
@@ -181,12 +181,12 @@ pyramidShow  auto | solo | routine | <sec>s:<routine>, …   8s:rings, 8s:beam, 
 geodeMix  kind[:weight], …   geode cathedral cluster cavern                          geode:3, cathedral, cluster
 geodeMineral  world | mineral, …   amethyst agate celestine citrine carnelian rose emerald quartz smoky
 floraPalette  world | #rrggbb, …  (≤6)                          world · #ff4fa0, #ffb347, #4fd1ff
-spotRig   slot[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
+spotRig   slot|@mark[/color][*radius], …  (≤3; they become a, b, c)   0/#ffd27a*24, 1/#ff8ad0*24, 2/#7fdcff*24
 spotCues  <sec>s:<spots>, …  loops                               4s:-, 7s:a, 7s:b, 12s:a+b
 signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcome to the reef", neon@home1/#ff4fa0:OPEN, led@plaza:TIDE 4.2M
           kinds plank arrow ring porthole neon led · places gate plaza courtyard hub fountain home1 home2 home3 centre left right front back
           an arrow points at >target · text ≤ plank 24, arrow 16, ring 10, porthole 4 (empty = a fish), neon 14, led 64 (scrolls) · ≤ 8 signs
-vignette  beats separated by |, cues by comma; actors a b c are fish slots 0 1 2
+vignette  beats separated by |, cues by comma; actors a b c d are fish slots 0 1 2 3
           [<sec>s:] actor =mark  be there, no travel (a later beat's = snaps at its start)    actor >mark  swim there
           actor @mark | @actor   face it    a b circle mark  each named actor rings it, back to its spot by the beat's end; others stay put
           actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus only: a cloud of ink)
@@ -260,9 +260,9 @@ export const RECIPES: readonly Recipe[] = [
       fishMix: '100:2,257:1', fishGlow: 0.5, bodyWiggle: 0.3, marineSnow: 0.5, cameraDistance: 185, cameraElevation: 13, cameraAzimuth: 0 },
   },
   {
-    id: 'open-mic', label: 'Open mic', what: 'A comedy club: three comic dolphins take the mic in turn; a seated crowd laughs and applauds.',
-    params: { ...ALIVE, ...STAGE, floorColor: '#1a1210', vignette: 'openmic', stageSet: 'club', spotRig: '0/#ffc890*22, 1/#ffc890*22, 2/#ffc890*22', spotCues: VIGNETTE_CUES.openmic!, spotStrength: 0.3,
-      fishMix: 'dolphin:3, dori:2@audience*0.7, crab:2@audience*0.6, octopus:1@audience*0.7, babyfish:5@audience', dolphinCast: 'showman, drifter, bigguy',
+    id: 'open-mic', label: 'Open mic', what: 'A comedy club: a host brings three comic dolphins to the mic in turn; a seated crowd laughs and applauds.',
+    params: { ...ALIVE, ...STAGE, floorColor: '#1a1210', vignette: 'openmic', stageSet: 'club', spotRig: '@mic/#ffc890*26', spotCues: VIGNETTE_CUES.openmic!, spotStrength: 0.3,
+      fishMix: 'dolphin:4, dori:2@audience*0.7, crab:2@audience*0.6, octopus:1@audience*0.7, babyfish:5@audience', dolphinCast: 'showman, drifter, bigguy, host',
       signs: 'neon@back/#ff4fa0:OPEN MIC', finish: 0.6, cameraDistance: 125, cameraElevation: 12, cameraAzimuth: 0 },
   },
   {
@@ -361,6 +361,9 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     else push('spotCues', parseSpotCues(str('spotCues'), spots).problems);
   }
   const world = worldMarks(params);
+  for (const s of rig.spots) {
+    if (s.mark && !(s.mark in OPEN_MARKS) && !(s.mark in world)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
+  }
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
     push('vignette', parseVignette(resolveVignette(str('vignette')), indoors ? INTERIOR_MARKS : { ...OPEN_MARKS, ...world }).problems);
@@ -458,18 +461,18 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
   const spot = Math.round(num('followSpot', -1));
   if (rig.length && set('followSpot')) out.push({ path: 'followSpot', also: ['spotRig'], message: 'ignored: a spotRig replaces the single followSpot' });
   else if (spot >= cast) out.push({ path: 'followSpot', also: castParams, message: noFish(spot) });
-  for (const s of rig) if (s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
+  for (const s of rig) if (!s.mark && s.slot >= cast) out.push({ path: 'spotRig', also: castParams, message: noFish(s.slot) });
   if (str('vignette')) {
     const v = parseVignette(resolveVignette(str('vignette')), { ...OPEN_MARKS, ...INTERIOR_MARKS });
     const { actors } = v;
-    if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abc'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
+    if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abcd'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
     // A breed's own gesture (an octopus's ink) on an actor of another breed does nothing.
     const slotBreeds = expandFishMixSlots(mix, 3).map((sl) => sl.breed);
     for (const [g, breeds] of Object.entries(BREED_GESTURES) as [string, readonly string[]][]) {
       for (let a = 0; a < actors; a++) {
         if (!v.beats.some((b) => b.actors[a]?.gesture === g)) continue;
         const breed = slotBreeds[a] ?? 'fish';
-        if (!breeds.includes(breed)) out.push({ path: 'vignette', also: ['fishMix'], message: `"${'abc'[a]} ${g}" does nothing: ${g} is the ${breeds.join('/')}'s own, and actor ${'abc'[a]} (slot ${a}) is a ${breed}` });
+        if (!breeds.includes(breed)) out.push({ path: 'vignette', also: ['fishMix'], message: `"${'abcd'[a]} ${g}" does nothing: ${g} is the ${breeds.join('/')}'s own, and actor ${'abcd'[a]} (slot ${a}) is a ${breed}` });
       }
     }
   }

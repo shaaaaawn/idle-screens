@@ -18,7 +18,7 @@
 import { BoxGeometry, BufferAttribute, Color, Mesh, MeshStandardMaterial, Vector3, type BufferGeometry, type Material, type Object3D, type SkinnedMesh } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export const DOLPHIN_PERSONAS = ['classic', 'showman', 'drifter', 'bigguy'] as const;
+export const DOLPHIN_PERSONAS = ['classic', 'showman', 'drifter', 'bigguy', 'host'] as const;
 export type DolphinPersonaId = (typeof DOLPHIN_PERSONAS)[number];
 
 export interface DolphinAct {
@@ -47,6 +47,8 @@ export interface DolphinPersona {
   plaid?: string;
   /** A tie down its chest, or none. */
   tie: string | null;
+  /** A bow tie at its throat, or none. */
+  bowtie?: string;
   /** A trucker cap: crown front, crown back and brim, or none. */
   cap: { front: string; back: string } | null;
   /** Its size (× the breed's). */
@@ -85,6 +87,13 @@ export const PERSONAS: Readonly<Record<DolphinPersonaId, DolphinPersona>> = {
     finish: { roughness: 0.6, metalness: 0.05, envMapIntensity: 0.5 },
     shirt: '#30343b', tie: null, cap: null, size: 1.3,
     act: { tempo: 0.85, energy: 0.55, slouch: 0.06, lean: 0.05, lids: 0.2 },
+  },
+  // The emcee: the dolphin itself, as it always is, in a black bow tie — bright, quick, warm, up on its tail
+  // to bring each comic on and to send them off.
+  host: {
+    id: 'host', label: 'The Host',
+    skin: null, finish: null, shirt: null, tie: null, bowtie: '#14161b', cap: null, size: 1,
+    act: { tempo: 1.15, energy: 1.1, slouch: -0.03, lean: 0, lids: 0 },
   },
 };
 
@@ -150,6 +159,11 @@ export function dressDolphin(body: Object3D, persona: DolphinPersona, bone: (nam
     const host = bone('body');
     if (host) { host.attach(tie); props.push(tie); }
   }
+  if (persona.bowtie) {
+    const bow = voxels(bowtieCells(surface), persona.bowtie, 'PROP-Bowtie');
+    const host = bone('body');
+    if (host) { host.attach(bow); props.push(bow); }
+  }
   if (persona.cap) {
     const cap = capOf(surface, persona.cap.front, persona.cap.back);
     const host = bone('head');
@@ -187,6 +201,16 @@ function tieCells(s: Surface): Cell[] {
   for (const z of [14, 12, 10]) at(z, [0]);
   for (const z of [8, 6]) at(z, [-2, 0, 2]);
   at(4, [0]); // the point
+  return cells;
+}
+
+/** A bow tie at the throat, just proud of the belly: a knot and two wings, each flaring out from it. */
+function bowtieCells(s: Surface): Cell[] {
+  const z = 17, y = s.bottom(z) - 1;
+  const cells: Cell[] = [[0, y, z]];
+  for (const side of [-1, 1]) {
+    cells.push([side * 2, y, z, undefined, 2.4], [side * 4, y, z, undefined, 3.4]);
+  }
   return cells;
 }
 

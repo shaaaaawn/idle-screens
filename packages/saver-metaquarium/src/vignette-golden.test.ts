@@ -30,7 +30,7 @@ describe('vignette presets', () => {
 const GOLDEN: Record<string, string> = {
   bedtime: '63.253:72384a13',
   duet: '53.000:5e4a0262',
-  openmic: '88.000:1badf75a',
+  openmic: '129.000:71fd0dec',
   seek: '109.783:fc0279a4',
   tea: '97.185:bdc03515',
   trio: '61.000:f9628336',

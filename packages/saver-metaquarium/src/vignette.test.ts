@@ -13,7 +13,7 @@ describe('vignettes', () => {
       const v = parseVignette(script, marksFor(name));
       expect(v.problems, name).toEqual([]);
       expect(v.actors).toBeGreaterThanOrEqual(2);
-      expect(v.actors).toBeLessThanOrEqual(3);
+      expect(v.actors).toBeLessThanOrEqual(4);
       expect(v.duration).toBeGreaterThan(20);
     }
     expect(resolveVignette('tea')).toBe(VIGNETTES.tea);

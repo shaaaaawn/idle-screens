@@ -95,7 +95,8 @@ export interface Vignette {
   centre: Mark;
 }
 
-const ACTOR = 'abc';
+/** Actor letters: up to four (a host and three comics). */
+const ACTOR = 'abcd';
 const CRUISE = 17; // units / second — an unhurried fish
 const STANDOFF = 20; // how far apart actors sharing a mark hold — a fish is 18 long
 
@@ -119,13 +120,13 @@ export function parseVignette(script: string, marks: Marks, audience: readonly n
   for (const beat of raw) {
     for (const cue of beat.replace(/^\d+(?:\.\d+)?s\s{0,16}:/, '').split(',')) {
       for (const word of cue.trim().split(/\s+/)) {
-        if (!/^[abc]$/.test(word)) break;
+        if (!/^[abcd]$/.test(word)) break;
         actors = Math.max(actors, ACTOR.indexOf(word) + 1);
       }
     }
   }
   const centre = marks.centre ?? marks.rug ?? OPEN_MARKS.centre!;
-  if (!raw.length || !actors) return { actors: 0, beats: [], duration: 0, problems: raw.length ? ['no actor (a, b, c) named'] : [], seats: new Map(), centre };
+  if (!raw.length || !actors) return { actors: 0, beats: [], duration: 0, problems: raw.length ? ['no actor (a–d) named'] : [], seats: new Map(), centre };
 
   let at: Mark[] = Array.from({ length: actors }, (_, i) => spot(centre, i, actors));
   const start: Mark[] = [];
@@ -145,12 +146,12 @@ export function parseVignette(script: string, marks: Marks, audience: readonly n
     for (const cue of body.split(',').map((c) => c.trim()).filter(Boolean)) {
       const words = cue.split(/\s+/);
       const who: number[] = [];
-      while (words.length && /^[abc]$/.test(words[0]!)) who.push(ACTOR.indexOf(words.shift()!));
+      while (words.length && /^[abcd]$/.test(words[0]!)) who.push(ACTOR.indexOf(words.shift()!));
       if (!who.length) { problems.push(`beat ${bi + 1}: "${cue}" names no actor`); continue; }
       for (let w = 0; w < words.length; w += 1) {
         const word = words[w]!;
         const target = (name: string): { actor: number | null; point: Mark | null } | null => {
-          if (/^[abc]$/.test(name) && ACTOR.indexOf(name) < actors) return { actor: ACTOR.indexOf(name), point: null };
+          if (/^[abcd]$/.test(name) && ACTOR.indexOf(name) < actors) return { actor: ACTOR.indexOf(name), point: null };
           const mk = marks[name];
           if (mk) return { actor: null, point: mk };
           problems.push(`beat ${bi + 1}: no mark or actor "${name}" (marks: ${Object.keys(marks).join(', ')})`);
@@ -475,14 +476,13 @@ function reactionsOf(v: Vignette): Reactions {
   return r;
 }
 
-/** Who holds the stage at t: whoever is talking, else whoever is doing something, else whoever is nearest its middle. */
+/** Who holds the stage at t: whoever is talking, else whoever is on (or headed for) its middle. Not whoever
+ *  is merely doing something: comics nodding along in the wings would steal the room's eyes. */
 function holderAt(v: Vignette, tSec: number): number {
   const t = ((tSec % v.duration) + v.duration) % v.duration;
   const beat = v.beats.find((b) => t < b.t0 + b.dur) ?? v.beats[v.beats.length - 1]!;
   const talking = beat.actors.findIndex((a) => a.gesture === 'talk');
   if (talking >= 0) return talking;
-  const busy = beat.actors.findIndex((a) => !!a.gesture && a.gesture !== 'rest');
-  if (busy >= 0) return busy;
   let best = 0, bestD = Infinity;
   beat.actors.forEach((a, i) => { const d = Math.hypot(a.to.x - v.centre.x, a.to.z - v.centre.z); if (d < bestD) { bestD = d; best = i; } });
   return best;
@@ -663,37 +663,49 @@ export const VIGNETTES: Readonly<Record<string, string>> = {
     '5s: a >left, b >right, c @front shake',
     '5s: c >back',
   ].join(' | '),
-  // Open mic: three comics take the mic in turn, each two bits and a bow, then all three take a last bow.
-  // Written for an `@audience` out front (it laughs as each talk ends) and `stageSet: club` (the mic at `mic`).
-  // openmic cues: 4s:-, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a+b, 6s:b, 3s:b, 6s:b, 3s:b, 5s:b+c, 6s:c, 3s:c, 6s:c, 3s:c, 6s:a+b+c, 4s:a+b+c, 5s:-
+  // Open mic: a host (d) brings on three comics (a b c) in turn — each two bits and a bow — and sends them off;
+  // the two waiting stand in the wings and watch whoever has the mic, nodding along when the room laughs. Then
+  // a goodnight from the host, and the company bows from where it stands. Written for an `@audience` out front (it laughs as each talk
+  // ends), `stageSet: club` and one spot standing on the mic (`spotRig: @mic`): whoever steps up is lit.
+  // openmic cues: 4s:-, 5s:a, 5s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 4s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 4s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 5s:a, 4s:a, 5s:-
   openmic: [
-    '4s: a =left, b =right, c =left',
-    '5s: a >mic @front',
-    '6s: a @front talk',
-    '3s: a @front nod',
-    '6s: a @front talk',
-    '3s: a @front bow',
-    '5s: a >left, b >mic @front',
-    '6s: b @front talk',
-    '3s: b @front rest',
-    '6s: b @front talk',
-    '3s: b @front bow',
-    '5s: b >right, c >mic @front',
-    '6s: c @front talk',
-    '3s: c @front shake',
-    '6s: c @front talk',
-    '3s: c @front bow',
-    '6s: a >centre @front, b >centre @front',
-    '4s: a @front bow, b @front bow, c @front bow',
-    '5s: a >left, b >right, c >left',
+    '4s: a =left, b =right, c =left, d =right',
+    '5s: d >mic @front, a @mic nod, b @mic nod, c @mic nod',
+    '5s: d @front talk, a @mic, b @mic, c @mic',
+    '3s: d @a wiggle, a @mic nod, b @mic nod, c @mic nod',
+    '5s: d >right, a >mic @front, b @mic, c @mic',
+    '6s: a @front talk, b @mic, c @mic, d @mic nod',
+    '3s: a @front nod, b @mic nod, c @mic nod, d @mic nod',
+    '6s: a @front talk, b @mic, c @mic, d @mic',
+    '3s: a @front bow, b @mic nod, c @mic nod, d @mic nod',
+    '5s: a >left, d >mic @front, b @mic, c @mic',
+    '4s: d @front talk, a @mic nod, b @mic, c @mic',
+    '3s: d @b wiggle, a @mic, b @mic nod, c @mic',
+    '5s: d >right, b >mic @front, a @mic, c @mic',
+    '6s: b @front talk, a @mic, c @mic, d @mic nod',
+    '3s: b @front rest, a @mic nod, c @mic nod, d @mic nod',
+    '6s: b @front talk, a @mic, c @mic, d @mic',
+    '3s: b @front bow, a @mic nod, c @mic nod, d @mic nod',
+    '5s: b >right, d >mic @front, a @mic, c @mic',
+    '4s: d @front talk, a @mic, b @mic nod, c @mic',
+    '3s: d @c wiggle, a @mic, b @mic, c @mic nod',
+    '5s: d >right, c >mic @front, a @mic, b @mic',
+    '6s: c @front talk, a @mic, b @mic, d @mic nod',
+    '3s: c @front shake, a @mic nod, b @mic nod, d @mic nod',
+    '6s: c @front talk, a @mic, b @mic, d @mic',
+    '3s: c @front bow, a @mic nod, b @mic nod, d @mic nod',
+    '5s: c >left, d >mic @front, a @mic, b @mic',
+    '5s: d @front talk, a @mic nod, b @mic, c @mic nod',
+    '4s: a @front bow, b @front bow, c @front bow, d @front bow',
+    '5s: d >right, a @mic, b @mic, c @mic',
   ].join(' | '),
 };
 
-/** The cue sheet that lights a staged preset, spot for spot (`spotRig` a b c = slots 0 1 2). */
+/** The cue sheet that lights a staged preset, spot for spot (`spotRig` a b c = its spots, in order). */
 export const VIGNETTE_CUES: Readonly<Record<string, string>> = {
   duet: '4s:-, 7s:a, 5s:a, 7s:b, 5s:b, 6s:a+b, 8s:a+b, 6s:a+b, 5s:a+b',
   trio: '4s:-, 6s:a, 6s:b, 6s:c, 7s:a+b, 7s:b+c, 9s:a+b+c, 6s:a+b+c, 5s:c, 5s:-',
-  openmic: '4s:-, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a+b, 6s:b, 3s:b, 6s:b, 3s:b, 5s:b+c, 6s:c, 3s:c, 6s:c, 3s:c, 6s:a+b+c, 4s:a+b+c, 5s:-',
+  openmic: '4s:-, 5s:a, 5s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 4s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 4s:a, 3s:a, 5s:a, 6s:a, 3s:a, 6s:a, 3s:a, 5s:a, 5s:a, 4s:a, 5s:-',
 };
 
 /** A preset's name, or the script itself. */
