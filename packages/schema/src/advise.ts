@@ -2,12 +2,12 @@ import { createRng } from '@idle-screens/core';
 import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
 import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction, flattenSprite, isPathPolygon, pathFrame, pathInkArea, polygonArea, polygonPoints } from './shapes';
-import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
-import { morphNothingMorphable, structuralSignature } from './steer';
+import { barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonArea, polygonPoints } from './shapes';
+import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, revealState, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
+import { describeStructuralDifferences, morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
-import { resolveTimelineAt, timelineTracks } from './timeline';
+import { resolveTimelineAt, timelineSampleTimes, timelineTracks } from './timeline';
 import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
 import { SEAMLESS_PERIOD_KINDS, periodWithoutTimeline } from './period';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
@@ -95,8 +95,11 @@ export function adviseSpec(
    * potentially different seeds: `seed` drives the ink layers' own entity
    * stream, `backgroundSeed` samples the bed's field. Defaults to `seed` —
    * every other caller has one scene and one seed for both.
+   *
+   * `until` bounds the timeline times the over-time checks sample (a
+   * sequence segment's `duration`): a segment never plays past its end.
    */
-  opts: { t?: number; seed?: number; backgroundSeed?: number } = {},
+  opts: { t?: number; seed?: number; backgroundSeed?: number; until?: number } = {},
 ): SpecWarning[] {
   // Which layers never show in this scene — paint opacity (the layer's own ×
   // its group's) 0 at every key boundary of its timeline, or simply 0 without
@@ -106,6 +109,9 @@ export function adviseSpec(
   const hidden = hiddenLayers(spec);
   // The timeline as authored, for the checks that read it over time.
   const authored = spec;
+  // Which layers a timeline key can change (F145, X776): text counts as
+  // static only when no key touches it. Null without a timeline.
+  const keyed = keyedLayers(authored);
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
   const warnings: SpecWarning[] = [];
@@ -123,7 +129,11 @@ export function adviseSpec(
     opts.t ?? COHESION_T, w, h,
   );
 
-  let totalEntities = 0;
+  // Count-based advisories read the DECLARED count, not the build: the build
+  // is density-scaled to the viewport (`entityScales`), so the same 532
+  // entities raised dense-scene at 1920×1080 and not at previewScene's
+  // 480×270 (F146, X771 — the F49 family). Viewport-free, so every caller agrees.
+  let declaredEntities = 0;
   let textLayerCount = 0;
   let motionLayerCount = 0;
 
@@ -131,12 +141,15 @@ export function adviseSpec(
     if (hidden?.[li]) continue;
     const layer = spec.layers[li]!;
     const entities = allEntities[li]!;
-    totalEntities += entities.length;
+    declaredEntities += layer.count;
 
     const isText = layer.sprite.kind === 'text' || layer.sprite.kind === 'textBlock';
-    const isStaticText = isText && layer.motion.type === 'static';
+    // A keyed layer moves on the timeline (an opacity fade, a transform), so
+    // static text a key touches is not a document line (F145, X776).
+    const isKeyed = !!keyed?.[li];
+    const isStaticText = isText && layer.motion.type === 'static' && !isKeyed;
     if (isStaticText) textLayerCount++;
-    if (layer.motion.type !== 'static') motionLayerCount++;
+    if (layer.motion.type !== 'static' || isKeyed) motionLayerCount++;
 
     const coh = cohesion[li]!;
     if (seamsWorthWarning(layer, coh, entities.length, () => buriedAreaOf(layer, entities, opts.t ?? COHESION_T, w, h))) {
@@ -178,7 +191,7 @@ export function adviseSpec(
       });
     }
 
-    if (layer.motion.type === 'wander' && layer.motion.coherence === 1 && entities.length >= 20) {
+    if (layer.motion.type === 'wander' && layer.motion.coherence === 1 && layer.count >= 20) {
       warnings.push({
         path: `layers[${li}].motion.coherence`,
         code: 'full-coherence',
@@ -370,11 +383,11 @@ export function adviseSpec(
     });
   }
 
-  if (totalEntities > 500 && density !== 'dense') {
+  if (declaredEntities > 500 && density !== 'dense') {
     warnings.push({
       path: 'layers',
       code: 'dense-scene',
-      message: `${totalEntities} entities — scene may feel crowded and hurt performance on low-end devices`,
+      message: `${declaredEntities} entities — scene may feel crowded and hurt performance on low-end devices`,
     });
   }
 
@@ -467,6 +480,26 @@ export function adviseSpec(
     }
   }
 
+  // `life` under a looping timeline (F145, X808): the envelope runs on scene
+  // time from mount (a sequence segment's own start), not on the lap clock, so
+  // an `enter` build plays once and an `exit` stays gone — it never replays
+  // when the timeline wraps. Informational: a once-only intro is a fine piece.
+  if (authored.timeline?.loop && (authored.timeline.duration ?? 0) > 0) {
+    const lap = Math.round(authored.timeline.duration!);
+    for (let li = 0; li < authored.layers.length; li++) {
+      if (hidden?.[li]) continue;
+      const layer = authored.layers[li]!;
+      const life = layer.life;
+      if (!life || (life.enter === undefined && life.exit === undefined && !life.stagger)) continue;
+      const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
+      warnings.push({
+        path: `layers[${li}].life`,
+        code: 'life-runs-once',
+        message: `informational: ${label}'s \`life\` runs once on scene time, from when the scene (or its sequence segment) starts — it does not replay when the timeline loops every ${lap} ms${life.exit !== undefined ? ', so after its exit the layer stays gone for every later lap' : ''}; to build it on every lap, key its \`opacity\` in the timeline instead`,
+      });
+    }
+  }
+
   // Link starvation: links layer where few edges actually form.
   // Chain mode always forms its edges — only distance-gated modes can starve.
   for (let li = 0; li < spec.layers.length; li++) {
@@ -494,7 +527,12 @@ export function adviseSpec(
     if (layer.motion.type === 'static') continue;
     const entities = allEntities[li]!;
     if (entities.length < 3) continue;
-    const speeds = entities.map((e) => Math.sqrt(e.vx * e.vx + e.vy * e.vy));
+    // An orbit stores its angular speed (deg/s) in `vx`: what the eye reads is
+    // the speed along the circle, angular speed × radius (F146, X739), so a
+    // fixed angular speed over a range of radii is varied motion, not uniform.
+    const speeds = layer.motion.type === 'orbit'
+      ? entities.map((e) => Math.abs(e.vx) * (Math.PI / 180) * e.orbitR)
+      : entities.map((e) => Math.sqrt(e.vx * e.vx + e.vy * e.vy));
     const mean = speeds.reduce((a, b) => a + b, 0) / speeds.length;
     if (mean === 0) continue;
     const maxDev = Math.max(...speeds.map((s) => Math.abs(s - mean)));
@@ -557,39 +595,7 @@ export function adviseSpec(
   // body. Only static text is judged (moving text has no fixed box). Boxes use
   // the character-class width table the textBlock line-breaker uses, so the
   // estimate is the renderer's own idea of the text, not a separate guess.
-  const textBoxes: TextBoxAt[] = [];
-  for (let li = 0; li < spec.layers.length; li++) {
-    if (hidden?.[li]) continue;
-    const layer = spec.layers[li]!;
-    const s = layer.sprite;
-    if (layer.motion.type !== 'static') continue;
-    if (s.kind !== 'text' && s.kind !== 'textBlock') continue;
-    const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
-    for (const e of allEntities[li]!) {
-      const p = positionAt(e, 0, w, h);
-      const unturned = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
-      // The renderer turns text about its entity by `rotate`: a vertical
-      // caption is tall and narrow, not a long line off the edge (X603).
-      const rot = rotationAt(e, 0);
-      const turn = (q: { x: number; y: number }) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) });
-      // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
-      // Both turns compose on the corners before one box is taken, so rotations that cancel don't grow it.
-      const map = paintMap(spec, layer, w, h, scale);
-      const both = rot && map ? (q: { x: number; y: number }) => map(turn(q)) : rot ? turn : map;
-      const box = both ? { ...unturned, ...mapBox(both, unturned) } : unturned;
-      const raw = rot ? { ...unturned, ...mapBox(turn, unturned) } : unturned;
-      // What the layer guarantees it paints, worst case: base alpha minus its
-      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
-      // duty cycle is a readability question, not an ink-colour one; sampling
-      // at `t = 0` would otherwise flag every emitting layer as invisible)
-      // times a textBlock's own `opacity` — so faint or invisible
-      // `role: 'read'` text can't hide behind an unmeasured alpha.
-      const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
-      const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
-      const str = s.kind === 'textBlock' ? textBlockText(s) : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
-      textBoxes.push({ li, label, alpha, str, ...box, rawW: raw.x1 - raw.x0, rawH: raw.y1 - raw.y0 });
-    }
-  }
+  const textBoxes = staticTextBoxes(spec, allEntities, hidden, w, h, scale);
   const asFraction = (b: Pick<Box, 'x0' | 'y0' | 'x1' | 'y1'>): WarningBox => ({
     x: +(b.x0 / w).toFixed(4),
     y: +(b.y0 / h).toFixed(4),
@@ -620,33 +626,55 @@ export function adviseSpec(
 
   // Overlap: two different static text layers whose boxes share more than 10%
   // of the smaller box. Reported once per layer pair, on the earlier layer.
-  const pairFlagged = new Set<string>();
-  for (let i = 0; i < textBoxes.length; i++) {
-    for (let j = i + 1; j < textBoxes.length; j++) {
-      const a = textBoxes[i]!;
-      const b = textBoxes[j]!;
-      if (a.li === b.li) continue;
-      const pair = `${Math.min(a.li, b.li)}:${Math.max(a.li, b.li)}`;
-      if (pairFlagged.has(pair)) continue;
-      const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-      const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-      if (ix <= 0 || iy <= 0) continue;
-      const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
-      if (smaller <= 0) continue;
-      const share = (ix * iy) / smaller;
-      if (share <= 0.1) continue;
-      if (isOutlineStack(a, b)) continue;
-      pairFlagged.add(pair);
-      const [first, second] = a.li < b.li ? [a, b] : [b, a];
-      warnings.push({
-        path: `layers[${first.li}]`,
-        code: 'text-overlap',
-        message: `${first.label} and ${second.label} text boxes overlap (~${Math.round(share * 100)}% of the smaller one) — they will paint over each other; move one or shrink it`,
-        // The two boxes, so an agent can move one without re-deriving the
-        // layout. Additive: the message is unchanged.
-        boxes: [asFraction(first), asFraction(second)],
+  // A pair whose boxes overlap at the sample instant is then judged over the
+  // piece (F145, X759/X776): at that instant and at every key boundary of a
+  // timeline that touches the text, a box counts only while it is visible —
+  // opacity in force, an effective scale above 2 %, a reveal that has begun,
+  // on screen — and the pair is flagged only if both are visible together
+  // while they overlap. This can only silence: a pair that never overlaps at
+  // the sample instant is not raised here. Text that declares
+  // `role: 'atmosphere'` is texture and is never judged (F146, X807).
+  const overlapSamples = textOverlapSamples(authored, spec, allEntities, keyed, hidden, opts.t ?? COHESION_T, opts.until, opts.seed ?? spec.seed ?? 42, w, h);
+  const overlapAt = new Map<string, { share: number; a: TextBoxAt; b: TextBoxAt; t: number | null }>();
+  if (overlapSamples) {
+    const pairsIn = (boxes: TextBoxAt[], each: (pair: string, a: TextBoxAt, b: TextBoxAt, share: number) => void): void => {
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i]!;
+          const b = boxes[j]!;
+          if (a.li === b.li) continue;
+          const share = overlapShare(a, b);
+          if (share <= 0.1 || isOutlineStack(a, b)) continue;
+          each(`${Math.min(a.li, b.li)}:${Math.max(a.li, b.li)}`, a, b, share);
+        }
+      }
+    };
+    // The pairs the instant itself raises (every box, visible or not)…
+    const raised = new Set<string>();
+    pairsIn(overlapSamples.now, (pair) => raised.add(pair));
+    // …kept only where both show together, the instant itself first.
+    for (const sample of overlapSamples.visible) {
+      pairsIn(sample.boxes, (pair, a, b, share) => {
+        if (!raised.has(pair) || overlapAt.has(pair)) return;
+        overlapAt.set(pair, { share, a, b, t: sample.t });
       });
     }
+  }
+  for (const pair of [...overlapAt.keys()].sort((x, y) => {
+    const [x0, x1] = x.split(':').map(Number) as [number, number];
+    const [y0, y1] = y.split(':').map(Number) as [number, number];
+    return x0 - y0 || x1 - y1;
+  })) {
+    const { share, a, b, t } = overlapAt.get(pair)!;
+    const [first, second] = a.li < b.li ? [a, b] : [b, a];
+    warnings.push({
+      path: `layers[${first.li}]`,
+      code: 'text-overlap',
+      message: `${first.label} and ${second.label} text boxes overlap (~${Math.round(share * 100)}% of the smaller one)${t === null ? '' : `, both visible at ${Math.round(t)} ms`} — they will paint over each other; move one or shrink it`,
+      // The two boxes, so an agent can move one without re-deriving the
+      // layout. Additive: the message is unchanged.
+      boxes: [asFraction(first), asFraction(second)],
+    });
   }
 
   // Cells of ONE list/table layer painting over each other (X214). A data
@@ -661,6 +689,8 @@ export function adviseSpec(
     const layer = spec.layers[a.li]!;
     const layout = layer.layout;
     if (layout?.type !== 'list' && layout?.type !== 'table') continue;
+    // Atmospheric text is texture: a dense wall of dim labels is the look (X807).
+    if (isAtmosphere(layer)) continue;
     for (let j = i + 1; j < textBoxes.length; j++) {
       const b = textBoxes[j]!;
       if (b.li !== a.li) continue;
@@ -787,6 +817,179 @@ export function adviseSpec(
   }
 
   return warnings;
+}
+
+/** Text that declares itself texture (`role: 'atmosphere'`): the overlap and layout checks leave it alone (X807). */
+function isAtmosphere(layer: LayerSpec): boolean {
+  const s = layer.sprite;
+  return (s.kind === 'text' || s.kind === 'textBlock') && s.role === 'atmosphere';
+}
+
+/**
+ * Every static text box of `spec` (built as `entities`) — `text` entities and
+ * `textBlock`s, through rotation and the layer / group transform — as the
+ * renderer would place them. The single-instant checks (off-screen, layout,
+ * legibility, safe area) read these at the sample time; the overlap check
+ * reads them at each key boundary (`textOverlapSamples`).
+ */
+function staticTextBoxes(spec: SaverSpec, allEntities: Entity[][], hidden: boolean[] | null, w: number, h: number, scale: number, only?: ReadonlySet<number>): TextBoxAt[] {
+  const textBoxes: TextBoxAt[] = [];
+  for (let li = 0; li < spec.layers.length; li++) {
+    if (hidden?.[li]) continue;
+    if (only && !only.has(li)) continue;
+    const layer = spec.layers[li]!;
+    const s = layer.sprite;
+    if (layer.motion.type !== 'static') continue;
+    if (s.kind !== 'text' && s.kind !== 'textBlock') continue;
+    const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
+    for (const e of allEntities[li]!) {
+      const p = positionAt(e, 0, w, h);
+      const unturned = s.kind === 'textBlock' ? textBlockBoxAt(s, p, w, h) : textBoxAt(s, e, p, spec, w, h);
+      // The renderer turns text about its entity by `rotate`: a vertical
+      // caption is tall and narrow, not a long line off the edge (X603).
+      const rot = rotationAt(e, 0);
+      const turn = (q: { x: number; y: number }) => ({ x: p.x + (q.x - p.x) * Math.cos(rot) - (q.y - p.y) * Math.sin(rot), y: p.y + (q.x - p.x) * Math.sin(rot) + (q.y - p.y) * Math.cos(rot) });
+      // A layer `transform` moves (and scales) the painted text: judge the box where it lands.
+      // Both turns compose on the corners before one box is taken, so rotations that cancel don't grow it.
+      const map = paintMap(spec, layer, w, h, scale);
+      const both = rot && map ? (q: { x: number; y: number }) => map(turn(q)) : rot ? turn : map;
+      const box = both ? { ...unturned, ...mapBox(both, unturned) } : unturned;
+      const raw = rot ? { ...unturned, ...mapBox(turn, unturned) } : unturned;
+      // What the layer guarantees it paints, worst case: base alpha minus its
+      // pulse trough (ignoring `emit`'s on/off envelope — a mark's on-screen
+      // duty cycle is a readability question, not an ink-colour one; sampling
+      // at `t = 0` would otherwise flag every emitting layer as invisible)
+      // times a textBlock's own `opacity` — so faint or invisible
+      // `role: 'read'` text can't hide behind an unmeasured alpha.
+      const baseAlpha = Math.max(0, Math.min(1, e.alpha - e.pulseAmp)) * (s.kind === 'textBlock' ? (s.opacity ?? 1) : 1);
+      const alpha = layer.opacity === undefined && layer.group === undefined ? baseAlpha : baseAlpha * paintOpacity(spec, layer);
+      const str = s.kind === 'textBlock' ? textBlockText(s) : (s.strings[e.spriteIndex] ?? s.strings[0] ?? '');
+      textBoxes.push({ li, label, alpha, peak: Math.min(1, e.alpha + e.pulseAmp), str, ...box, rawW: raw.x1 - raw.x0, rawH: raw.y1 - raw.y0 });
+    }
+  }
+  return textBoxes;
+}
+
+/**
+ * Per layer, whether any `timeline` key can change it: a key on the layer, on
+ * its group, on a whole-object parent of either, or on a root field that
+ * resizes every layer. Null without a timeline (nothing is keyed).
+ */
+function keyedLayers(spec: SaverSpec): boolean[] | null {
+  if (!spec.timeline) return null;
+  const paths = [...timelineTracks(spec).keys()];
+  if (paths.length === 0) return null;
+  return spec.layers.map((l, i) => paths.some((p) => keyTouchesLayer(p, i, l)));
+}
+
+/** Whether a key on (index-form) `path` can change layer `i`. */
+function keyTouchesLayer(path: string, i: number, layer: LayerSpec): boolean {
+  const lp = `layers.${i}`;
+  if (path === 'layers' || path === lp || path.startsWith(`${lp}.`)) return true;
+  if (path === 'referenceViewport' || path === 'units') return true;
+  if (layer.group === undefined) return false;
+  const gp = `groups.${layer.group}`;
+  return path === 'groups' || path === gp || path.startsWith(`${gp}.`);
+}
+
+/** Text visible below this alpha or effective scale reads as gone (X759, X776: a box at scale 0.001 is not a box). */
+const TEXT_VISIBLE_FLOOR = 0.02;
+
+/** The smaller of a layer's two painted axis scales (its own transform × its group's). */
+function paintAxisScale(spec: SaverSpec, layer: LayerSpec): number {
+  const axes = (tf: LayerSpec['transform']): [number, number] => {
+    const s = Math.abs(tf?.scale ?? 1);
+    return [s * Math.abs(tf?.scaleX ?? 1), s * Math.abs(tf?.scaleY ?? 1)];
+  };
+  const [lx, ly] = axes(layer.transform);
+  const [gx, gy] = axes(groupOf(spec, layer)?.transform);
+  return Math.min(lx * gx, ly * gy);
+}
+
+/** Cap on the key boundaries the overlap check resolves (each one rebuilds the scene's entities when its structure changes). */
+const TEXT_OVERLAP_MAX_SAMPLES = 48;
+
+/**
+ * What the text-overlap check judges. `now`: every static text box at the
+ * sample instant `tNow`, visible or not — the pairs it may raise. `visible`:
+ * the boxes that SHOW, at `tNow` first (its `t` null, so the message stays
+ * the instant's own) and then, when a timeline keys the text, at every key
+ * boundary of those keys (starts and ends, folded into one lap under `loop`,
+ * none past `until`), the scene resolved there and its entities rebuilt
+ * whenever its structure differs. Null with fewer than two judged layers.
+ */
+function textOverlapSamples(
+  authored: SaverSpec,
+  spec: SaverSpec,
+  allEntities: Entity[][],
+  keyed: boolean[] | null,
+  hidden: boolean[] | null,
+  tNow: number,
+  until: number | undefined,
+  seed: number,
+  w: number,
+  h: number,
+): { now: TextBoxAt[]; visible: Array<{ t: number | null; boxes: TextBoxAt[] }> } | null {
+  const candidates = new Set<number>();
+  spec.layers.forEach((l, li) => {
+    const k = l.sprite.kind;
+    if (!hidden?.[li] && (k === 'text' || k === 'textBlock') && !isAtmosphere(l)) candidates.add(li);
+  });
+  if (candidates.size < 2) return null;
+  const visibleAt = (t: number, at: SaverSpec, entities: Entity[][], boxes?: TextBoxAt[]): TextBoxAt[] => {
+    const { scale } = entityScales(at, w, h);
+    return (boxes ?? staticTextBoxes(at, entities, hidden, w, h, scale, candidates)).filter((b) => textBoxVisible(at, at.layers[b.li]!, b, t, w, h, scale));
+  };
+  const now = staticTextBoxes(spec, allEntities, hidden, w, h, entityScales(spec, w, h).scale, candidates);
+  const visible: Array<{ t: number | null; boxes: TextBoxAt[] }> = [{ t: null, boxes: visibleAt(tNow, spec, allEntities, now) }];
+  if (keyed && [...candidates].some((li) => keyed[li])) {
+    const touches = (path: string): boolean => [...candidates].some((li) => keyTouchesLayer(path, li, authored.layers[li]!));
+    let times = timelineSampleTimes(authored, false, 120, touches).filter((t) => t !== tNow && (until === undefined || t <= until));
+    if (times.length > TEXT_OVERLAP_MAX_SAMPLES) {
+      const step = times.length / TEXT_OVERLAP_MAX_SAMPLES;
+      times = Array.from({ length: TEXT_OVERLAP_MAX_SAMPLES }, (_, i) => times[Math.floor(i * step)]!);
+    }
+    const built = new Map<string, Entity[][]>([[structuralSignature(spec), allEntities]]);
+    for (const t of times) {
+      const at = resolveTimelineAt(authored, t, true);
+      const sig = structuralSignature(at);
+      let entities = built.get(sig);
+      if (!entities) {
+        const sc = entityScales(at, w, h);
+        const rng = createRng(seed);
+        entities = at.layers.map((l) => buildEntities(l, rng, w, h, sc.scale, sc.countScale));
+        built.set(sig, entities);
+      }
+      visible.push({ t, boxes: visibleAt(t, at, entities) });
+    }
+  }
+  return { now, visible };
+}
+
+/** Whether a static text box shows at `t` (see `textOverlapSamples`). */
+function textBoxVisible(spec: SaverSpec, layer: LayerSpec, b: TextBoxAt, t: number, w: number, h: number, scale: number): boolean {
+  if (b.x1 <= 0 || b.x0 >= w || b.y1 <= 0 || b.y0 >= h) return false;
+  if (paintAxisScale(spec, layer) <= TEXT_VISIBLE_FLOOR) return false;
+  const s = layer.sprite;
+  let a = paintOpacity(spec, layer) * b.peak;
+  if (s.kind === 'textBlock') {
+    a *= s.opacity ?? 1;
+    if (s.reveal) {
+      const fsPx = s.fontSize * scale;
+      const lines = breakTextBlock(textBlockText(s), (s.maxWidth * scale) / fsPx, textMetricsClassFor(s.font));
+      if (revealState(lines, s.reveal, t).progress <= 0) return false;
+    }
+  }
+  return a > TEXT_VISIBLE_FLOOR;
+}
+
+/** Two boxes' intersection as a share of the smaller box. */
+function overlapShare(a: TextBoxAt, b: TextBoxAt): number {
+  const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  if (ix <= 0 || iy <= 0) return 0;
+  const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+  return smaller > 0 ? (ix * iy) / smaller : 0;
 }
 
 /**
@@ -919,7 +1122,10 @@ function holeFrame(
  * purpose: only static, transform-free, normal-blend, hard-edged shapes
  * count, with exact containment for circles, axis-aligned (or quarter-turned)
  * rects and unrotated polygons — so the low-contrast check can only be
- * talked out of firing by a plate that is really there.
+ * talked out of firing by a plate that is really there. An unrotated path
+ * drawing counts through the filled parts that hold the point, their colours
+ * weighted by each part's area (F146, X783: a chip on a seven-part card is
+ * on the card, as it is on a rect card).
  */
 function groundUnder(
   spec: SaverSpec,
@@ -943,8 +1149,8 @@ function groundUnder(
     if (layer.life !== undefined || layer.emit !== undefined) continue;
     if ((sp.kind === 'circle' || sp.kind === 'polygon') && sp.soft) continue;
     if (sp.kind !== 'circle' && sp.kind !== 'rect' && sp.kind !== 'polygon') continue;
-    // A path drawing paints through its parts (own colours, opacity, holes); the base colour is not what lands.
-    if (sp.kind === 'polygon' && isPathPolygon(sp)) continue;
+    // A path drawing paints through its parts (own colours, opacity, holes), not its base colour.
+    const drawing = sp.kind === 'polygon' && isPathPolygon(sp);
     const a = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
     for (const e of allEntities[lj]!) {
       if (e.spinSpeed !== 0 || e.pulseAmp > 0 || e.growAmp > 0 || e.alpha * a <= 0) continue;
@@ -953,6 +1159,14 @@ function groundUnder(
       const c = positionAt(e, 0, w, h);
       const dx = pt.x - c.x;
       const dy = pt.y - c.y;
+      if (drawing) {
+        if (e.rotate) continue;
+        const ink = pathGroundAt(sp, e, dx, dy, w, h);
+        if (!ink) continue;
+        plate = sourceOverPlate(plate, ink.rgb, Math.min(1, e.alpha * a * ink.opacity));
+        covered = true;
+        continue;
+      }
       let inside = false;
       if (sp.kind === 'circle') inside = Math.hypot(dx, dy) <= e.size / 2;
       else if (sp.kind === 'rect') {
@@ -972,6 +1186,56 @@ function groundUnder(
     }
   }
   return covered ? { rgb: plate, luma: 0.2126 * plate.r + 0.7152 * plate.g + 0.0722 * plate.b } : null;
+}
+
+/**
+ * The paint a path drawing lays at an offset (`dx`, `dy`) px from its entity
+ * centre: the filled, visible parts whose outline holds the point, as one
+ * colour — each part's fill (a gradient by its stops, weighted by the span
+ * each governs, a translucent stop leaning toward the part's colour) weighted
+ * by the part's area × opacity — and their area-weighted opacity. Null when
+ * no filled part holds the point (a stroke-only line is not a ground).
+ */
+function pathGroundAt(
+  sp: Extract<LayerSpec['sprite'], { kind: 'polygon' }>,
+  e: Entity,
+  dx: number,
+  dy: number,
+  w: number,
+  h: number,
+): { rgb: Rgb; opacity: number } | null {
+  const base = sp.colors?.[e.colorIndex] ?? sp.color;
+  const fr = pathFrame(sp, e.size / 2, w, h);
+  // The point in the drawing's unit box (the inverse of the renderer's frame).
+  const u = dx / fr.sx + fr.ox;
+  const v = dy / fr.sy + fr.oy;
+  let r = 0, g = 0, b = 0, wsum = 0, area = 0;
+  for (const part of pathParts(sp)) {
+    if (!part.fill || part.opacity <= 0 || part.flat.points.length < 3) continue;
+    const box = part.box;
+    if (Math.abs(u - box.cx) > box.hw || Math.abs(v - box.cy) > box.hh) continue;
+    const ring = part.flat.points.map(([x, y]) => ({ x, y }));
+    if (!pointInPolygon(u, v, ring)) continue;
+    const pc = hexRgb(part.color ?? base);
+    let rgb = pc;
+    if (part.gradient) {
+      const weights = gradientStopWeights(part.gradient.stops);
+      rgb = { r: 0, g: 0, b: 0 };
+      part.gradient.stops.forEach((st, i) => {
+        const o = st.opacity ?? 1;
+        const c = hexRgb(st.color);
+        const k = weights[i]!;
+        rgb = { r: rgb.r + (c.r * o + pc.r * (1 - o)) * k, g: rgb.g + (c.g * o + pc.g * (1 - o)) * k, b: rgb.b + (c.b * o + pc.b * (1 - o)) * k };
+      });
+    }
+    const pa = Math.max(1e-6, polygonArea(ring));
+    const wt = pa * part.opacity;
+    r += rgb.r * wt; g += rgb.g * wt; b += rgb.b * wt;
+    wsum += wt;
+    area += pa;
+  }
+  if (wsum <= 0 || area <= 0) return null;
+  return { rgb: { r: r / wsum, g: g / wsum, b: b / wsum }, opacity: Math.min(1, wsum / area) };
 }
 
 function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>): boolean {
@@ -1028,6 +1292,8 @@ interface TextBoxAt {
    * textBlock's own `opacity`.
    */
   alpha: number;
+  /** The entity's own peak alpha (base + pulse), before paint opacity: whether it ever shows, not what it guarantees. */
+  peak: number;
   x0: number;
   y0: number;
   x1: number;
@@ -1142,7 +1408,7 @@ export function adviseSequence(
     // timeline's final frame while the request asked about another (X418).
     const timed = !!seg.scene.timeline && seg.duration !== undefined;
     const tSample = timed ? Math.min(COHESION_T, seg.duration!) : undefined;
-    const segWarnings = adviseSpec(seg.scene, viewport, tSample === undefined ? {} : { t: tSample });
+    const segWarnings = adviseSpec(seg.scene, viewport, tSample === undefined ? {} : { t: tSample, until: seg.duration });
     const at = tSample === undefined ? '' : ` (judged ${(tSample / 1000).toFixed(1)} s into this ${(seg.duration! / 1000).toFixed(1)} s segment)`;
     for (const w of segWarnings) {
       warnings.push({ path: `segments[${i}].scene.${w.path}`, code: w.code, message: w.message + at, boxes: w.boxes });
@@ -1196,7 +1462,7 @@ export function adviseSequence(
         warnings.push({
           path: `segments[${i}].transition`,
           code: 'morph-structural-mismatch',
-          message: `segments ${i}→${i + 1} differ structurally: morph will fall back to cut`,
+          message: `segments ${i}→${i + 1} differ structurally (${describeStructuralDifferences(seq.segments[i]!.scene, seq.segments[i + 1]!.scene)}): morph will fall back to cut`,
         });
       } else if (!seq.segments[i]!.scene.timeline && !seq.segments[i + 1]!.scene.timeline
         && morphNothingMorphable(seq.segments[i]!.scene, seq.segments[i + 1]!.scene, { textCrossfade: tr.text === 'crossfade' || tr.text === 'dip' })) {

@@ -196,6 +196,15 @@ and only `units: "px"` specs get it verbatim. See **Scale** below.
 `ghosting` paints each frame over a faded copy of the previous one instead of
 clearing: moving entities leave decaying after-images (Mystify smears, Matrix
 trails, long-exposure light). 0.85–0.95 is the useful range; 0 (default) is off.
+Only the background is faded in: every layer still paints in full each frame on
+top, so wherever an opaque sprite (alpha 1) sits it repaints over the smear —
+a static opaque sprite looks the same with ghosting as without, and only
+motion leaves a trail. A static translucent sprite of alpha *a* over
+bare ground builds up to an effective alpha of *a* / (1 − *g*(1 − *a*)) at
+`ghosting` *g* — 0.5 at *g* = 0.9 reads as 0.91 — so a soft glow brightens
+under ghosting rather than smearing. That figure is the 60 fps steady state,
+the rate seeks and the warm-up replay paint at; a live display fades by
+*g*^(Δt / 16.7 ms) per frame, so at 120 Hz the build-up is a little stronger.
 
 `density` declares what the emptiness or the crowding means. `sparse` says
 the scene is *meant* to be almost empty — one faint mark on a dark ground,
@@ -225,7 +234,7 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   | `scale` | 0.5..8 | — | noise features across the **short side** of the viewport (so a 16:9 frame shows more of the same field than a square one) |
   | `octaves` | int 1..4 | 2 | layers of detail; each halves in amplitude and doubles in frequency |
   | `warp` | 0..1 | 0 | domain warp: 0 round blobs, 1 the folded, smeared contours of a weather chart |
-  | `quantize` | 0 or int 2..8 | `bands.length` | posterise into that many levels, one read off the `bands` ramp per level — hard, crisp contours (Terrain, Sonar). `bands.length` is exactly one band per level; more levels step through the ramp. `0` interpolates the ramp smoothly (Aura, Mist) |
+  | `quantize` | 0 or int 2..8 | `bands.length` | posterise into that many levels, one read off the `bands` ramp per level — hard-edged contours (Terrain, Sonar), stepped at the field raster's resolution (see **Raster and cache**). `bands.length` is exactly one band per level; more levels step through the ramp. `0` interpolates the ramp smoothly (Aura, Mist) |
   | `bands` | 2..8 hex | — | the ramp, low end of the field to high |
   | `drift` | `{ period ≥ 10000, amount 0..1 }` | none | the field's slow **animate**: the sample domain travels a circle of radius `amount` feature units once per `period` ms, so the contours crawl and the field loops exactly. `amount` defaults to 0.3 |
   | `seed` | number | the spec seed | the field's own seed — change it to get a different field without re-seating an entity |
@@ -244,8 +253,11 @@ exceeds 2 %, or a `dense` one that would have tripped `sparse-scene`, gets a
   **Raster and cache.** The renderer samples the field into a low-res raster
   — 96 px on the short side, the long side by aspect; 48 px on the `basic` /
   `minimal` capability tiers (`capabilityTier` on the mount context) — and
-  draws it scaled to the canvas, nearest-neighbour for quantised bands so the
-  contours stay crisp and smoothed for `quantize: 0`. A static field is
+  draws it scaled to the canvas: nearest-neighbour for quantised bands
+  (`quantize` ≥ 2), smoothed for `quantize: 0`. The contours are therefore
+  hard but not fine — each raster pixel is about 11 px on a 1080p screen (22 px
+  on the low tiers), so a band edge is a staircase of that pitch, not a smooth
+  line. Draw a line with a layer when it must be crisp. A static field is
   sampled **once per mount**; a drifting one is resampled only when `t`
   crosses a 100 ms bucket, so ten times a second at most, however high the
   frame rate. Steering any knob recomputes on the next frame.
@@ -357,7 +369,7 @@ on the sprite tier (the `basic` tier rule).
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` (`gap`: a number or `{x?, y?}`) | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}` — a list is one column, so only its `y`, the row pitch, applies). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
-| `life` | `{enter?, exit?, fade?, stagger?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit`. `stagger` shifts entity *i*'s whole envelope (enter and exit) by *i* × `stagger` in entity order (reading order for `list` / `table` / `grid`), so a row of labels builds one after another; paint, no RNG draws. Density scaling changes the count, so the build takes (count − 1) × `stagger`. **Native:** rendered |
+| `life` | `{enter?, exit?, fade?, stagger?}` ms | always on | act structure: fade the layer in at `enter`, out at `exit`. The times are **scene time from mount** (a sequence segment's own start), not the `timeline` clock: under `timeline.loop` the envelope plays once and does not replay on later laps, so an `exit` stays gone (`adviseSpec` notes it as `life-runs-once`); key `opacity` in the timeline for a build that repeats every lap. `stagger` shifts entity *i*'s whole envelope (enter and exit) by *i* × `stagger` in entity order (reading order for `list` / `table` / `grid`), so a row of labels builds one after another; paint, no RNG draws. Density scaling changes the count, so the build takes (count − 1) × `stagger`. **Native:** rendered |
 | `emit` | `{every ≥ 1000, life ≥ 500, jitter?, grow?}` (`life ≤ every`) | always lit | **sparse events**: each entity is dark except a `life`-ms window every `every` ms, fading in fast and out slow; `jitter` 0 staggers entities evenly (one event at a time while `life ≤ every / count`), 1 scatters the offsets (a fixed sequence, not seeded — declaring `emit` disturbs no other draw); `grow: [from, to]` scales size across the window — expansion rather than travel |
 | `clock` | `{phase?, rate?}` | seeded phases | **phase-lock**: `pulse`, `grow` and `cycle` share one phase (turns, 0..1) and run at `rate` × time; two layers with the same clock breathe in step. Clocked periods must satisfy `period / rate ≥ 1000` |
 | `key` | string | none | addressable name → `setParam("key.count", …)` for a layer field, `setParam("key.sprite.color", …)` for a sprite field (the path mirrors the JSON: sprite fields sit under `sprite`) |
@@ -596,8 +608,12 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   checking on. Absent, or `"atmosphere"`, the layer is texture — a haiku
   fading in a corner, dim labels on a wall board, the `dev-dashboard`'s
   2.6:1 telemetry — and `adviseSpec` says nothing about how readable it is,
-  exactly as before the field existed; keep atmospheric text undeclared, the
-  advisories would only nag. `"read"` says the words must be read from
+  exactly as before the field existed. `"atmosphere"` goes one step further
+  and also opts the layer out of the layout checks — `text-overlap`,
+  `layout-text-overlap` and the validator's `list-length-mismatch` — since
+  texture words layered over a title or packed into a dense wall are the
+  look, not a collision; undeclared text is still checked for layout.
+  `"read"` says the words must be read from
   across the room, and opts that layer into two advisories:
   `text-legibility` fires when the text colour's WCAG ratio falls below
   **4.5:1** against the background sampled at the box centre (gradient stops
@@ -1172,7 +1188,9 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   its own × its group's — is 0 in the base scene and at every key boundary of
   its `timeline` never shows, so it is not judged and its entities do not count
   toward `dense-scene`; coverage is weighed by paint opacity) (also on
-  `perceiveScene().advisories`). `giant-entity` flags an emoji/text layer
+  `perceiveScene().advisories`). Count-based advisories (`dense-scene`,
+  `full-coherence`) read the **declared** `count`, not the density-scaled
+  build, so a small preview and a 4K screen agree on them. `giant-entity` flags an emoji/text layer
   whose glyphs come out taller than the viewport's min dimension — usually
   px numbers in a viewport-unit spec (`size: [20, 40]` is 21,600 px at
   1080p), which blankets the frame and otherwise reads as healthy coverage.
@@ -1183,7 +1201,16 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   viewport fractions so the fix needs no re-derivation) and
   `layout-text-overlap` (two cells of one `list`/`table` layer do — its
   `gap` pitch is narrower than its labels; the message names the `gap` that
-  clears them, and it carries the two boxes too). Boxes come from the
+  clears them, and it carries the two boxes too). A pair `text-overlap` finds
+  at the sample instant is then checked over the piece: at that instant and
+  at every key boundary of a `timeline` that keys the text, a box counts only
+  while it shows (paint opacity in force, an effective `transform` scale above
+  2 % on both axes, a `reveal` that has begun, on screen), and the pair is
+  reported only if both show together while they overlap — a cross-fade
+  between two cards in one place is not a collision (the message then names
+  the time, `both visible at N ms`). Text declared `role: "atmosphere"` is
+  texture: it is left out of `text-overlap` and `layout-text-overlap`, and the
+  validator's `list-length-mismatch` does not fire on it. Boxes come from the
   same character-class width table the textBlock line-breaker uses, so they
   are estimates of the renderer's own layout — a caption that fails these
   will look wrong on the wall; one that passes may still sit a few px off.
@@ -1208,6 +1235,12 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   their densest one-second window, flicker at least 2 times a second over a
   quarter of the frame — a full-frame step at the 200 ms key floor is 2.5, which
   the publish-time WCAG gate (more than 3) lets through.
+  `life-runs-once` (informational) notes a layer whose `life` envelope sits
+  under a looping timeline: `life` runs on scene time from mount, so it plays
+  once and never replays when the lap wraps.
+  `uniform-motion` fires when every entity of a moving layer travels at
+  nearly the same on-screen speed; an orbit's is its angular speed × its
+  radius, so one angular speed over a spread of radii is not uniform.
   `loop-seam` fires when a scene declares a looping timeline and the rest
   of the scene repeats too, but on a period the lap does not divide — so
   one lap can never come round to its own first frame (it names the period
@@ -1338,7 +1371,8 @@ change, with the baseline regenerated. **Native:** tvOS lerps the two
 segments frame by frame on the chain root's seed and honours `text`. Morph requires structurally
 identical adjacent segments (same `structuralSignature`); if they differ, the
 engine falls back to cut and the validator emits a `morph-structural-mismatch`
-warning. When the segments are structural twins whose only differences are
+warning that names the fields that differ (e.g. `layers[2].layout.type: grid →
+list`; the first three, then a count of the rest). When the segments are structural twins whose only differences are
 values morph steps (a text-only change), the morph runs but every frame of it
 shows the incoming segment — it reads as a cut — and the validator emits a
 `morph-nothing-morphable` warning (never an error; stored sequences stay

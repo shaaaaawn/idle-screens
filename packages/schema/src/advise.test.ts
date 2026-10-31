@@ -687,12 +687,18 @@ describe("adviseSpec — legibility, opt-in by role: 'read' (#59, plan 1e)", () 
       expect(b.h).toBeGreaterThan(0);
       expect(b.h).toBeLessThan(1);
     }
-    // Same fire, same boxes when the layers declare a role.
+    // Same fire, same boxes when both layers declare they must be read.
     const declared = adviseSpec({
+      ...vp,
+      layers: [block('Title of the talk', 0.1, 0.3, { role: 'read' }, 'title'), block('Body copy under it', 0.1, 0.3, { role: 'read' }, 'body')],
+    }).filter((x) => x.code === 'text-overlap');
+    expect(declared[0]!.boxes).toEqual(o.boxes);
+    // Text declared as texture is never judged for overlap (F146, X807).
+    const texture = adviseSpec({
       ...vp,
       layers: [block('Title of the talk', 0.1, 0.3, { role: 'read' }, 'title'), block('Body copy under it', 0.1, 0.3, { role: 'atmosphere' }, 'body')],
     }).filter((x) => x.code === 'text-overlap');
-    expect(declared[0]!.boxes).toEqual(o.boxes);
+    expect(texture).toEqual([]);
   });
 
   it('a list of text sprites is judged per row, worst row wins, one advisory per layer', () => {
