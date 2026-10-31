@@ -248,3 +248,15 @@ describe('the act schedule', () => {
     for (const t of [3, 50, 777]) expect(pufferAct(5, t)).toEqual(pufferAct(5, t));
   });
 });
+
+describe('a cued puff', () => {
+  it('a vignette\'s puff fills the dial whatever the schedule, gulping while it fills', () => {
+    const { rig } = rigged();
+    const t = 1.3, calm = pufferFrame(rig, t, 2, 0, { pace: 0 });
+    const cued = pufferFrame(rig, t, 2, 0, { pace: 0, puffCue: { at: 0.3, weight: 0.95 } });
+    expect(cued.puff).toBeGreaterThanOrEqual(Math.max(calm.puff, 0.95));
+    expect(cued.doing).toBe('puffup');
+    expect(rig.actions.gulp.getEffectiveWeight()).toBeCloseTo(0.95, 9);
+    expect(pufferFrame(rig, t, 2, 0, { pace: 0, puffCue: { at: 0.3, weight: 0 } }).puff).toBe(calm.puff);
+  });
+});

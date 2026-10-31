@@ -268,3 +268,17 @@ describe('crab: the frame', () => {
     expect(far.x).toBeCloseTo(s.x, 9);
   });
 });
+
+describe('a crab acting in a vignette', () => {
+  it('plays the gestures it has claws for over its idle, and only those', () => {
+    const rig = rigged();
+    crabIdle(rig, 3, 0, { name: 'hop', at: 0.4, weight: 0.8 });
+    expect(weight(rig, 'cheer')).toBeCloseTo(0.8, 9);
+    expect(weight(rig, 'idle')).toBeCloseTo(0.2, 9);
+    crabIdle(rig, 3, 0, { name: 'nod', at: 0.4, weight: 1 }); // nod is its whole body's (vignette.ts), not a clip
+    expect(weight(rig, 'idle')).toBe(1);
+    expect(['pinch', 'forage', 'wave', 'cheer'].every((n) => weight(rig, n as (typeof CRAB_CLIPS)[number]) === 0)).toBe(true);
+    crabIdle(rig, 3, 0);
+    expect(weight(rig, 'idle')).toBe(1);
+  });
+});

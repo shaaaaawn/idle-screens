@@ -44,9 +44,9 @@ export type Marks = Readonly<Record<string, Mark>>;
 export const DANCES = ['toprock', 'footwork', 'windmill', 'headspin', 'freeze', 'drop'] as const;
 export type Dance = (typeof DANCES)[number];
 /** `ink` is the octopus's own (it lets go a cloud of ink; the tank does that, not the pose): any other breed ignores it, with a warning. */
-export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow', 'ink', ...DANCES] as const;
+export const GESTURES = ['talk', 'nod', 'shake', 'hop', 'spin', 'wiggle', 'rest', 'peek', 'bow', 'ink', 'puff', ...DANCES] as const;
 /** Gestures only some breeds can make, and which. */
-export const BREED_GESTURES: Readonly<Partial<Record<Gesture, readonly string[]>>> = { ink: ['octopus'] };
+export const BREED_GESTURES: Readonly<Partial<Record<Gesture, readonly string[]>>> = { ink: ['octopus'], puff: ['blowfish'] };
 export type Gesture = (typeof GESTURES)[number];
 
 /** Marks any open tank has, for vignettes played outside a room. */
@@ -398,6 +398,7 @@ export function poseOf(v: Vignette, actor: number, tSec: number, own?: (g: Gestu
         case 'peek': { const k = Math.sin(gt * 2.4) * e; x += -fz * k * 7; z += fx * k * 7; roll += k * 0.18; break; }
         case 'rest': y -= 5 * e; roll += 0.22 * e; pitch = -0.08 * e; break;
         // ink: the body holds still; the octopus squirts its cloud (the tank's InkLayer) and pales.
+        // puff: the body holds still; the blowfish gulps itself round (puffer.ts PufferInput.puffCue).
         // The dances, for a fish with no clips for them: the whole body does what it can.
         case 'toprock': roll += Math.sin(bt * Math.PI * 2) * 0.3 * e; y += Math.abs(Math.sin(bt * Math.PI * 2)) * 1.5 * e; break;
         case 'footwork': yaw = Math.sin(bt * Math.PI) * 0.5 * e; y -= 3 * e; roll += Math.sin(bt * Math.PI * 3) * 0.15 * e; break;

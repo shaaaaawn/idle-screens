@@ -194,7 +194,7 @@ signs     kind[@place][>target][/#color][*size][:text], …   plank@gate:"Welcom
 vignette  beats separated by |, cues by comma; actors a b c d are fish slots 0 1 2 3
           [<sec>s:] actor =mark  be there, no travel (a later beat's = snaps at its start)    actor >mark  swim there
           actor @mark | @actor   face it    a b circle mark  each named actor rings it, back to its spot by the beat's end; others stay put
-          actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus only: a cloud of ink)
+          actor follow actor     gestures: talk nod shake hop spin wiggle rest peek bow · ink (octopus) · puff (blowfish)
           dances: toprock footwork windmill headspin freeze drop (a betafish dances them with its own body; 2 s beats keep them on a 120 bpm bar)
           Give every beat a duration and end where you began and a spotCues sheet stays in step forever.
           Fish cast @audience sit out front facing the stage: they laugh as each talk ends and applaud each bow.

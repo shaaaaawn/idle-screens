@@ -324,10 +324,17 @@ function setAction(rig: CrabRig, name: CrabClip, time: number, weight: number): 
 }
 
 /** A crab the tank is placing itself (a vignette's actor): idle on the spot. */
-export function crabIdle(rig: CrabRig, t: number, index: number): void {
+export function crabIdle(rig: CrabRig, t: number, index: number, gesture: { name: string; at: number; weight: number } | null = null): void {
   const D = rig.durations;
   setAction(rig, 'walk', 0, 0);
-  for (const n of GESTURES) setAction(rig, n, 0, 0);
-  setAction(rig, 'idle', posMod(t + fishHash(index, 713) * D.idle, D.idle), 1);
+  // A vignette's actor plays the gestures it has clips for (CRAB_GESTURES) with its own claws: over the idle.
+  const clip = gesture ? CRAB_GESTURE_CLIP[gesture.name] : undefined;
+  for (const n of GESTURES) setAction(rig, n, n === clip ? posMod(gesture!.at, D[n]) : 0, n === clip ? gesture!.weight : 0);
+  setAction(rig, 'idle', posMod(t + fishHash(index, 713) * D.idle, D.idle), clip ? 1 - gesture!.weight : 1);
   rig.mixer.update(0);
 }
+
+/** A vignette's gestures a crab plays with its own clips: talk snaps the claws, wiggle waves, hop throws them up and
+ *  cheers, peek forages (busy with something on the floor). The rest (nod, shake, bow…) move its whole body. */
+export const CRAB_GESTURE_CLIP: Readonly<Record<string, CrabClip>> = { talk: 'pinch', wiggle: 'wave', hop: 'cheer', peek: 'forage' };
+export const CRAB_GESTURES = Object.keys(CRAB_GESTURE_CLIP);
