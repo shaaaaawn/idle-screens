@@ -6,7 +6,8 @@ import Foundation
 ///
 /// Plain text on purpose: readable in ten years without this app, and each
 /// key is written as the app's own handoff link, so restoring one is a tap
-/// (`ChannelTokenFormat.handoff(from:)` parses exactly this shape).
+/// (`ChannelTokenFormat.handoffLink` writes it, `handoff(from:)` parses it,
+/// and still reads the `?token=` form that older backups were printed with).
 enum KeyBackup {
     struct Entry: Equatable {
         let channelId: String
@@ -30,7 +31,7 @@ enum KeyBackup {
             lines.append("\(entry.label)\(entry.role.map { " (\($0))" } ?? "")")
             lines.append("  channel: \(entry.channelId)")
             lines.append("  key:     \(entry.token)")
-            lines.append("  restore: idlescreens://channel/\(entry.channelId)?token=\(entry.token)")
+            lines.append("  restore: \(ChannelTokenFormat.handoffLink(channelId: entry.channelId, token: entry.token))")
             lines.append("")
         }
         return lines.joined(separator: "\n")
