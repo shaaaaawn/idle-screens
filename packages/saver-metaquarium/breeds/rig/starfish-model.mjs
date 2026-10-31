@@ -25,9 +25,9 @@
  *           middle by the disc, thinning to one at the edges and the tip
  *   bumps   SecondaryColor tubercles, small cubes half sunk in the top, in a
  *           line zig-zagging down each arm's ridge
- *   tips    GLOW-Tips, the last TIP_LEN of each arm, its end stepped up half
- *           a cube (a real starfish lifts its tips, where its eyespots are; the
- *           name must not contain "eye")
+ *   tips    GLOW-Tips, each arm's point: its last cell and the one behind it
+ *           down the middle (a real starfish's eyespots are there; the name
+ *           must not contain "eye"); the rig's idle and crawl lift them
  *   face    two eyes on top of the disc (2×2 white, the inner front voxel a
  *           black pupil) behind a black smile set into the disc's top
  */
@@ -51,10 +51,11 @@ const MATERIALS = {
 
 /** Half an arm's width at `along` voxels out (a cell is on the arm if |across| ≤ this). */
 export const armHalfWidth = (along) => 2.3 - 1.55 * (along / ARM_R);
-/** An arm's cells either side of its axis, `u` cells out: five wide by the disc, three down its length and the
- *  glowing tip a paddle of three, as it was drawn. Chunky on purpose: the arms are the
- *  character (cut to the taper above on their own grid, they came out thin and spiky). */
-export const armHalfCells = (u) => (u <= 4 ? 2 : 1);
+/** An arm's cells either side of its axis, `u` cells out: five wide by the disc, three down its length, and the
+ *  glowing tip narrowing to a point — the arm's own end, lit (a full-width glowing paddle at the end of a
+ *  thinning arm read as a separate slab stuck on). Chunky on purpose: the arms are the character (cut to the
+ *  taper above on their own grid, they came out thin and spiky). */
+export const armHalfCells = (u) => (u <= 4 ? 2 : u < Math.round(ARM_R) ? 1 : 0);
 
 /** Which arm a point (voxel units) lies in, and how far out: null off the arms. */
 export function armOf(x, y) {
@@ -78,10 +79,7 @@ export function armLayers(u, v) {
   if (a === 1) return u <= 5 ? 2 : 1;
   return 1;
 }
-/** The tip turns up: its last row of cells sits half a cube high, the whole paddle's end stepping up (one cell
- *  raised alone read as a knob on the paddle). A real starfish lifts its tips to see. */
 const TIP_U = Math.round(ARM_R);
-const TIP_LIFT = 1;
 const ARM_SINK = 0.06;
 /** Bumps (tubercles) down each arm: a small cube of SecondaryColor half sunk in the top, where these cells are. */
 export const BUMP = 1.1;
@@ -121,13 +119,14 @@ export function cubes() {
       for (let v = -2; v <= 2; v++) {
         // Inside the disc the disc is the starfish (its face is drawn on it): an arm starts at its rim.
         if (Math.abs(v) > armHalfCells(u) || Math.hypot(u, v) < DISC_R) continue;
-        const tip = u > ARM_R - TIP_LEN;
+        // The light is the tip itself: the last cell and the one behind it down the middle. A whole lit paddle,
+        // haloed and bloomed past its cubes, read as a glowing slab pasted over the end of the arm.
+        const tip = u === TIP_U || (u === TIP_U - 1 && v === 0);
         const layers = armLayers(u, v);
-        const lift = u === TIP_U ? TIP_LIFT : 0;
         for (let k = 0; k < layers; k++) {
-          out.push({ grid: n, cell: [v, u, k], mat: tip ? 'GLOW-Tips' : 'PrimaryColor', centre: at(u, v, 2 * k + 1 + lift), basis: [p, d, [0, 0, 1]], size: 2 });
+          out.push({ grid: n, cell: [v, u, k], mat: tip ? 'GLOW-Tips' : 'PrimaryColor', centre: at(u, v, 2 * k + 1), basis: [p, d, [0, 0, 1]], size: 2 });
         }
-        if (!tip && bumpAt(u, v)) {
+        if (!tip && bumpAt(u, v) && u < TIP_U - 1) {
           out.push({ grid: n, cell: [v, u, layers], mat: 'SecondaryColor', centre: at(u, v, 2 * layers + BUMP * 0.3), basis: [p, d, [0, 0, 1]], size: BUMP, bump: true });
         }
       }
