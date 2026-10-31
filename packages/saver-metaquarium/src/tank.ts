@@ -3869,7 +3869,9 @@ class TankInstance implements SaverInstance {
           const hx = act ? act.fx : lfx, hz = act ? act.fz : lfz;
           let toYou = Math.atan2(viewer.x - px, viewer.z - pz) - Math.atan2(hx, hz);
           toYou -= Math.round(toYou / (Math.PI * 2)) * Math.PI * 2;
-          f.group.rotateOnWorldAxis(Y_AXIS, (toYou - Math.sign(toYou) * UPRIGHT.offAxis) * up);
+          // The side it turns to eases in across dead-ahead (no pop as the camera crosses its heading).
+          const side = MathUtils.clamp(toYou / 0.3, -1, 1);
+          f.group.rotateOnWorldAxis(Y_AXIS, (toYou - side * UPRIGHT.offAxis) * up);
         }
         const { roll } = dolphin.turn;
         // A breach pitches it along its arc (+ nose up there; + head down here); standing, nose up.
