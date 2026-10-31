@@ -120,6 +120,7 @@ import { rigBetaEyes, type BetaEyeRig } from './beta-eyes';
 const EYES_AT_REST: EyeState = { blink: 0, gazeFwd: 0, gazeUp: 0, dilate: 1, widen: 0, expr: 0 };
 import { MAX_SPOTS, parseSpotCues, parseSpotRig, spotLevels, type SpotSheet, type SpotSpec } from './spots';
 import { roomScale } from './interior';
+import { STAGE_SETS, type StageSet } from './club';
 import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseAcross, poseOf, resolveVignette, type Marks, type Vignette } from './vignette';
 import {
   clusterClearance, clusterMound, emittersOf, ENV_PROP_MIX, layoutCrystals, parsePropMix, sampleLight, shardGeometry,
@@ -1676,6 +1677,7 @@ class TankInstance implements SaverInstance {
     const townSrc = this.str('townProps').trim(), town = townSrc ? parseTownProps(townSrc).props : null;
     const coverSrc = this.str('floorCover').trim(), floorCover = coverSrc ? parseFloorCover(coverSrc).cover : null;
     const signs = this.str('signs').trim();
+    const stageSet = (STAGE_SETS as readonly string[]).includes(this.str('stageSet')) ? this.str('stageSet') as StageSet : 'none';
     // An LED board's words are live data: when nothing but them changed, swap
     // them on the boards in place. The world (and every sign's site) depends
     // only on the layout, so it is keyed without them.
@@ -1688,7 +1690,7 @@ class TankInstance implements SaverInstance {
       };
     }
     const { entries: signEntries, layout: signLayout, led: ledTexts } = this.signsMemo;
-    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${this.str('stoneStyle')}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${pyramids}|${pyramids > 0 ? `${pyramidMix}|${pyramidLayout}|${environment}` : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signLayout}|${townSrc}|${coverSrc}`;
+    const key = `${this.propsKey}|${rocks}|${veins}|${homes}|${this.str('stoneStyle')}|${flora}|${flora > 0 ? `${floraMix}|${floraPalette}|${floraLayout}|${environment}` : ''}|${geodes}|${geodeMix}|${geodeMineral}|${geodeLayout}|${fountain}|${streetLamps}|${pyramids}|${pyramids > 0 ? `${pyramidMix}|${pyramidLayout}|${environment}` : ''}|${bubbles}|${snow}|${interior}|${lanterns}|${lanternHeight}|${horizon}|${castle}|${paths}|${pathMaterial}|${bubbleStyle}|${pearling}|${mist}|${signLayout}|${townSrc}|${coverSrc}|${stageSet}`;
     if (key === this.sceneryKey) {
       this.scenery?.setLedTexts(ledTexts);
       return;
@@ -1707,10 +1709,10 @@ class TankInstance implements SaverInstance {
       this.rockCrystals = null;
     }
     const terrain = this.terrainAt ?? (() => 0);
-    if (rocks > 0 || homes > 0 || flora > 0 || pyramids > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs || townSrc || coverSrc) {
+    if (rocks > 0 || homes > 0 || flora > 0 || pyramids > 0 || geodes > 0 || fountain !== 'none' || bubbles > 0 || mist > 0 || snow > 0 || lanterns > 0 || horizon > 0 || castle || paths > 0 || interior || signs || townSrc || coverSrc || stageSet !== 'none') {
       this.scenery = buildScenery(this.clusters, this.ctxSaver.rng.fork(0x70a1d), terrain,
         { rocks, veins, homes, stoneStyle: this.str('stoneStyle') === 'weathered' ? 'weathered' : 'classic', flora, floraMix: this.floraMixParsed(floraMix), environment, floraPalette: this.floraPaletteParsed(floraPalette), floraLayout,
-          fountain, lamps: streetLamps, pyramids, pyramidMix, pyramidLayout, signs: signEntries.length ? signEntries : undefined, town: town ?? undefined, floorCover: floorCover ?? undefined,
+          fountain, lamps: streetLamps, pyramids, pyramidMix, pyramidLayout, signs: signEntries.length ? signEntries : undefined, stageSet, town: town ?? undefined, floorCover: floorCover ?? undefined,
           geodes, geodeMix: parseGeodeMix(geodeMix).mix, geodeMinerals: parseGeodeMineral(geodeMineral, this.ctxSaver.rng.fork(0x9e0).next()).minerals, geodeLayout,
           bubbles, bubbleStyle, pearling, mist, snow, lanterns, lanternHeight, horizon, castle, paths, pathMaterial, interior, cap: this.quality.props.clusters, scale: this.num('crystalScale'),
           wild: this.num('crystalWild'), shardCap: Math.max(4, Math.round(this.quality.props.shards * 0.4)), variants: 3 });
@@ -1721,6 +1723,7 @@ class TankInstance implements SaverInstance {
         for (const m of this.scenery.floraMaterials) installFloraLight(m, this.poolUniforms);
         // The geodes stand in the same light: a crystal tints the stone and agate beside it.
         for (const m of this.scenery.geodeMaterials) installFloraLight(m, this.poolUniforms, false);
+        for (const m of this.scenery.stageMaterials) installFloraLight(m, this.poolUniforms, false);
       }
       // What broke out of the rocks is the same crystal as `propMix`: same
       // shard shapes, material, pulse, fog and halo — one more instanced
@@ -1930,7 +1933,9 @@ class TankInstance implements SaverInstance {
     const script = resolveVignette(this.str('vignette'));
     const indoors = this.str('interior') === 'geode';
     const scale = this.num('crystalScale');
-    const key = `${script}|${indoors}|${scale}|${this.sceneryKey}`;
+    // The fish cast `@audience` take seats out front (vignette.ts crowdPose).
+    const audience = this.wantStyles.flatMap((st, i) => (st?.name === 'audience' ? [i] : []));
+    const key = `${script}|${indoors}|${scale}|${this.sceneryKey}|${audience.join(',')}`;
     if (key === this.vignetteKey) return;
     this.vignetteKey = key;
     this.vignette = null;
@@ -1939,8 +1944,8 @@ class TankInstance implements SaverInstance {
     // Indoors the marks scale with the room, which is built no smaller than ROOM_MIN_SCALE (interior.ts).
     const k = indoors ? roomScale(scale) : 1;
     // The world's own places (a castle's gate, plaza, courtyard) join the stage marks.
-    const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
-    const parsed = parseVignette(script, marks);
+    const marks: Marks = { ...Object.fromEntries(Object.entries(base).map(([n, m]) => [n, { ...m, x: m.x * k, y: m.y * k, z: m.z * k }])), ...(indoors ? {} : this.scenery?.marks ?? {}) };
+    const parsed = parseVignette(script, marks, audience);
     if (parsed.problems.length && script !== this.warnedVignette) {
       this.warnedVignette = script;
       console.warn(`[metaquarium] vignette: ${parsed.problems.join('; ')}`);
@@ -3109,7 +3114,7 @@ class TankInstance implements SaverInstance {
       if (!f?.rig || f.index >= visible) continue;
       const d = danceSpots.get(f.index);
       // A vignette's actor is where its script has it, not where its own walk would.
-      const a = !d && this.vignette && f.index < this.vignette.actors ? poseOf(this.vignette, f.index, tSec) : null;
+      const a = !d && this.vignette ? poseOf(this.vignette, f.index, tSec) : null;
       const s = d ? { x: d[0], z: d[1] } : a ? { x: a.x, z: a.z } : f.rig.crab ? crabSpot(f.index, tSec, f.plan, crabStart(f.plan, f.index))
         : f.rig.starfish ? starfishSpot(f.index, tSec, f.plan, starfishStart(f.plan, f.index))
         : f.rig.octopus ? octopusSpot(f.index, tSec, f.plan, octopusStart(f.plan, f.index))
@@ -3212,7 +3217,7 @@ class TankInstance implements SaverInstance {
       }
       // A vignette's actor is the script's (X441): no maneuver moves it, flurries
       // its tail or counts it as maneuvering — its place and facing were already exempt.
-      const scripted = !!this.vignette && f.index < this.vignette.actors;
+      const scripted = !!this.vignette && (f.index < this.vignette.actors || this.vignette.seats.has(f.index));
       const mnv = maneuverAt(scripted ? null : spec, f.index, tSec, mnvRate, mnvIntensity, seatDelay);
       // A dori holds still for a headstand, plays dead without being towed,
       // backs off when wary — then catches up (tang.ts). Before the pose, so a
@@ -3943,6 +3948,16 @@ class TankInstance implements SaverInstance {
             L * 0.11, fishHash(f.index, Math.round(dolphin.bubble.t * 10)));
         }
       }
+      // An audience member's laugh lets a bubble go (vignette.ts crowdPose): from its mouth, a little ahead.
+      if (act?.burst && tSec >= act.burst.t) {
+        if (!this.burps) {
+          this.burps = new BurpLayer(this.scene);
+          if (this.waterInstalled) patchWater(this.burps.mesh.material as Material, this.str('dither') === 'on');
+        }
+        const hl = Math.hypot(act.fx, act.fy, act.fz) || 1;
+        this.burps.emit(act.burst.key, act.burst.t, px + (act.fx / hl) * L * 0.55, y + (act.fy / hl) * L * 0.55 + L * 0.05, pz + (act.fz / hl) * L * 0.55,
+          L * 0.08, fishHash(f.index, Math.round(act.burst.t * 10)));
+      }
       // Hic! The bubble leaves the mouth at the jolt, and stays where it was let go.
       if (baby?.moment === 'hiccup' && baby.into >= HICCUP_JOLT && this.burps) {
         const hx = act ? act.fx : lfx, hy = act ? act.fy : lfy, hz = act ? act.fz : lfz, hl = Math.hypot(hx, hy, hz) || 1;
@@ -4194,6 +4209,7 @@ class TankInstance implements SaverInstance {
         beats: this.vignette.beats.length,
         duration: Math.round(this.vignette.duration * 10) / 10,
         doing: Array.from({ length: this.vignette.actors }, (_, i) => poseOf(this.vignette!, i, this.lastFrameT / 1000)?.doing ?? null),
+        audience: [...this.vignette.seats.keys()].map((slot) => ({ slot, doing: poseOf(this.vignette!, slot, this.lastFrameT / 1000)?.doing ?? null })),
       } : null,
       glow: {
         lighting: this.lit ? 'lit' : 'flat',

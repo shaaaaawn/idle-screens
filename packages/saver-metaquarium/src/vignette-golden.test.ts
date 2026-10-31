@@ -6,7 +6,7 @@ import { INTERIOR_MARKS, OPEN_MARKS, parseVignette, poseOf, VIGNETTES } from './
  * loop, rounded and hashed. A change to the parser or the poser that moves a
  * preset by a hundredth of a unit fails here — the presets are live scenes.
  */
-const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' ? OPEN_MARKS : INTERIOR_MARKS);
+const marksFor = (name: string): typeof OPEN_MARKS => (name === 'duet' || name === 'trio' || name === 'openmic' ? OPEN_MARKS : INTERIOR_MARKS);
 
 function digest(name: string): string {
   const v = parseVignette(VIGNETTES[name]!, marksFor(name));
@@ -30,6 +30,7 @@ describe('vignette presets', () => {
 const GOLDEN: Record<string, string> = {
   bedtime: '63.253:72384a13',
   duet: '53.000:5e4a0262',
+  openmic: '88.000:1badf75a',
   seek: '109.783:fc0279a4',
   tea: '97.185:bdc03515',
   trio: '61.000:f9628336',

@@ -43,6 +43,8 @@ export interface DolphinPersona {
   finish: { roughness: number; metalness: number; envMapIntensity: number } | null;
   /** A shirt round its chest (a colour multiplied into the skin there), or none. */
   shirt: string | null;
+  /** A flannel's dark check over the shirt, or none: the side a standing comic shows its audience is its chest. */
+  plaid?: string;
   /** A tie down its chest, or none. */
   tie: string | null;
   /** A trucker cap: crown front, crown back and brim, or none. */
@@ -65,13 +67,14 @@ export const PERSONAS: Readonly<Record<DolphinPersonaId, DolphinPersona>> = {
     shirt: null, tie: '#d0283a', cap: null, size: 1,
     act: { tempo: 1.35, energy: 1.25, slouch: -0.05, lean: 0, lids: 0 },
   },
-  // Sun-bleached and easy: a sandy, matte skin, a two-tone trucker cap, heavy lids, a slow drawl, a slouch
-  // and a lean like it is propped on a bar.
+  // Sun-bleached and easy: a sandy, matte skin, a faded flannel, a two-tone trucker cap, heavy lids, a slow
+  // drawl, a slouch and a lean like it is propped on a bar. Tanned deeper than it reads: under a stage spot
+  // its first coat (cream belly, pale sand flank) was all an audience saw, a white dolphin.
   drifter: {
     id: 'drifter', label: 'The Drifter',
-    skin: { cape: '#a8895c', back: '#8a6d44', flank: '#c7a978', belly: '#efe3c8' },
+    skin: { cape: '#8c6a40', back: '#6e532f', flank: '#a5844f', belly: '#c4a878' },
     finish: { roughness: 0.8, metalness: 0, envMapIntensity: 0.25 },
-    shirt: null, tie: null, cap: { front: '#f4efe2', back: '#c8402c' }, size: 0.95,
+    shirt: '#a8321f', plaid: '#241a16', tie: null, cap: { front: '#f4efe2', back: '#c8402c' }, size: 0.95,
     act: { tempo: 0.72, energy: 0.95, slouch: 0.12, lean: 0.2, lids: 0.5 },
   },
   // Big and unbothered: a stocky slate-grey dolphin in a dark tee, gestures small and slow, a deadpan
@@ -126,10 +129,13 @@ export function dressDolphin(body: Object3D, persona: DolphinPersona, bone: (nam
       const g = mesh.geometry.clone();
       g.userData.mqOwned = true;
       const pos = g.getAttribute('position'), col = g.getAttribute('color') as BufferAttribute;
-      const tint = new Color(persona.shirt), v = new Vector3();
+      const shirt = new Color(persona.shirt), check = new Color(persona.plaid ?? persona.shirt), v = new Vector3();
       for (let i = 0; i < pos.count; i++) {
         v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
         if (v.z < CHEST.z0 || v.z > CHEST.z1) continue;
+        // A flannel's check: dark bands two cubes apart along it and across it, darkest where they cross.
+        const bands = persona.plaid ? (Math.floor(v.z / 2) % 2 === 0 ? 1 : 0) + (Math.floor((v.x + 50) / 2) % 2 === 0 ? 1 : 0) : 0;
+        const tint = bands ? shirt.clone().lerp(check, bands * 0.5) : shirt;
         // Brightened so the skin's own colour still tells under the shirt a little (a tee, not a hole).
         col.setXYZ(i, col.getX(i) * (tint.r * 1.6 + 0.08), col.getY(i) * (tint.g * 1.6 + 0.08), col.getZ(i) * (tint.b * 1.6 + 0.08));
       }
