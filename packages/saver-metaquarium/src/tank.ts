@@ -78,6 +78,7 @@ import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
 import { rigSpawnFade, spawnAmount, type SpawnUniform } from './spawnfade';
 import { FLOOR_DETAIL, patchFloorDetail } from './floor-detail';
 import { addRimNormals, patchFishRim, setFishRim } from './rim';
+import { bakeVoxelOcclusion, patchVoxelAO, VOXEL_AO } from './voxel-ao';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
 import { FinishPass } from './finish';
 import { HighlightPass, canHoldHighlights } from './highlights';
@@ -2868,6 +2869,7 @@ class TankInstance implements SaverInstance {
     this.updateSceneryShadows();
     this.updateFloorDetail();
     this.updateFishRim();
+    this.updateVoxelAO();
     this.updateNearFade();
 
     // Camera: the named shot (shots.ts; `orbit` is the classic camera, exactly).
@@ -4366,6 +4368,19 @@ class TankInstance implements SaverInstance {
     });
     for (const f of this.fish) if (f) patch(f.group);
     if (this.shoal) patch(this.shoal.mesh);
+  }
+
+  /**
+   * `voxelAO` (voxel-ao.ts): the plants' corner shading, baked into their mesh
+   * the first frame the param is on for this scenery (a rebuilt world bakes
+   * again), then only its strength moves.
+   */
+  private updateVoxelAO(): void {
+    const amount = this.num('voxelAO');
+    VOXEL_AO.value = Math.max(0, Math.min(1, amount));
+    const flora = this.scenery?.flora;
+    if (amount <= 0 || !flora) return;
+    if (bakeVoxelOcclusion(flora.geometry, { ground: this.scenery!.floraGround })) patchVoxelAO(flora.material as Material);
   }
 
   /**

@@ -162,9 +162,12 @@ class VoxelWriter {
   readonly cells: number[] = [];
   /** Each cell's sway (root, phase, gust, flex), as its vertices have it: a spore leaves with the tip it came off. */
   readonly cellSway: number[] = [];
+  /** Every box drawn (centre, half-extents: cx cy cz hx hy hz), for the voxel occlusion (voxel-ao.ts). */
+  readonly boxes: number[] = [];
 
   cube(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, c: Color, lit: number, flat = false): void {
     for (let f = 0; f < 6; f += 1) this.face(f, cx, cy, cz, sx / 2, sy / 2, sz / 2, c, lit, flat);
+    this.boxes.push(cx, cy, cz, sx / 2, sy / 2, sz / 2);
     if (this.flex > this.maxFlex) this.maxFlex = this.flex;
     this.count += 1;
     this.last = [cx, cy, cz];
@@ -187,6 +190,7 @@ class VoxelWriter {
         const [nx, ny, nz] = FACES[f]!;
         if (!cells.has(`${i + nx},${j + ny},${k + nz}`)) this.face(f, cx, cy, cz, h, h, h, c, lit, flat);
       }
+      this.boxes.push(cx, cy, cz, h, h, h);
       this.count += 1;
       this.last = [cx, cy, cz];
       this.cells.push(cx, cy, cz);
@@ -240,6 +244,12 @@ class VoxelWriter {
       this.cells[c + 2] = z + (this.cells[c + 2]! - z) * k;
       this.cellSway[(c / 3) * 4] = root + (this.cellSway[(c / 3) * 4]! - root) * k;
     }
+    for (let o = cellFrom * 6; o < this.boxes.length; o += 6) {
+      this.boxes[o] = x + (this.boxes[o]! - x) * k;
+      this.boxes[o + 1] = root + (this.boxes[o + 1]! - root) * k;
+      this.boxes[o + 2] = z + (this.boxes[o + 2]! - z) * k;
+      this.boxes[o + 3] = this.boxes[o + 3]! * k; this.boxes[o + 4] = this.boxes[o + 4]! * k; this.boxes[o + 5] = this.boxes[o + 5]! * k;
+    }
     this.last = [x + (this.last[0] - x) * k, root + (this.last[1] - root) * k, z + (this.last[2] - z) * k];
   }
 
@@ -253,6 +263,8 @@ class VoxelWriter {
     g.setAttribute('aGlow', new BufferAttribute(new Float32Array(this.glow), 1));
     g.setAttribute('aMat', new BufferAttribute(new Float32Array(this.mat), 2));
     g.setAttribute('aPlant', new BufferAttribute(new Float32Array(this.plant), 4));
+    // Kept for the occlusion, worked out only if `voxelAO` is ever on (voxel-ao.ts).
+    g.userData.mqBoxes = new Float32Array(this.boxes);
     return [g];
   }
 }
