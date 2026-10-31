@@ -18,8 +18,8 @@ export const METAQUARIUM_PARAMS = {
   cameraDistance: { type: 'number', default: 110, min: 80, max: 400, ease: 'smooth' },
   /** A named framing: `orbit` (the classic camera), hero, front, low, top,
    *  surface (looking up at the water's underside), macro (close on the
-   *  landmark nearest the front) or cast (the whole cast, wherever it swims,
-   *  as close as its spread allows). Azimuth and autoRotate still turn it;
+   *  landmark nearest the front) or cast (the leads — the mix's first three — wherever they swim,
+   *  as close as their spread allows). Azimuth and autoRotate still turn it;
    *  distance scales it. A change is a cut. */
   shot: { type: 'enum', default: 'orbit', options: ['orbit', 'hero', 'front', 'low', 'top', 'surface', 'macro', 'cast'], ease: 'step' },
   /** Ride with one fish (a cast slot, 0 = first); -1 (default) is the orbit
