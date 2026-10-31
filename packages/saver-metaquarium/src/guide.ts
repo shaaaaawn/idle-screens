@@ -90,6 +90,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   floorKind: 'Floor shape: `auto` follows the environment, `flat`, or terrain `dunes`, `ridges`, `basin`, `shelf` (the town on a terraced plateau), `trench` (a deep channel across the front), `terraces` (tiers behind the town).',
   waterY: 'Height of the water ceiling; -1 = the environment\'s own.',
   rayStrength: 'Light shafts from the surface, within device budget: 5 on the high tier, 2 on standard, none on the lowest tier in a room with a water surface (reef, kelp, ice, lagoon; abyss, vent and universe keep 2). Where dropped, perceiveChannel reads room.rayStrength 0.',
+  raySoftness: 'Shafts as volume, not sheets, 0–1 (default 0): the sides melt, faint filaments run down them, their feet fade into the floor. 1 for anything cinematic.',
   caustics: 'The dancing net of light from the surface on the floor, rocks, plants and fish (0 = none). Sharp near the top, soft and dim deep down.',
   causticScale: 'Size of the caustic cells: below 1 a fine shimmer, above 1 broad slow bands.',
   surfaceMirror: 'The surface from below: a window up to the light and a rippling mirror of the tank around it (0 = the plain sheet). Needs reef, kelp, ice or lagoon; pays off on the `surface` and `low` shots. High tier reflects the real tank, mid tier the deep water.',

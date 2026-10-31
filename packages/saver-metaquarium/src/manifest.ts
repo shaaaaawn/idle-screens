@@ -121,6 +121,10 @@ export const METAQUARIUM_PARAMS = {
    *  same sentinel reason: ramping -1 → 0 would read as FULL strength until it
    *  snapped off. */
   rayStrength: { type: 'number', default: -1, min: -1, max: 1, ease: 'step' },
+  /** Light shafts as light in the water rather than sheets of it: their sides
+   *  melt, faint filaments run down them, their feet fade into the floor.
+   *  0 is the classic flat cone. */
+  raySoftness: { type: 'number', default: 0, min: 0, max: 1, ease: 'smooth' },
   /** Caustics: the net of light a rippled surface throws on the floor, rocks,
    *  plants and fish — sharp near the surface, broad and dim deep down,
    *  brightest on faces that look up. 0 compiles the stock programs. */

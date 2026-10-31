@@ -577,16 +577,20 @@ export function buildRays(count: number, color: string, y: number, strength: num
     depthWrite: false,
     blending: AdditiveBlending,
     side: DoubleSide,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, ...causticUniforms() },
+    uniforms: { uTime: { value: 0 }, uColor: { value: new Color(color) }, uStrength: { value: strength }, uSoft: { value: 0 }, ...causticUniforms() },
     vertexShader: `
       uniform float uTime;
       attribute float aPhase;
       varying float vY;
       varying vec3 vW;
       varying float vPhase;
+      varying vec3 vN;
+      varying float vU;
       void main() {
         vY = uv.y;
+        vU = uv.x;
         vPhase = aPhase;
+        vN = mat3(modelMatrix) * normal;
         vec4 w = modelMatrix * vec4(position, 1.0);
         // A slow, small sway about the shaft's source end (uv.y = 1): about
         // 0.03 rad, its own phase and a different period each way, so the
@@ -599,10 +603,12 @@ export function buildRays(count: number, color: string, y: number, strength: num
       }`,
     fragmentShader: `
       ${CAUSTIC_FUNCS}
-      uniform vec3 uColor; uniform float uStrength; uniform float uTime;
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime; uniform float uSoft;
       varying float vY;
       varying vec3 vW;
       varying float vPhase;
+      varying vec3 vN;
+      varying float vU;
       void main() {
         // Fade along the shaft and breathe slowly, so it reads as light in
         // suspended matter rather than a solid cone — each shaft on its own
@@ -613,6 +619,19 @@ export function buildRays(count: number, color: string, y: number, strength: num
         // dial — 0.34 turned ice's near-white shafts into pyramids that
         // dwarfed the fish. Faint is what light through water looks like.
         float a = fade * uStrength * 0.13 * breathe;
+        // raySoftness: light in a volume, not a sheet. Through a round shaft
+        // the path in the light is longest down its middle and nothing at its
+        // rim — |N.V| is that profile — so the sides melt instead of ending in
+        // a ruled edge, and the cone's facets go with them. 1.55 keeps about
+        // the light it had. Faint filaments run down it (light through a
+        // moving surface is never even), and its foot fades longer into the floor.
+        if (uSoft > 0.0) {
+          float facing = abs(dot(normalize(vN), normalize(cameraPosition - vW)));
+          float tau = 6.2831853;
+          float streak = 0.78 + 0.22 * sin(vU * tau * 7.0 + vPhase * 2.0) * sin(vU * tau * 3.0 - vPhase + uTime * 0.05);
+          float foot = smoothstep(0.0, 0.5, vY) / max(smoothstep(0.0, 0.3, vY), 1e-3);
+          a *= mix(1.0, 1.55 * pow(facing, 1.5) * streak * min(foot, 1.0), uSoft);
+        }
         // With caustics on, a shaft is the same rippled light that lands on
         // the floor: brighter where the net focuses at the surface above this
         // streak, darker between, with slow bands running down it.
@@ -1399,6 +1418,7 @@ class TankInstance implements SaverInstance {
     if (this.rayMat) {
       const s = rayStrength >= 0 ? rayStrength : this.presetRayStrength;
       this.rayMat.uniforms.uStrength!.value = s;
+      this.rayMat.uniforms.uSoft!.value = this.num('raySoftness');
       this.rayMat.visible = s > 0;
     }
   }
