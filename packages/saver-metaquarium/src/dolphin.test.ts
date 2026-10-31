@@ -2,7 +2,7 @@ import { AnimationClip, AnimationMixer, Bone, Group, type Object3D, type Skinned
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
 import {
-  BUBBLE_AT, DOLPHIN_CATCH, dolphinTurn, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
+  BANK, BUBBLE_AT, DOLPHIN_CATCH, dolphinBank, dolphinLeap, dolphinLeapAhead, dolphinLeapAt, dolphinLeapStart, dolphinTurn, LEAP, FLIP_TURN, SPIN_TURN, DOLPHIN_CLIPS, DOLPHIN_GESTURE_CLIP, DOLPHIN_GESTURES, DOLPHIN_MOMENTS, DOLPHIN_STROKE, dolphinBlink, dolphinFrame,
   dolphinGaze, dolphinHold, dolphinLook, dolphinMoment, dolphinPersonality, MOMENT_LENGTH, PUPIL_SLIDE, pupilSlide, rigDolphin,
   type DolphinRig,
 } from './dolphin';
@@ -365,5 +365,102 @@ describe('dolphin: the real model, against the real animal', () => {
     expect(swim.head).toBeLessThan(0.05);
     expect(burst.flukes).toBeGreaterThan(swim.flukes);
     expect(glide.flukes).toBeLessThan(swim.flukes);
+  });
+});
+
+describe('dolphin: banked turns and breaches', () => {
+  const loadRig = async () => {
+    const b = Buffer.from((await BUNDLED_BREEDS.dolphin!()).default, 'base64');
+    const g = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+    return { g, rig: rigDolphin(g.scene, g.animations)! };
+  };
+
+  it('cruises nearly level and banks deep only in a hard turn', () => {
+    // The tank's routes turn ~0.5 rad a body length half the time (measured): that stays under 15°.
+    expect(Math.abs(dolphinBank(0.5).roll)).toBeLessThan((15 * Math.PI) / 180);
+    expect(dolphinBank(0.5).curl).toBe(0);
+    // The hardest turns roll it most of the way onto its side, and curl it.
+    expect(Math.abs(dolphinBank(BANK.to).roll)).toBeGreaterThan(1.2);
+    expect(dolphinBank(BANK.to).curl).toBeCloseTo(BANK.curl, 6);
+    expect(dolphinBank(-0.9).roll).toBeCloseTo(-dolphinBank(0.9).roll, 9);
+    // Smooth: no step anywhere along it.
+    for (let a = 0; a < 1.5; a += 0.01) expect(Math.abs(dolphinBank(a + 0.01).roll - dolphinBank(a).roll)).toBeLessThan(0.05);
+  });
+
+  it('in a hard turn it rolls its belly to the turn and bends round it: both ends nearer the centre than its middle', async () => {
+    const { g, rig } = await loadRig();
+    const holder = new Group(); holder.add(g.scene);
+    // Turning to its left (+): the centre is off its left side, +x in its own frame (nose +z).
+    const s = dolphinFrame(rig, 50, 0, 0, { pace: 1, flurry: 0, turn: 0.95, actor: true });
+    holder.rotation.z = s.bank;
+    holder.updateMatrixWorld(true);
+    const v = new Vector3();
+    let nose = -Infinity, tail = Infinity, noseX = 0, tailX = 0;
+    g.scene.traverse((o) => {
+      const m = o as SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      const p = m.geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld);
+        if (v.z > nose) { nose = v.z; noseX = v.x; }
+        if (v.z < tail) { tail = v.z; tailX = v.x; }
+      }
+    });
+    const mid = rig.pivot!.getWorldPosition(new Vector3());
+    expect(noseX).toBeGreaterThan(mid.x);
+    expect(tailX).toBeGreaterThan(mid.x);
+  });
+
+  it('the curl is set fresh each frame, never piled up', async () => {
+    const { rig } = await loadRig();
+    const at = () => { dolphinFrame(rig, 40, 2, 10, { pace: 1, flurry: 0, turn: 0.95, actor: true }); return rig.spine.map((b) => b.quaternion.clone()); };
+    const a = at(), b = at();
+    a.forEach((q, i) => expect(q.angleTo(b[i]!)).toBeLessThan(1e-9));
+  });
+
+  it('a breach: early in a tank, between its moments, never two at once, deterministic', () => {
+    for (let index = 0; index < 8; index++) {
+      // The first comes early (6–10 s, later only if a moment is in the way), so a tank shows one.
+      expect(dolphinLeapStart(index, 0)).toBeLessThan(25);
+      let prev = -Infinity;
+      for (let k = 0; k < 12; k++) {
+        const s0 = dolphinLeapStart(index, k);
+        expect(s0).toBeGreaterThan(prev + LEAP.run + LEAP.air + LEAP.dive);
+        prev = s0;
+        // No moment of its own overlaps its flight.
+        for (let t = s0; t <= s0 + LEAP.run + LEAP.air + LEAP.dive; t += 0.1) expect(dolphinMoment(index, t).moment, `fish ${index} leap ${k} at ${t}`).toBeNull();
+      }
+      expect(dolphinLeapAt(index, 123.4)).toEqual(dolphinLeapAt(index, 123.4));
+    }
+  });
+
+  it('runs ahead along its route and gives it back slower than it swims: never backwards', () => {
+    for (let index = 0; index < 8; index++) {
+      let before = dolphinLeapAhead(index, 0);
+      for (let t = 0.05; t < 400; t += 0.05) {
+        const now = dolphinLeapAhead(index, t);
+        // d(ahead)/dt > -1: its speed along the route is (1 + that) × cruising.
+        expect((now - before) / 0.05, `fish ${index} at ${t}`).toBeGreaterThan(-0.7);
+        before = now;
+      }
+    }
+  });
+
+  it('flies a parabola above the surface, along its path: nose up on the run, level at the top, down into the dive', () => {
+    const index = 1, start = dolphinLeapStart(index, 0), S = 118, routeY = 45, L = 37, pace = 9;
+    const at = (u: number) => dolphinLeap(index, start + u, S, routeY, L, pace)!;
+    // The air: y against time is a parabola (fit three points, check the rest).
+    const t0 = LEAP.run + 0.05, t1 = LEAP.run + LEAP.air / 2, t2 = LEAP.run + LEAP.air - 0.05;
+    const [y0, y1, y2] = [at(t0).y, at(t1).y, at(t2).y];
+    const q = (t: number) => y0 * ((t - t1) * (t - t2)) / ((t0 - t1) * (t0 - t2)) + y1 * ((t - t0) * (t - t2)) / ((t1 - t0) * (t1 - t2)) + y2 * ((t - t0) * (t - t1)) / ((t2 - t0) * (t2 - t1));
+    for (let u = t0; u <= t2; u += 0.05) expect(Math.abs(at(u).y - q(u))).toBeLessThan(0.5);
+    // Above the surface by about its height at the top.
+    expect(at(t1).y - S).toBeGreaterThan(LEAP.height * L * 0.8);
+    expect(at(LEAP.run * 0.8).pitch).toBeGreaterThan(0.5);
+    expect(Math.abs(at(t1).pitch)).toBeLessThan(0.1);
+    expect(at(LEAP.run + LEAP.air + 0.2).pitch).toBeLessThan(-0.5);
+    // In and out of its route with no step: its height moves smoothly from the run's start to the dive's end.
+    for (let u = 0.02; u < LEAP.run + LEAP.air + LEAP.dive; u += 0.02) expect(Math.abs(at(u).y - at(u - 0.02).y), `u ${u}`).toBeLessThan(4);
+    expect(at(0.01).y).toBeCloseTo(routeY, 0);
   });
 });

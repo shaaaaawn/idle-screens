@@ -67,6 +67,9 @@ export interface DolphinRig {
   pivot: Object3D | null;
   /** The spine, nose to flukes (head, body, tail1, tail2, flukes): a banked turn's curl bends these. */
   spine: Object3D[];
+  /** The spine as the mixer last set it: put back before each update, since the mixer only writes a bone
+   *  whose value CHANGED (PropertyMixer.apply) — a curl laid on after it would otherwise stay and pile up. */
+  spineBase: Quaternion[];
   mixer: AnimationMixer;
   actions: Record<DolphinClip, AnimationAction>;
   durations: Record<DolphinClip, number>;
@@ -107,7 +110,7 @@ export function rigDolphin(body: Object3D, clips: readonly AnimationClip[]): Dol
     durations[n] = clip.duration;
   }
   const spine = SPINE_BONES.map((n) => named(body, n)).filter((b): b is Object3D => !!b);
-  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, pivot: named(body, 'body') ?? null, spine, mixer, actions, durations };
+  return { body, eyes, blowhole: named(body, 'blowhole') ?? null, pivot: named(body, 'body') ?? null, spine, spineBase: spine.map((b) => b.quaternion.clone()), mixer, actions, durations };
 }
 
 /** Swim-clip seconds per unit swum: a stroke (1 s of clip) every 25 units, about a body length. */
@@ -299,13 +302,14 @@ export const LEAP = {
   /** Seconds climbing to the surface, in the air, and diving back. */
   run: 1.6, air: 1.3, dive: 1.8,
   /** The arc's height above the surface, in body lengths. */
-  height: 0.5,
-  /** Extra cruising per second while it runs and flies (the push along the route), and seconds to give it back. */
-  boost: 3, giveBack: 20,
+  height: 0.45,
+  /** Extra cruising per second while it runs and flies (the push along the route), and seconds to give it back.
+   *  The push sets the arc's angle (its rise against its run): with less it left the water near vertical. */
+  boost: 4, giveBack: 26,
   /** The soft max's width (units): how smoothly it leaves its route for the curve. */
   soft: 15,
   /** Seconds between leaps, by temperament (and the first comes early, so a tank shows one). */
-  every: { playful: 38, chatty: 60, curious: 50, showoff: 34 } as Readonly<Record<DolphinTemper, number>>,
+  every: { playful: 40, chatty: 62, curious: 52, showoff: 36 } as Readonly<Record<DolphinTemper, number>>,
 } as const;
 const LEAP_LEN = LEAP.run + LEAP.air + LEAP.dive;
 
@@ -354,7 +358,7 @@ const rampArea = (x: number, e: number): number => {
 /**
  * Seconds of cruising it is AHEAD of its route at `t` (the tank adds that much travel; 0 between leaps).
  * Each leap pushes it on by `boost` from a third of its run to halfway down its dive (eased in and out
- * over 0.6 s), then gives it all back over `giveBack` — at most 0.6 of its cruising speed, so it slows
+ * over 0.6 s), then gives it all back over `giveBack` — at most ~0.65 of its cruising speed, so it slows
  * after a breach but never swims backwards. Leaps' pushes add, so one that starts before the last has
  * been given back never jumps.
  */
@@ -388,7 +392,8 @@ export function dolphinLeap(index: number, t: number, surface: number, routeY: n
   const fade = (u: number): number => smooth(u / 0.5) * (1 - smooth((u - LEAP_LEN) / 0.5));
   const yAt = (u: number): number => {
     const c = curve(u), d = c - routeY, k = LEAP.soft;
-    return routeY + fade(u) * (d + Math.sqrt(d * d + k * k) - k) / 2;
+    // smax(route, curve) = (route + curve + √((curve − route)² + k²)) / 2: the higher, a soft corner between.
+    return routeY + (fade(u) * (d + Math.sqrt(d * d + k * k))) / 2;
   };
   const h = 0.02, u = l.into;
   const rise = (yAt(u + h) - yAt(u - h)) / (2 * h);
@@ -453,7 +458,9 @@ export function dolphinFrame(rig: DolphinRig, t: number, index: number, beat: nu
     a.time = times[n];
     a.setEffectiveWeight(weights[n]);
   }
+  rig.spine.forEach((b, i) => b.quaternion.copy(rig.spineBase[i]!));
   rig.mixer.update(0);
+  rig.spine.forEach((b, i) => rig.spineBase[i]!.copy(b.quaternion));
 
   // A hard turn: the roll (the tank's) and the curl, round the turn's centre (dolphinBank); not while a
   // moment, a breach or the friendly face-turn has the body. After the mixer, which rewrites every spine

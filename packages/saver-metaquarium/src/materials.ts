@@ -429,7 +429,11 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
         const sc = new Color(skin[1]);
         // Under the neon look, near black with a breath of its hue, as a coat is.
         const c = neonColor ? sc.clone().multiplyScalar(0.07).lerp(NEON_DARK, 0.4) : sc;
-        const coatLike = lit ? new MeshLambertMaterial({ color: c }) : new MeshBasicMaterial({ color: c });
+        // Wet: where the tank is lit and its metal polished (`fishMetal`), a skin is satin, with a little
+        // of the studio in it — a dolphin's skin shines; a Lambert coat beside a shark's chrome teeth read chalky.
+        const coatLike = !lit ? new MeshBasicMaterial({ color: c })
+          : reflective && !neonColor ? new MeshStandardMaterial({ color: c, roughness: 0.42, metalness: 0.1, envMapIntensity: 0.7 })
+          : new MeshLambertMaterial({ color: c });
         // Baked ambient occlusion (a per-corner grey, COLOR_0: breeds.json `ao`): creases and steps darken.
         coatLike.vertexColors = !!mesh.geometry.getAttribute('color');
         coatLike.name = m.name;

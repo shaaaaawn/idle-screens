@@ -524,13 +524,17 @@ describe('VIVID- and PAINT- (a babyfish\'s coat and stripe)', () => {
 describe('SKIN- (a character\'s own coat: the dolphin)', () => {
   const part = (name: string): Mesh => { const m = new Mesh(new SphereGeometry(1, 4, 4), new MeshStandardMaterial()); m.material.name = name; return m; };
   it('SKIN-#hex is that colour on every fish, lit like a coat: no glow of its own (PAINT- glows)', () => {
-    const dress = (seed: number, lit: boolean, neon = false): MeshLambertMaterial[] => {
+    const dress = (seed: number, lit: boolean, neon = false, reflective = true): MeshLambertMaterial[] => {
       const root = new Group(); const parts = ['SKIN-#1f6fd1', 'PAINT-#1f6fd1'].map(part); root.add(...parts);
-      applyNpcMaterials(root, createRng(seed), true, lit, neon);
+      applyNpcMaterials(root, createRng(seed), reflective, lit, neon);
       return parts.map((p) => p.material as MeshLambertMaterial);
     };
     const [skin, paint] = dress(3, true), [skin2] = dress(7, true);
-    expect(skin!.type).toBe('MeshLambertMaterial');
+    // Wet: satin, a little metal, the studio in it, where the tank is lit and polished; a coat's Lambert with metal off.
+    expect(skin!.type).toBe('MeshStandardMaterial');
+    expect((skin as unknown as MeshStandardMaterial).roughness).toBeGreaterThan(0.3);
+    expect((skin as unknown as MeshStandardMaterial).metalness).toBeLessThan(0.3);
+    expect(dress(3, true, false, false)[0]!.type).toBe('MeshLambertMaterial');
     expect(skin!.color.getHex()).toBe(new Color('#1f6fd1').getHex());
     expect(skin2!.color.getHex()).toBe(skin!.color.getHex());
     expect(skin!.emissive.getHex()).toBe(0);
