@@ -78,6 +78,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   fishLook: '`neon` dresses the bundled creatures (crab, glowfish, shark…) for blacklight: near-black coats, eyes and a crab\'s mouth glowing a neon of their own. Best in a dark room (abyss, void) with `finish`. `natural` is the default.',
   fishRim: 'A thin edge of the water\'s light round each fish, 0–1 (default 0; lit mode): separates dark fish from dark water. Dark rooms (abyss, void, night) want 0.6–1.',
   fishShadows: 'Soft shadows on the ground under the swimmers, 0–1 (default 0): dark near the sand, wide and faint high up, so a fish sits at a height. Floor walkers always have theirs.',
+  fishFadeIn: 'Seconds a fish takes to dissolve in when its model first arrives, 0–3 (default 0 = it pops in). 0.8 for a polished mount.',
   sceneryShadows: 'Soft shadows pooled under the rocks, homes, castle, pyramids, geodes and lamps, 0–1 (default 0), so they stand on the floor instead of floating. Pairs with fishShadows.',
   swimWave: 'Fish bend as they swim: a wave runs nose to tail and the body curls into turns (0 = rigid wiggle). Skips the turtle, crab and fish that already have a skeleton; the seahorse gets its own motion instead — fin, tail and nod.',
   fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',

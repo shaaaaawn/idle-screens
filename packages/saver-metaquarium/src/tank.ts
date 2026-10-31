@@ -74,6 +74,7 @@ import { buildCanopy, shoalLiftTable, type Canopy } from './canopy';
 import { clearSightline } from './sightline';
 import { MIRROR_GLSL, MIRROR_SKIP_LAYER, SurfaceMirror } from './mirror';
 import { patchFishLight, setFishWater, tagFishMaterials } from './fishlight';
+import { rigSpawnFade, spawnAmount, type SpawnUniform } from './spawnfade';
 import { FLOOR_DETAIL, patchFloorDetail } from './floor-detail';
 import { addRimNormals, patchFishRim, setFishRim } from './rim';
 import { NEAR_FADE, nearFadeRange, patchNearFade } from './nearfade';
@@ -748,6 +749,10 @@ function disposeOwned(root: Object3D): void {
 // ---------------------------------------------------------------------------
 
 interface Fish {
+  /** The clock (seconds) the first frame this fish was drawn — where its fade-in (`fishFadeIn`) starts. */
+  bornAt?: number;
+  /** Its fade-in amount (spawnfade.ts), bound into its own materials. */
+  spawn?: SpawnUniform;
   /** Spawn slot. Visibility and phase math key off this — never off array
    *  or arrival order, which is GLB-completion order and network-dependent.
    *  (With one URL every load awaits the same cached promise, so the two
@@ -1038,6 +1043,8 @@ class TankInstance implements SaverInstance {
   /** The follow-spot's house lights (1 = full); the fish's water light dims with them. */
   private houseLevel = 1;
   private fishLightInstalled = false;
+  /** The fade-in (spawnfade.ts): hooked onto the cast the first frame `fishFadeIn` is on. */
+  private spawnFadeInstalled = false;
   /** The floor's detail (floor-detail.ts): patched onto the disc and the terrain the first frame `floorDetail` is on. */
   private floorDetailInstalled = false;
   /** The fish's rim light (rim.ts): patched onto the lit coats the first frame `fishRim` is on. */
@@ -3016,6 +3023,9 @@ class TankInstance implements SaverInstance {
     // gathered) — one frame of lag on a 0.12 Hz light is invisible.
     const tintAmount = this.emitters.length || this.tintEmitters.length ? this.num('crystalTint') : 0;
     const shadowAmount = this.num('fishShadows');
+    const fadeIn = this.num('fishFadeIn');
+    if (fadeIn > 0) this.spawnFadeInstalled = true;
+    if (this.spawnFadeInstalled) for (const f of this.fish) if (f) rigSpawnFade(f.group, f.spawn ??= { value: 1 });
     const tintPulse = this.num('crystalPulse');
     this.walkShadowN = 0;
     this.swimShadowN = 0;
@@ -3105,6 +3115,9 @@ class TankInstance implements SaverInstance {
       if (!f) continue;
       f.group.visible = f.index < visible;
       if (!f.group.visible) continue;
+      // Its first frame on screen: where a fade-in starts (spawnfade.ts). Stills never fade.
+      f.bornAt ??= tSec;
+      if (f.spawn) f.spawn.value = this.thumbnail ? 1 : spawnAmount(tSec - f.bornAt, fadeIn);
       const style = styleAt(f.index);
       const seat = formationSeat.get(f.index) ?? f.index;
       const bond = style.bond ?? 'none';
