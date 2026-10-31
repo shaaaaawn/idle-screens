@@ -388,7 +388,7 @@ struct PairedTVView: View {
     // MARK: Desktop & web
 
     /// A key held here, opened on a computer. The website takes a key from a
-    /// `?token=` link, stores it in that browser and strips it from the address
+    /// `#token=` link, stores it in that browser and strips it from the address
     /// bar — so AirDropping the link to a Mac is the whole sync.
     private var desktopSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -443,16 +443,22 @@ struct PairedTVView: View {
         }
     }
 
-    /// `https://idlescreens.com/channel/<id>/remote?token=…` — the web remote's
-    /// own hand-in. nil for anything the site would refuse, so a malformed
-    /// key never becomes a link someone pastes around.
+    /// `https://idlescreens.com/channel/<id>/remote#token=…` — the web remote's
+    /// own hand-in. The key rides in the FRAGMENT: a fragment never reaches
+    /// the server or its logs, and the site refuses an editor or owner key in
+    /// `?token=` (idle-server #334), so this shape is a contract with the
+    /// site's `parseUrlToken`. nil for anything the site would refuse, so a
+    /// malformed key never becomes a link someone pastes around.
     static func webRemoteLink(channelId: String, token: String?,
                               baseURL: String = Config.baseURL) -> URL? {
         guard let token, WebSceneView.isWellFormed(token),
               let id = ChannelTokenFormat.sanitizeId(channelId),
               var parts = URLComponents(string: baseURL) else { return nil }
         parts.path = "/channel/\(id)/remote"
-        parts.queryItems = [URLQueryItem(name: "token", value: token)]
+        parts.queryItems = nil
+        // isWellFormed limits the key to [A-Za-z0-9_-], so nothing is
+        // percent-encoded and the site reads it back verbatim.
+        parts.fragment = "token=\(token)"
         return parts.url
     }
 

@@ -20,6 +20,9 @@ final class KeyBackupTests: XCTestCase {
             XCTAssertEqual(parsed.channelId, id)
             XCTAssertEqual(parsed.token, token)
         }
+        // Restore lines carry the key after #, never in a query string.
+        XCTAssertFalse(doc.contains("?token="))
+        XCTAssertTrue(doc.contains("idlescreens://channel/attic#token=isk_xyz"))
         // Sorted by name, case-insensitively.
         XCTAssertLessThan(try XCTUnwrap(doc.range(of: "attic")).lowerBound, try XCTUnwrap(doc.range(of: "Living Room")).lowerBound)
     }

@@ -192,7 +192,7 @@ private struct MintedKeySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     /// Opens in the app and adds the key in one tap.
-    private var link: String { "idlescreens://channel/\(channelId)?token=\(token)" }
+    private var link: String { ChannelTokenFormat.handoffLink(channelId: channelId, token: token) }
 
     var body: some View {
         NavigationStack {
