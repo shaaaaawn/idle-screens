@@ -271,3 +271,48 @@ describe('stripe runs along one scan line', () => {
     expect(stripeRuns(stripeExtrema(random), 0, 'x')).toEqual([]);
   });
 });
+
+/**
+ * Whole reports, frozen. The snapshot was written by the scan as merged,
+ * before its per-patch medians were computed once instead of once per run;
+ * it must still match after any change that is meant to be a pure speed-up.
+ * Numbers are rounded to 12 significant digits, as the other baselines are,
+ * so a platform's last-ulp trig never fails it while a changed pitch, area or
+ * message does.
+ */
+describe('patternHazardReport: frozen reports', () => {
+  const stabilize = (v: unknown): unknown => {
+    if (typeof v === 'number') return +v.toPrecision(12);
+    if (Array.isArray(v)) return v.map(stabilize);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, stabilize(x)]));
+    return v;
+  };
+  const cases: Array<[string, SaverSpec]> = [
+    // The original repro shapes: a full-frame ≈19 px grating still, turned 0° and spinning; lime on near-black; forty bars.
+    ['grating 19 px, still', grating(19.4)],
+    ['grating 19 px, transform 0°', grating(19.4, { layer: { transform: { rotate: 0 } } })],
+    ['grating 19 px, spin 30', grating(19.4, { layer: { spin: 30 } })],
+    ['grating 19 px, spin 360', grating(19.4, { layer: { spin: 360 } })],
+    ['grating 19 px, lime on near-black', grating(19.4, { color: '#c8ff3a', bg: '#0c0a14' })],
+    ['forty bars in a list', bars(40, 0.025)],
+    // Slanted stripes: the patch's slant median is not zero.
+    ['grating 12 px, turned 37°', grating(12, { layer: { transform: { rotate: 37 } } })],
+    ['grating 30 px, turned 45°', grating(30, { layer: { transform: { rotate: 45 } } })],
+    // Patterns that pass, so every sample is scanned and the report keeps the most patterned one.
+    ['grating 30 px, radius 0.4 (under 40 %)', grating(30, { radius: 0.4 })],
+    ['grating 30 px, radius 0.4, turned 30°', grating(30, { radius: 0.4, layer: { transform: { rotate: 30 } } })],
+    ['grating 30 px, radius 0.37, spin 10 (moving rescan)', grating(30, { radius: 0.37, layer: { spin: 10 } })],
+    ['band 30 px, slow flow (flicker forecast)', band(30, 0.3, { type: 'drift', speed: [0.05, 0.05], angle: 0 })],
+    ['band 30 px, fast flow', band(30, 0.3, { type: 'drift', speed: [0.2, 0.2], angle: 0 })],
+    ['five bars', bars(5, 0.1, 0.03)],
+    ['six bars', bars(6, 0.1, 0.03)],
+  ];
+  for (const id of ['relay-board', 'rain', 'aquarium', 'lanterns', 'orrery', 'snowfall']) {
+    cases.push([`example ${id}`, SCHEMA_EXAMPLES.find((e) => e.id === id)!.spec]);
+  }
+
+  it('matches the reports the scan gave when it shipped', () => {
+    const reports = Object.fromEntries(cases.map(([name, s]) => [name, stabilize(patternHazardReport(s))]));
+    expect(reports).toMatchSnapshot();
+  }, HEAVY);
+});
