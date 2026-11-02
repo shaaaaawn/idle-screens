@@ -30,8 +30,12 @@ struct IdleScreensTVApp: App {
                         // Debug: the always-renderable ambient stand-in.
                         FallbackSceneView(channelId: "debug-preview")
                     } else if ProcessInfo.processInfo.arguments.contains("-tank3d"), #available(tvOS 26.0, *) {
-                        // Spike: the RealityKit tank in isolation.
-                        Tank3DView()
+                        // Spike: the RealityKit tank in isolation (-mix picks the cast).
+                        Tank3DView(fishMix: {
+                            let args = ProcessInfo.processInfo.arguments
+                            if let m = args.firstIndex(of: "-mix"), args.indices.contains(m + 1) { return args[m + 1] }
+                            return "angelfish:3,betafish:3,blowfish:2,glowfish:2,shark:1,babyfish:2"
+                        }())
                     } else if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-classic"),
                               ProcessInfo.processInfo.arguments.indices.contains(i + 1),
                               let kind = ClassicSaverKind.supported(id: ProcessInfo.processInfo.arguments[i + 1]) {
