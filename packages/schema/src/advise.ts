@@ -1215,7 +1215,7 @@ function pathGroundAt(
     const box = part.box;
     if (Math.abs(u - box.cx) > box.hw || Math.abs(v - box.cy) > box.hh) continue;
     const ring = part.flat.points.map(([x, y]) => ({ x, y }));
-    if (!pointInPolygon(u, v, ring)) continue;
+    if (!pointInPolygon(u, v, ring, part.rule === 'evenodd')) continue;
     const pc = hexRgb(part.color ?? base);
     let rgb = pc;
     if (part.gradient) {
@@ -1238,14 +1238,19 @@ function pathGroundAt(
   return { rgb: { r: r / wsum, g: g / wsum, b: b / wsum }, opacity: Math.min(1, wsum / area) };
 }
 
-function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>): boolean {
+/** Whether a point lies inside a polygon by the even-odd rule (default) or the nonzero winding rule. */
+function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>, evenodd = true): boolean {
   let inside = false;
+  let wind = 0;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const a = pts[i]!;
     const b = pts[j]!;
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+      wind += a.y > b.y ? 1 : -1;
+    }
   }
-  return inside;
+  return evenodd ? inside : wind !== 0;
 }
 
 /** Whether an entity's disc of half-extent `r` can overlap `box` (see `brightestAdditivePlate`). */

@@ -1064,6 +1064,7 @@ export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportion
       continue;
     }
     w += charWidthEm(str[i]!, metrics);
+    if (cp > 0xffff) i++; // a supplementary glyph (emoji) is one glyph, two code units
   }
   return w;
 }
