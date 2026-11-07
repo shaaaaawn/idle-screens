@@ -159,7 +159,7 @@ describe("motion.loop: 'once' and 'hold'", () => {
     const e = ent({ phase: 0.9, loop: 'hold' });
     near(pos(e, 0.85 * LAP), at(SQUARE[3]!));
     near(pos(e, 20 * LAP), at(SQUARE[3]!));
-    // It passed the first point on the way, a quarter-lap after the start of the next lap… still moving.
+    // It passed the first point on the way, a tenth of a lap (400 ms from phase 0.9) into the next lap… still moving.
     near(pos(e, 0.1 * LAP), at(SQUARE[0]!));
   });
 
