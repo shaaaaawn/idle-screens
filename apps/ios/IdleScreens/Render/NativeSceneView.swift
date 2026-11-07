@@ -358,7 +358,7 @@ struct NativeSceneView: View {
         for s in 1...n {
             let k = Double(s) / Double(n)
             let past = t - k * trail.length / 1000
-            if past < since { break }
+            if past < Swift.max(0, since) { break }
             let p = posAt(past)
             if jumps(prev, p) { break }
             prev = p

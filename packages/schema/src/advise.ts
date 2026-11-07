@@ -515,7 +515,7 @@ export function adviseSpec(
       warnings.push({
         path: `layers[${li}].motion.loop`,
         code: 'path-runs-once',
-        message: `informational: ${label}'s path (\`loop: '${m.loop}'\`) runs its pass once on scene time, from when the scene (or its sequence segment) starts — it does not replay when the timeline loops every ${lap} ms, so it stays at rest for every later lap; give the layer an \`emit\` to replay the pass on each event`,
+        message: `informational: ${label}'s path (\`loop: '${m.loop}'\`) runs its pass once on scene time, from when the scene (or its sequence segment) starts — it does not replay when the timeline loops every ${lap} ms; give the layer an \`emit\` to replay the pass on each event`,
       });
     }
   }

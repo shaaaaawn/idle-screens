@@ -874,12 +874,21 @@ export function headingAt(e: Entity, t: number, w: number, h: number): number | 
   if (p?.stop !== undefined) {
     // A path at rest keeps the heading it arrived with — at rest the
     // difference is zero, and an oriented sprite would snap to 0 on landing.
+    // Sample the last dtMs of the pass, one-sided and ending at the stop, so a
+    // phase near the stop (or an `emit` event opened before t = 0) still has one.
     const tl = pathPassTime(e, t);
     const tStop = (p.stop - p.phase) * p.duration;
-    if (tl > tStop && tStop >= dtMs) t -= tl - tStop;
+    if (tl > tStop) {
+      if (tStop <= 0) return null;
+      const base = t - tl;
+      return headingBetween(e, base + Math.max(0, tStop - dtMs), base + tStop, w, h);
+    }
   }
   const t1 = t < dtMs ? t + dtMs : t;
-  const t0 = t1 - dtMs;
+  return headingBetween(e, t1 - dtMs, t1, w, h);
+}
+
+function headingBetween(e: Entity, t0: number, t1: number, w: number, h: number): number | null {
   const a = positionAt(e, t0, w, h);
   const b = positionAt(e, t1, w, h);
   const dx = b.x - a.x;

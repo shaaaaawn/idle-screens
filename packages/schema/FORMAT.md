@@ -813,7 +813,8 @@ screen-heights each way, a px value written into a viewport-unit spec.
     glides the same way and does not warn `timeline-structural-key`. `loop` is
     an enum: a steer on it steps, and it is not listed in `steerablePaths`
     (like `curve`). Two sequence segments that differ in `phase` are not
-    structural twins, so a `morph` between them crossfades.
+    structural twins, so a `morph` between them falls back to a cut, with a
+    `morph-structural-mismatch` warning.
   - **Native:** rendered (tvOS / iOS place, stop and orient the same way).
 
 All speeds are ranges; each entity draws its own value (seeded).
@@ -1307,7 +1308,7 @@ stands still.
   once and never replays when the lap wraps.
   `path-runs-once` (informational) is the same note for a `path` with
   `loop: "once"` or `"hold"` (and no `emit`): its pass runs on scene time, so
-  it rests after the first lap and stays at rest on every later one.
+  its pass is not replayed when the timeline loops.
   `uniform-motion` fires when every entity of a moving layer travels at
   nearly the same on-screen speed; an orbit's is its angular speed × its
   radius, so one angular speed over a spread of radii is not uniform.

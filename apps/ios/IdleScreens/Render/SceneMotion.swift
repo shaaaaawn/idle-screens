@@ -128,15 +128,21 @@ enum SceneMotion {
     static func heading(of entity: CompiledEntity, at t: TimeInterval, in size: CGSize, dim: CGFloat,
                         wrap: Bool, parent: CompiledEntity? = nil) -> Double? {
         let step = 0.032
-        var t = t
-        if let p = entity.path, let stop = p.stop {
-            // At rest the difference is zero: keep the heading it arrived with.
-            let tl = pathPassMs(at: t, emit: entity.emit)
-            let tStop = (stop - p.phase) * p.duration
-            if tl > tStop, tStop >= step * 1000 { t -= (tl - tStop) / 1000 }
+        var t0: TimeInterval, t1: TimeInterval
+        if let p = entity.path, let stop = p.stop,
+           case let tl = pathPassMs(at: t, emit: entity.emit),
+           case let tStop = (stop - p.phase) * p.duration, tl > tStop {
+            // At rest the difference is zero: keep the heading it arrived with,
+            // sampled one-sided over the last step of the pass.
+            if tStop <= 0 { return nil }
+            let base = t - tl / 1000
+            t1 = base + tStop / 1000
+            t0 = base + Swift.max(0, tStop / 1000 - step)
+        } else {
+            t1 = t < step ? t + step : t
+            t0 = t1 - step
         }
-        let t1 = t < step ? t + step : t
-        let a = position(of: entity, at: t1 - step, in: size, dim: dim, wrap: wrap, parent: parent)
+        let a = position(of: entity, at: t0, in: size, dim: dim, wrap: wrap, parent: parent)
         let b = position(of: entity, at: t1, in: size, dim: dim, wrap: wrap, parent: parent)
         let dx = b.x - a.x, dy = b.y - a.y
         if abs(dx) > size.width / 2 || abs(dy) > size.height / 2 { return nil }

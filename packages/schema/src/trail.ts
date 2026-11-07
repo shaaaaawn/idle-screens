@@ -86,7 +86,7 @@ export function trailEchoes(
   for (let s = 1; s <= n; s++) {
     const k = s / n;
     const pastT = t - k * trail.length;
-    if (pastT < since) break;
+    if (pastT < Math.max(0, since)) break;
     const pos = posAt(pastT);
     if (jumps(prev, pos)) break;
     prev = pos;

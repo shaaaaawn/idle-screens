@@ -208,6 +208,25 @@ describe("motion.loop: 'once' and 'hold'", () => {
     expect(cell(REST.x, REST.y)).toBe(g.background[Math.floor(REST.y * g.rows)]);
   });
 
+  it('a once path starting just short of its stop still keeps its arrival heading', () => {
+    // phase 0.999 on a 4000 ms lap: the stop is 4 ms away, under the 32 ms difference step.
+    const [[e]] = build(scene([pathLayer({ phase: 0.999, loop: 'once' })]));
+    const h = headingAt(e!, 1000, W, H);
+    expect(h).not.toBeNull();
+    // It arrives along the left edge, point 3 → 0: heading up.
+    expect(Math.abs(h! + Math.PI / 2)).toBeLessThan(0.05);
+  });
+
+  it('a trail under emit never samples before the clock starts', () => {
+    const trail = { length: 1500, fade: 1 };
+    const spec = scene([pathLayer({ phase: 0, loop: 'hold' }, { emit: { every: 6000, life: 5000 }, trail })]);
+    const [[e]] = build(spec);
+    const t = 100; // before the first event opens
+    const posAt = (pt: number) => positionAt(e!, pt, W, H);
+    const echoes = trailEchoes(trail, t, 1, 20, posAt, W, H, true, 0, 0, false, trailSince(e!, t));
+    for (const ec of echoes) expect(ec.t).toBeGreaterThanOrEqual(0);
+  });
+
   it('a resting entity keeps the heading it arrived with', () => {
     const e = ent({ phase: 0, loop: 'hold' });
     const arriving = headingAt(e, 0.75 * LAP - 1, W, H);
