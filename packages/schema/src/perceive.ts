@@ -1373,7 +1373,8 @@ function boxInkArea(s: Extract<LayerSpec['sprite'], { kind: 'rect' | 'bar' }>, e
  * what scene colour mixes by. A paint transform scales it by paintSize².
  */
 function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: number, t: number, w: number, h: number, scale: number): number {
-  if (s.kind === 'circle') return Math.PI * (sz / 2) * (sz / 2);
+  // A soft circle is a radial gradient to its radius: SOFT_DISC_MEAN of the disc.
+  if (s.kind === 'circle') return Math.PI * (sz / 2) * (sz / 2) * (s.soft ? SOFT_DISC_MEAN : 1);
   if (s.kind === 'ring') return Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
   if (s.kind === 'streak') return sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
   if (s.kind === 'rect' || s.kind === 'bar') return boxInkArea(s, e, sz);
@@ -1420,9 +1421,9 @@ function turnedBoxOnScreen(w: number, h: number, p: { x: number; y: number }, ox
 
 /**
  * The fraction of an entity's extent inside the viewport. A rect or bar is
- * its own box, turned as the renderer turns it (the entity's rotation plus
- * its layer's and group's `transform.rotate`); anything else is the
- * circumradius square (a path drawing's own frame, which `span`/`origin` can
+ * its own box, and an emoji its glyph box, turned as the renderer turns it
+ * (the entity's rotation plus its layer's and group's `transform.rotate`);
+ * anything else is the circumradius square (a path drawing's own frame, which `span`/`origin` can
  * stretch and shift). All scale by the paint transform `k`; a text box is
  * judged by the text checks, so text counts whole. Only what lands in the
  * frame is the scene's mass or colour (X616).
@@ -1447,6 +1448,8 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
     if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
     return turnedBoxOnScreen(w, h, p, b.cx, b.cy, b.halfX, b.halfY, rotationAt(e, t) + paintRot);
   }
+  // An emoji's glyph box (its size square) turns with it, as the luminance map turns it.
+  if (s.kind === 'emoji') return hx > 0 ? turnedBoxOnScreen(w, h, p, 0, 0, hx, hx, rotationAt(e, t) + paintRot) : 1;
   if (s.kind === 'polygon' && isPathPolygon(s)) {
     const fr = pathFrame(s, sz / 2, w, h);
     // The frame turns with the entity (and its layer/group), origin included.

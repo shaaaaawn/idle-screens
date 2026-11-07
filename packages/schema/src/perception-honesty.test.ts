@@ -62,6 +62,25 @@ describe('perception reads what is on screen', () => {
     expect(sr).toBeGreaterThan(sb * 2);
   });
 
+  it('a soft circle weighs the ink of its gradient, not a full disc', () => {
+    // The canvas fades a soft disc to 0 at its radius: 0.378 of the disc's area (∫ softProfile · 2u du).
+    const disc = (soft: boolean, color = '#ffffff', y = 0.5) => L({ key: soft ? 'soft' : 'hard', position: { x: soft ? 0.3 : 0.7, y }, sprite: { kind: 'circle', radius: [0.15, 0.15], color, ...(soft ? { soft: true } : {}) } });
+    const area = (layer: unknown) => perceiveScene(scene('#000000', [layer]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    expect(area(disc(true)) / area(disc(false))).toBeCloseTo(0.378, 3);
+    // So a soft red glow beside a hard blue disc of the same size reads blue.
+    const hex = perceiveScene(scene('#000000', [disc(true, '#ff0000'), disc(false, '#0000ff')]), { viewport: { width: 1000, height: 1000 } }).colour.hex;
+    expect(parseInt(hex.slice(5, 7), 16)).toBeGreaterThan(parseInt(hex.slice(1, 3), 16));
+  });
+
+  it('an emoji is clipped to the frame by its turned glyph box', () => {
+    // A 0.2 glyph box centred 0.1 in from the right edge fits; turned 45° its
+    // corner pokes 0.1·(√2 − 1) past the edge, a triangle of that height.
+    const area = (rotate: number) => perceiveScene(scene('#000000', [L({ key: 'fish', position: { x: 0.9, y: 0.5 }, rotate, size: [0.2, 0.2], sprite: { kind: 'emoji', glyphs: ['🐟'] } })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    const over = 100 * (Math.SQRT2 - 1);
+    expect(area(45) / area(0)).toBeCloseTo(1 - (over * over) / (200 * 200), 4);
+    expect(area(90) / area(0)).toBeCloseTo(1, 6);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),

@@ -1187,8 +1187,9 @@ stands still.
   (area × alpha × contrast × glow/motion boosts; links and persistence ink —
   trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
-  line-salience boost so they aren't crushed by filled discs. A shape's
-  base area counts only where it lands in the frame, a `rect` or `bar` by its
+  line-salience boost so they aren't crushed by filled discs; a `soft` circle
+  counts the ink of its gradient (about 38 % of its disc). A shape's base area
+  counts only where it lands in the frame, a `rect`, `bar` or `emoji` by its
   own turned box (text boxes and persistence ink are not clipped).
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
