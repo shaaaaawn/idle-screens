@@ -434,8 +434,11 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 /**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
  * like "layers.0.count", "background.stops.1.color", "background.bands.2", etc. Metadata fields
- * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
- * they describe structure, not tuneable values.
+ * (id, label, schemaVersion, seed, units, kind, type, key, and the declared
+ * hints motionIntensity and density) are excluded — they describe structure
+ * or intent, not tuneable values. Every path returned resolves through
+ * `resolveSpecPath` (pinned over the examples corpus in steer.test.ts), so a
+ * setParam on an advertised path never 400s for being unknown.
  *
  * Properties the validator flags as unknown or misplaced (e.g. `angle` on a
  * gradient background, `blend` inside a sprite) are excluded too: the
@@ -449,10 +452,10 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
   // `group` (membership) and `origin` are enums that step, not knobs; the
-  // `timeline` is authored structure, not a steer target (resolveSpecPath
-  // refuses it), so none of them are advertised.
+  // `timeline` is authored structure, and `density` a declared hint that
+  // changes no pixel. resolveSpecPath refuses all of them, so none is advertised.
   const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer', 'group', 'origin']);
-  const SKIP_ROOT = new Set(['timeline']);
+  const SKIP_ROOT = new Set(['timeline', 'density']);
   // `bands` (a field background's palette) is indexed like `stops`, so
   // `background.bands.2` is a hex paint path that glides.
   const INDEXED = new Set(['layers', 'stops', 'bands', 'parts']);

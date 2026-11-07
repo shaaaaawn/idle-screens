@@ -127,6 +127,28 @@ export const MOTION_FIELDS = {
   warp: ['speed', 'center'],
   path: ['points', 'duration', 'curve', 'closed', 'scatter'],
 } as const satisfies Record<string, readonly string[]>;
+/**
+ * The idle-sequence envelope's fields, a segment's, and each transition
+ * type's besides `type` — validateSequence's allowlist for `unknown-property`
+ * warnings, pinned to saver-spec.schema.json (json-schema.test.ts) as
+ * MOTION_FIELDS is. Unknown keys warn and never error, so a stored sequence
+ * with a stray field keeps loading.
+ */
+export const SEQUENCE_FIELDS = {
+  envelope: ['format', 'schemaVersion', 'id', 'label', 'seed', 'loop', 'sync', 'wrapMorph', 'bed', 'finish', 'segments'],
+  segment: ['key', 'scene', 'duration', 'advance', 'transition'],
+  transition: {
+    cut: [],
+    morph: ['dur', 'text'],
+    fade: ['dur'],
+    wipe: ['dur', 'shape', 'origin', 'angle', 'feather'],
+  },
+} as const satisfies { envelope: readonly string[]; segment: readonly string[]; transition: Record<string, readonly string[]> };
+const KNOWN_SEQUENCE = new Set<string>(SEQUENCE_FIELDS.envelope);
+const KNOWN_SEGMENT = new Set<string>(SEQUENCE_FIELDS.segment);
+const KNOWN_TRANSITION: Record<string, Set<string>> = Object.fromEntries(
+  Object.entries(SEQUENCE_FIELDS.transition).map(([t, f]) => [t, new Set<string>(['type', ...f])]),
+);
 const motionKnown = (t: keyof typeof MOTION_FIELDS): Set<string> => new Set(['type', ...MOTION_FIELDS[t]]);
 const KNOWN_DRIFT = motionKnown('drift');
 const KNOWN_RISE = motionKnown('rise');
@@ -1700,9 +1722,45 @@ function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string
     else if (tr.shape !== 'line') err(`${path}.angle`, "applies to shape 'line' only — an iris opens from `origin`");
   }
   if (tr.feather !== undefined && (!isNum(tr.feather) || tr.feather < 0 || tr.feather > 1)) err(`${path}.feather`, 'must be 0..1 (the edge width, as a fraction of the distance it travels)');
-  for (const k of Object.keys(tr)) {
-    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) warn(`${path}.${k}`, 'unknown-property', `unknown wipe property '${k}' — will be ignored`);
+  // The wipe's own keys are checked with every transition's in validateSequence.
+  if (isObj(tr.origin)) {
+    for (const k of Object.keys(tr.origin)) {
+      if (k !== 'x' && k !== 'y') warn(`${path}.origin.${k}`, 'unknown-property', `unknown origin property '${k}' — origin takes x and y; will be ignored`);
+    }
   }
+}
+
+/**
+ * `unknown-property` warnings for an idle-sequence envelope, its segments
+ * and their transitions (vork-review A7: a typo there used to pass silently
+ * end to end). A scene field written one level too high gets told where it
+ * belongs. `text` on a non-morph transition is already an error, so it is
+ * not reported twice; neither is an unrecognised transition `type`.
+ */
+function warnUnknownSequenceKeys(seq: Record<string, unknown>, warn: WarnFn): void {
+  for (const k of unknownKeys(seq, KNOWN_SEQUENCE)) {
+    const hint = KNOWN_TOP.has(k) ? " — a scene field: it belongs on each segment's `scene` (or the `bed`)" : '';
+    warn(k, 'unknown-property', `unknown sequence property '${k}' — will be ignored${hint}`);
+  }
+  if (!Array.isArray(seq.segments)) return;
+  seq.segments.forEach((s: unknown, i: number) => {
+    if (!isObj(s)) return;
+    const p = `segments[${i}]`;
+    for (const k of unknownKeys(s, KNOWN_SEGMENT)) {
+      const hint = k === 'dur'
+        ? " — a segment's length is `duration` (ms); `dur` belongs to its `transition`"
+        : KNOWN_TOP.has(k) ? " — a scene field: put it under this segment's `scene`" : '';
+      warn(`${p}.${k}`, 'unknown-property', `unknown segment property '${k}' — will be ignored${hint}`);
+    }
+    const tr = s.transition;
+    if (!isObj(tr) || typeof tr.type !== 'string' || !Object.prototype.hasOwnProperty.call(KNOWN_TRANSITION, tr.type)) return;
+    const type = tr.type;
+    for (const k of unknownKeys(tr, KNOWN_TRANSITION[type]!)) {
+      if (k === 'text') continue; // an error on every non-morph transition already
+      const hint = k === 'dur' && type === 'cut' ? ' — a cut is instant; `dur` applies to morph, fade and wipe' : '';
+      warn(`${p}.transition.${k}`, 'unknown-property', `unknown ${type} property '${k}' — will be ignored${hint}`);
+    }
+  });
 }
 
 /** A line's draw-on span: `{ start?, end?, mode? }`, each a fraction of its arc length 0..1. */
@@ -1780,6 +1838,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
   if (seq.wrapMorph !== undefined && typeof seq.wrapMorph !== 'boolean') err('wrapMorph', 'must be a boolean');
   if (seq.finish !== undefined) validateFinish(seq.finish, 'finish', err, (p, code, message) => void warnings.push({ path: p, code, message }));
+  warnUnknownSequenceKeys(seq, (p, code, message) => void warnings.push({ path: p, code, message }));
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');
