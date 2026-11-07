@@ -143,7 +143,7 @@ describe('perception reads what is on screen', () => {
       const level = mass(line(0, sprite));
       for (const angle of [0.5, 2, 5, 37, 45, 90, 180]) expect(mass(line(angle, sprite)) / level).toBeCloseTo(1, 2);
     }
-    // Its bounding box lit eleven times its ink at 37°.
+    // Measured by its turned box's bounding box, as before, its coverage ballooned at 37°.
     expect(line(37, bar).coverage).toBeLessThan(line(0, bar).coverage * 2);
   });
 
