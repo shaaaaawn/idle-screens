@@ -1353,6 +1353,21 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 }
 
 /**
+ * The ink a rect or bar lays down, in px²: its own box (width × height; a
+ * bar's value-scaled length × thickness), less a feathered rect's soft edge.
+ */
+function boxInkArea(s: Extract<LayerSpec['sprite'], { kind: 'rect' | 'bar' }>, e: Entity, sz: number): number {
+  const per = e.size > 0 ? sz / e.size : 1;
+  if (s.kind === 'bar') {
+    const th = e.size2 !== undefined ? e.size2 * per : sz * 0.2;
+    return sz * barFraction(s, e.barIndex ?? 0) * th;
+  }
+  const h2 = e.size2 !== undefined ? e.size2 * per : sz;
+  const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
+  return sz * h2 * f;
+}
+
+/**
  * The fraction of a box inside the w × h frame: half extents (hx, hy),
  * centred at offset (ox, oy) from `p` before the turn, turned by `rot` about
  * `p` as the renderer turns it. Square to the frame it is the overlap of two
@@ -1473,21 +1488,14 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       if (s.kind === 'circle') entArea = Math.PI * (sz / 2) * (sz / 2);
       else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
       else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
-      else if (s.kind === 'rect') {
-        const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
-        const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
-        entArea = sz * h2 * f;
-      }
+      else if (s.kind === 'rect') entArea = boxInkArea(s, e, sz);
       else if (s.kind === 'polygon') {
         if (isPathPolygon(s)) {
           const fr = pathFrame(s, sz / 2, w, h);
           entArea = pathInkArea(s, fr.sx, fr.sy, sz / 2);
         } else entArea = polygonArea(polygonPoints(s, sz / 2));
       }
-      else if (s.kind === 'bar') {
-        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
-        entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
-      }
+      else if (s.kind === 'bar') entArea = boxInkArea(s, e, sz);
       else if (s.kind === 'stroke') {
         const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
         entArea = pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
@@ -1753,7 +1761,12 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       }
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
-      add(hex, a * (s.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2) : sz * sz));
+      // A rect or bar by the ink of its own box (as dominance counts it), not
+      // a square as wide as it is long: a thin rule is a sliver of colour.
+      const area = s.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2)
+        : s.kind === 'rect' || s.kind === 'bar' ? boxInkArea(s, e, sz)
+          : sz * sz;
+      add(hex, a * area);
     }
   }
   const bg = backgroundRgb(spec);

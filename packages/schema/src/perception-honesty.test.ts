@@ -25,6 +25,22 @@ describe('perception reads what is on screen', () => {
     expect(perceiveScene(s, { viewport: { width: 1080, height: 1080 } }).colour.hex).toBe('#ff3a4a');
   });
 
+  it('a thin rule or a short bar adds the colour of its own ink, not of a square as long as it is', () => {
+    // 0.9 × 0.009 of red (or a bar at a twentieth of its 0.9) beside a 0.2 × 0.2 blue tile:
+    // the tile lays ~5× (or ~40×) the ink, so the scene reads blue.
+    const tile = L({ key: 'tile', position: { x: 0.5, y: 0.7 }, sprite: { kind: 'rect', width: [0.2, 0.2], color: '#0000ff' } });
+    const rule = L({ key: 'rule', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.9, 0.9], aspect: [0.01, 0.01], color: '#ff0000' } });
+    const bar = L({ key: 'bar', position: { x: 0.05, y: 0.3 }, sprite: { kind: 'bar', values: [0.05], max: 1, length: 0.9, thickness: 0.02, color: '#ff0000' } });
+    const rgb = (s: SaverSpec) => { const hex = perceiveScene(s, { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); };
+    for (const red of [rule, bar]) {
+      const [r, , b] = rgb(scene('#000000', [red, tile]));
+      expect(b).toBeGreaterThan(r!);
+    }
+    // A square red tile of the same width as the rule still outweighs the blue one.
+    const [r, , b] = rgb(scene('#000000', [L({ key: 'big', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.4, 0.4], color: '#ff0000' } }), tile]));
+    expect(r).toBeGreaterThan(b!);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),
