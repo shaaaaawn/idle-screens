@@ -208,7 +208,7 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   // A path with a fixed `phase` is exempt for the same reason: it is
   // choreography (entity i at phase + i/count), and a scaled count would add
   // a phantom dancer on a 4K wall or drop one on a phone. Productions used
-  // to buy this exemption by declaring a one-cell grid (everyone-in-between).
+  // to buy this exemption by declaring a one-cell grid on every dancer.
   const fixedPhase = layer.motion.type === 'path' && layer.motion.phase !== undefined;
   const effectiveCount = countScale === 1 || layer.layout !== undefined || fixedPhase
     ? layer.count
