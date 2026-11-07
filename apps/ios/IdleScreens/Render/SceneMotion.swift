@@ -139,7 +139,10 @@ enum SceneMotion {
             t1 = base + tStop / 1000
             t0 = base + Swift.max(0, tStop / 1000 - step)
         } else {
-            t1 = t < step ? t + step : t
+            // Under `emit` a stopping path restarts every event: look forward, not
+            // back across the restart jump, for the first step of each pass.
+            let lead = entity.path?.stop != nil ? pathPassMs(at: t, emit: entity.emit) / 1000 : t
+            t1 = lead < step ? t + step : t
             t0 = t1 - step
         }
         let a = position(of: entity, at: t0, in: size, dim: dim, wrap: wrap, parent: parent)

@@ -224,7 +224,18 @@ describe("motion.loop: 'once' and 'hold'", () => {
     const t = 100; // before the first event opens
     const posAt = (pt: number) => positionAt(e!, pt, W, H);
     const echoes = trailEchoes(trail, t, 1, 20, posAt, W, H, true, 0, 0, false, trailSince(e!, t));
+    expect(echoes.length).toBeGreaterThan(0);
     for (const ec of echoes) expect(ec.t).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a moving emit path just after an event opens is oriented along the path, not the restart jump', () => {
+    const DIAMOND = [{ x: 0.3, y: 0.5 }, { x: 0.5, y: 0.3 }, { x: 0.7, y: 0.5 }, { x: 0.5, y: 0.7 }];
+    const [[e]] = build(scene([pathLayer({ points: DIAMOND, phase: 0, loop: 'hold' }, { emit: { every: 6000, life: 5000 } })]));
+    const opened = e!.emit!.phase + 6000;
+    const early = headingAt(e!, opened + 5, W, H);
+    const later = headingAt(e!, opened + 100, W, H);
+    expect(early).not.toBeNull();
+    expect(early!).toBeCloseTo(later!, 1);
   });
 
   it('a resting entity keeps the heading it arrived with', () => {

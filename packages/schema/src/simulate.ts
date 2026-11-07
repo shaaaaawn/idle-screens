@@ -884,7 +884,10 @@ export function headingAt(e: Entity, t: number, w: number, h: number): number | 
       return headingBetween(e, base + Math.max(0, tStop - dtMs), base + tStop, w, h);
     }
   }
-  const t1 = t < dtMs ? t + dtMs : t;
+  // Under `emit` a stopping path restarts every event: look forward, not back
+  // across the restart jump, for the first dtMs of each pass.
+  const lead = p?.stop !== undefined ? pathPassTime(e, t) : t;
+  const t1 = lead < dtMs ? t + dtMs : t;
   return headingBetween(e, t1 - dtMs, t1, w, h);
 }
 
