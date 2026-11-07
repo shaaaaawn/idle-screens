@@ -232,6 +232,15 @@ describe('timeline keys on a path that does not resolve', () => {
     );
   });
 
+  it('for every such key, from one list of the base\'s paths', () => {
+    const spec = scene([dots({ key: 'fireflies' })], { timeline: { keys: [
+      { t: 1000, path: 'layers.0.speed', value: [0.02, 0.04], dur: 2000 },
+      { t: 2000, path: 'fireflies.sprite.colr', value: '#ffffff', dur: 2000 },
+    ] } });
+    expect(error(spec, 'timeline.keys[0].path')).toContain("did you mean 'layers.0.motion.speed'?");
+    expect(error(spec, 'timeline.keys[1].path')).toContain("did you mean 'fireflies.sprite.color'?");
+  });
+
   it('and keep the plain message when nothing is close', () => {
     const spec = scene([dots()], { timeline: { keys: [{ t: 1000, path: 'layers.0.zorp', value: 1, dur: 2000 }] } });
     expect(error(spec, 'timeline.keys[0].path')).toBe("'layers.0.zorp' does not resolve on the spec — a key can only animate a field the spec already has");

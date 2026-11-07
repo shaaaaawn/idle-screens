@@ -508,8 +508,9 @@ export function steerablePaths(spec: unknown): string[] {
  * and idle-server's setParam/setTrack unknown-path errors, so both suggest
  * by one rule.
  */
-export function suggestSpecPath(spec: unknown, path: string): string | undefined {
-  const candidates = steerablePaths(spec);
+export function suggestSpecPath(spec: unknown, path: string, paths?: readonly string[]): string | undefined {
+  // `paths`: the spec's `steerablePaths`, when the caller already has them (one per call otherwise).
+  const candidates = paths ?? steerablePaths(spec);
   const [head, ...rest] = path.split('.');
   const layers = (spec as { layers?: unknown } | null)?.layers;
   const idx = head !== undefined && head !== 'layers' && head !== 'background' && Array.isArray(layers)

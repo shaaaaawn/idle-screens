@@ -1,5 +1,5 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type SpriteSpec, type ValidationResult } from './types';
-import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature, suggestSpecPath } from './steer';
+import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
@@ -677,6 +677,9 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
 
   const base = withoutTimeline(spec);
   const baseSig = structuralSignature(base);
+  // The base's steerable paths, for "did you mean" on keys that do not resolve —
+  // computed once, on the first such key: it costs a validation of the base.
+  let basePaths: string[] | undefined;
   const times = new Map<string, number[]>();
   let latest = 0;
   tl.keys.forEach((key, i) => {
@@ -697,7 +700,7 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
       ok = false;
     }
     else if (!cp) {
-      const near = suggestSpecPath(base, key.path);
+      const near = suggestSpecPath(base, key.path, (basePaths ??= steerablePaths(base)));
       err(`${p}.path`, `'${key.path}' does not resolve on the spec — a key can only animate a field the spec already has${near ? ` — did you mean '${near}'?` : ''}`);
       ok = false;
     }

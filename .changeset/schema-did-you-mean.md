@@ -9,4 +9,4 @@ Validator messages now say what was probably meant. Each hint is appended to the
 - A timeline key on a path that does not resolve suggests the steerable path it was likely meant to be (`layers.0.speed` → `layers.0.motion.speed`).
 - The curated hints (`delay` → `life.enter`, `id` → `key`, the F142 shape hints) still come first, and only one hint is ever added.
 - A suggestion is made only when one candidate is clearly closest: one edit for names of 3–5 characters and two for longer ones, with a transposed pair counting as one and case ignored. A tie suggests nothing.
-- New exports `nearest(name, candidates)`, `nearestPath(path, candidates)` and `suggestSpecPath(spec, path)` (index or layer-key paths, checked against `steerablePaths`), so idle-server's setParam/setTrack errors can use the same rule.
+- New exports `nearest(name, candidates)`, `nearestPath(path, candidates)` and `suggestSpecPath(spec, path, paths?)` (index or layer-key paths, checked against `steerablePaths` or the `paths` passed), so idle-server's setParam/setTrack errors can use the same rule.
