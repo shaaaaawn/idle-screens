@@ -194,3 +194,50 @@ final class FeedOrderTests: XCTestCase {
         XCTAssertEqual(FeedOrder.arrange([ch("x"), ch("y")], by: []).map(\.id), ["x", "y"])
     }
 }
+
+/// Which page the feed treats as the one you are watching. A pull to refresh
+/// that put a new channel above the page you were on left that new channel on
+/// screen and the old one selected: chrome over a black scene, no web view,
+/// until you swiped away and back.
+final class FeedSelectionTests: XCTestCase {
+    func testThePageOnScreenWinsOnceTheScrollIsAtRest() {
+        XCTAssertEqual(FeedSelection.correction(selected: "old", settled: "new", among: ["new", "old"]), "new")
+    }
+
+    func testNothingToFixWhenTheyAgree() {
+        XCTAssertNil(FeedSelection.correction(selected: "a", settled: "a", among: ["a", "b"]))
+    }
+
+    /// Mid-swipe, mid-pull or mid-scroll no page fills the screen, and a
+    /// `select` on its way to its page must be left to land.
+    func testNothingSettledMeansNoCorrection() {
+        XCTAssertNil(FeedSelection.correction(selected: "a", settled: nil, among: ["a", "b"]))
+    }
+
+    /// A page that left the feed (hidden, dropped by a refresh) can still be
+    /// the last one measured. Selecting it would make no page active at all.
+    func testAPageThatLeftTheFeedIsNeverChosen() {
+        XCTAssertNil(FeedSelection.correction(selected: "b", settled: "gone", among: ["a", "b"]))
+    }
+
+    func testANilSelectionTakesThePageOnScreen() {
+        XCTAssertEqual(FeedSelection.correction(selected: nil, settled: "a", among: ["a"]), "a")
+    }
+
+    /// The scroll view reports nil while a pull drags the first page down.
+    /// Taken as a position, every pull switched the page you were on off and on.
+    func testAPullsNilPositionKeepsThePageYouAreOn() {
+        XCTAssertEqual(FeedSelection.reported(nil, keeping: "here"), "here")
+        XCTAssertEqual(FeedSelection.reported("next", keeping: "here"), "next")
+    }
+
+    func testAPageFillsTheViewportOnlyAtRest() {
+        XCTAssertTrue(FeedSelection.fills(CGRect(x: 0, y: 0, width: 402, height: 874)))
+        XCTAssertTrue(FeedSelection.fills(CGRect(x: 0, y: -0.33, width: 402, height: 874)))
+        // Pulled down under the refresh spinner, or halfway through a swipe.
+        XCTAssertFalse(FeedSelection.fills(CGRect(x: 0, y: 60, width: 402, height: 874)))
+        XCTAssertFalse(FeedSelection.fills(CGRect(x: 0, y: -437, width: 402, height: 874)))
+        // Not laid out yet.
+        XCTAssertFalse(FeedSelection.fills(.zero))
+    }
+}
