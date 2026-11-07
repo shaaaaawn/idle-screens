@@ -18,14 +18,13 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { FIELD_RASTER_SHORT_SIDE, fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, polygonInkArea, polygonUnitRing, ringFill, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
   breakTextBlock, textBlockText,
   buildEntities,
   headingAt,
-  isFullWidth,
   lifeAlphaAt,
   lifeStaggerAt,
   linkEdges,
@@ -36,6 +35,7 @@ import {
   sizeAt,
   textBlockAnchorOffset,
   textMetricsClassFor,
+  textWidthEm,
   entityScales,
   trailSince,
   type Entity,
@@ -181,11 +181,10 @@ function textBox(
   const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
   // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
-  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614) — every
-  // glyph of the string, as the renderer paints it, however long.
-  const glyphs = Array.from(str);
-  const wide = glyphs.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
-  const est = Math.max(fh, fh * (0.62 * glyphs.length + 0.38 * wide));
+  // The same per-glyph metrics the advisories and textBlock layout use (a
+  // full-width glyph a whole em, X614; monospace by its advance), over the
+  // whole string the renderer paints.
+  const est = fh * textWidthEm(str, textMetricsClassFor(s.font));
   const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';
@@ -846,7 +845,12 @@ export function luminanceGrid(
             const g = gradientAt(part.gradient, gu, gv);
             cl = g.luma; ca = g.opacity;
           }
-          const wgt = s.soft && !parts ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6)) : f;
+          // A soft fill is the renderer's radial gradient: a plain polygon's
+          // over its circumradius, a single path drawing's over its unit
+          // circle (unless the path carries its own gradient, which wins).
+          const wgt = !s.soft ? f
+            : !parts ? f * softProfile(Math.hypot(x - p.x, y - p.y) / Math.max(radius, 1e-6))
+              : !s.parts && !part?.gradient ? f * softProfile(Math.hypot(...unitAt(x, y))) : f;
           if (wgt > 0) compose(r * cols + c, cl, a * partA * ca * Math.min(1, wgt), layer.blend);
         }
       }
@@ -1435,7 +1439,7 @@ function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: n
   if (s.kind === 'polygon') {
     // A soft one paints its fill through a radial gradient (softPolygonFactor);
     // a drawing's part with its own gradient paints that instead.
-    if (!isPathPolygon(s)) return polygonArea(polygonPoints(s, sz / 2)) * (s.soft ? softPolygonFactor(s) : 1);
+    if (!isPathPolygon(s)) return polygonInkArea(s, sz / 2) * (s.soft ? softPolygonFactor(s) : 1);
     const fr = pathFrame(s, sz / 2, w, h);
     if (!s.soft || s.parts) return pathInkArea(s, fr.sx, fr.sy, sz / 2);
     let ink = 0;
@@ -1660,6 +1664,11 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
       // Its ink is its gradient's, heaviest at the centre: weigh the clip by it.
       const r = half;
       const f = rasterFill(pts, polygonFillRule(s) === 'evenodd', (x, y) => softProfile(Math.hypot(x - p.x, y - p.y) / r), { w, h });
+      return f.all > 0 ? Math.min(1, f.inside / f.all) : 1;
+    }
+    if (!ringFill(polygonUnitRing(s), false).simple) {
+      // A self-crossing outline: its overlap painted once, by the rule (rasterFill).
+      const f = rasterFill(pts, false, undefined, { w, h });
       return f.all > 0 ? Math.min(1, f.inside / f.all) : 1;
     }
     const all = polygonArea(pts);

@@ -1,5 +1,5 @@
 import { createRng } from '@idle-screens/core';
-import { polygonArea, polygonPoints } from './shapes';
+import { polygonInkArea } from './shapes';
 import { buildEntities, entityScales, linkEdges, linkMaxDistPx, positionAt } from './simulate';
 import type { FinishSpec, SaverSpec } from './types';
 
@@ -65,7 +65,7 @@ export function describeScene(
         pixArea += layer.sprite.kind === 'circle'
           ? Math.PI * r * r
           : layer.sprite.kind === 'polygon'
-            ? polygonArea(polygonPoints(layer.sprite, r))
+            ? polygonInkArea(layer.sprite, r)
             : e.size * e.size;
       }
       const coverage = pixArea / (w * h);

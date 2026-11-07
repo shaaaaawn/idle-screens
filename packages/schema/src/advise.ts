@@ -2,7 +2,7 @@ import { createRng } from '@idle-screens/core';
 import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
 import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonArea, polygonPoints } from './shapes';
+import { barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonInkArea, polygonPoints, ruleArea } from './shapes';
 import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, revealState, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { describeStructuralDifferences, morphNothingMorphable, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
@@ -316,7 +316,7 @@ export function adviseSpec(
         if (isPathPolygon(layer.sprite)) {
           const fr = pathFrame(layer.sprite, r, w, h);
           pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy, r);
-        } else pixArea = polygonArea(polygonPoints(layer.sprite, r));
+        } else pixArea = polygonInkArea(layer.sprite, r);
       } else if (layer.sprite.kind === 'bar') {
         pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
       } else if (layer.sprite.kind === 'textBlock') {
@@ -1235,7 +1235,7 @@ function pathGroundAt(
     const box = part.box;
     if (Math.abs(u - box.cx) > box.hw || Math.abs(v - box.cy) > box.hh) continue;
     const ring = part.flat.points.map(([x, y]) => ({ x, y }));
-    if (!pointInPolygon(u, v, ring)) continue;
+    if (!pointInPolygon(u, v, ring, part.rule === 'evenodd')) continue;
     const pc = hexRgb(part.color ?? base);
     let rgb = pc;
     if (part.gradient) {
@@ -1248,7 +1248,7 @@ function pathGroundAt(
         rgb = { r: rgb.r + (c.r * o + pc.r * (1 - o)) * k, g: rgb.g + (c.g * o + pc.g * (1 - o)) * k, b: rgb.b + (c.b * o + pc.b * (1 - o)) * k };
       });
     }
-    const pa = Math.max(1e-6, polygonArea(ring));
+    const pa = Math.max(1e-6, ruleArea(part.flat.points, part.rule === 'evenodd', 1, 1));
     const wt = pa * part.opacity;
     r += rgb.r * wt; g += rgb.g * wt; b += rgb.b * wt;
     wsum += wt;
@@ -1258,14 +1258,19 @@ function pathGroundAt(
   return { rgb: { r: r / wsum, g: g / wsum, b: b / wsum }, opacity: Math.min(1, wsum / area) };
 }
 
-function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>): boolean {
+/** Whether a point lies inside a polygon by the even-odd rule (default) or the nonzero winding rule. */
+function pointInPolygon(x: number, y: number, pts: Array<{ x: number; y: number }>, evenodd = true): boolean {
   let inside = false;
+  let wind = 0;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const a = pts[i]!;
     const b = pts[j]!;
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+      wind += a.y > b.y ? 1 : -1;
+    }
   }
-  return inside;
+  return evenodd ? inside : wind !== 0;
 }
 
 /** Whether an entity's disc of half-extent `r` can overlap `box` (see `brightestAdditivePlate`). */
@@ -1346,7 +1351,7 @@ function textBoxAt(
   const fontScale = spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
   const fh = m ? Number(m[1]) * fontScale : e.size;
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
-  let fw = textWidthEm(str) * fh;
+  let fw = textWidthEm(str, textMetricsClassFor(s.font)) * fh;
   if (s.maxWidth) fw = Math.min(fw, s.maxWidth * (spec.units === 'px' ? 1 : Math.min(w, h)));
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';

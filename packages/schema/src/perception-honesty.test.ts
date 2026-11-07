@@ -172,6 +172,57 @@ describe('perception reads what is on screen', () => {
     expect(area(rule, { x: 0, y: 0.5 }) / area(rule)).toBeCloseTo(0.5, 3);
   });
 
+  it('a label is measured by its font\'s glyph metrics, the same in the maps and the advisories', () => {
+    // Thirty narrow "i"s at 40 px: 10.5 em proportional, 18 em monospace (0.6 em an advance).
+    const label = (font: string, x: number) => scene('#000000', [L({ key: 'cap', position: { x, y: 0.5 }, size: [0.04, 0.04], sprite: { kind: 'text', strings: ['i'.repeat(30)], align: 'left', font, color: '#ffffff' } })]);
+    const lit = (s: SaverSpec) => {
+      const g = luminanceGrid(s, { viewport: { width: 1000, height: 1000 }, cols: 200, rows: 100 });
+      let c0 = Infinity, c1 = -1;
+      g.cells.forEach((v, i) => { if (v > 0.001) { c0 = Math.min(c0, i % g.cols); c1 = Math.max(c1, i % g.cols); } });
+      return (c1 - c0 + 1) * 5;
+    };
+    expect(lit(label('system-ui', 0.1))).toBeCloseTo(420, -1);
+    expect(lit(label('monospace', 0.1))).toBeCloseTo(720, -1);
+    // From the middle, the monospace one runs ~220 px off the right edge; the proportional one fits.
+    expect(codes(label('monospace', 0.5), 1000, 1000)).toContain('text-off-screen');
+    expect(codes(label('system-ui', 0.5), 1000, 1000)).not.toContain('text-off-screen');
+  });
+
+  it('a soft single-path drawing is its gradient in the maps; a path with its own gradient is that gradient', () => {
+    const drawing = (o: Record<string, unknown>) => luminanceGrid(scene('#000000', [L({ key: 'd', position: { x: 0.5, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#ffffff', path: sq, ...o } })]), { viewport: { width: 1000, height: 1000 }, cols: 100, rows: 100 });
+    // The unit square under the unit-circle gradient: ~0.297 of its ink (brute force, as softPolygonFactor).
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    let bf = 0;
+    for (let i = 0; i < 400; i++) for (let j = 0; j < 400; j++) bf += profile(Math.hypot(-1 + (i + 0.5) / 200, -1 + (j + 0.5) / 200));
+    expect(mass(drawing({ soft: true })) / mass(drawing({}))).toBeCloseTo(bf / 160000, 2);
+    const gradient = { type: 'linear', from: [-1, 0], to: [1, 0], stops: [{ at: 0, color: '#ffffff' }, { at: 1, color: '#000000' }] };
+    expect(mass(drawing({ soft: true, gradient }))).toBeCloseTo(mass(drawing({ gradient })), 9);
+  });
+
+  it('a fill is measured by its rule: an even-odd hole is empty, an overlap paints once', () => {
+    const area = (sprite: Record<string, unknown>) => perceiveScene(scene('#000000', [L({ key: 'k', position: { x: 0.5, y: 0.5 }, sprite: { radius: [0.2, 0.2], color: '#ffffff', ...sprite, kind: 'polygon' } })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    const square = area({ path: sq });
+    // A square with a half-size square inside it, both drawn the same way round.
+    const nested = `${sq} M -0.5 -0.5 L 0.5 -0.5 L 0.5 0.5 L -0.5 0.5 Z`;
+    expect(area({ path: nested, fillRule: 'evenodd' }) / square).toBeCloseTo(0.75, 2); // the hole is empty
+    expect(area({ path: nested, fillRule: 'nonzero' }) / square).toBeCloseTo(1, 2); // the overlap paints once
+    expect(area({ path: nested }) / square).toBeCloseTo(0.75, 6); // auto winds it as a hole (unchanged: shoelace)
+    // A pentagram drawn as one self-crossing outline: nonzero paints its centre once.
+    const star = Array.from({ length: 5 }, (_, k) => { const a = -Math.PI / 2 + (k * 4 * Math.PI) / 5; return [Math.cos(a), Math.sin(a)]; });
+    const inStar = (x: number, y: number) => {
+      let wind = 0;
+      for (let k = 0; k < 5; k++) {
+        const [ax, ay] = star[k]!, [bx, by] = star[(k + 1) % 5]!;
+        if (ay <= y && by > y && (bx - ax) * (y - ay) - (x - ax) * (by - ay) > 0) wind++;
+        else if (by <= y && ay > y && (bx - ax) * (y - ay) - (x - ax) * (by - ay) < 0) wind--;
+      }
+      return wind !== 0;
+    };
+    let n = 0;
+    for (let i = 0; i < 800; i++) for (let j = 0; j < 800; j++) if (inStar(-1 + (i + 0.5) / 400, -1 + (j + 0.5) / 400)) n++;
+    expect(area({ points: star }) / square).toBeCloseTo(((n / 640000) * 4) / 4, 2);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),

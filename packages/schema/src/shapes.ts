@@ -87,7 +87,85 @@ export function polygonArea(pts: Array<{ x: number; y: number }>): number {
 export function polygonFill(s: PolygonSprite, radius: number): number {
   if (radius <= 0) return 0;
   const disc = Math.PI * radius * radius;
-  return Math.min(1, polygonArea(polygonPoints(s, radius)) / disc);
+  return Math.min(1, polygonInkArea(s, radius) / disc);
+}
+
+/** Scanlines across a ring when checking how it fills (`ringFill`). */
+const RULE_SCANLINES = 512;
+const ringFills = new WeakMap<object, { nonzero?: { simple: boolean; area: number }; evenodd?: { simple: boolean; area: number } }>();
+
+/**
+ * How a ring fills under its rule, memoised on the ring array: `simple` while
+ * every point is wound 0 or (all one sign) 1 — a plain outline, or holes the
+ * auto rule wound against their container — where the shoelace area is
+ * exact. Otherwise (a hole drawn the same way round under `evenodd`, two
+ * solids overlapping, a self-crossing star) `area` is what the rule paints,
+ * summed on scanlines exact in x.
+ */
+export function ringFill(ring: ReadonlyArray<readonly [number, number]>, evenodd: boolean): { simple: boolean; area: number } {
+  const memo = ringFills.get(ring) ?? {};
+  const hit = evenodd ? memo.evenodd : memo.nonzero;
+  if (hit) return hit;
+  let y0 = Infinity, y1 = -Infinity;
+  for (const [, y] of ring) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  let simple = true;
+  let sign = 0;
+  let area = 0;
+  if (ring.length >= 3 && y1 > y0) {
+    const dy = (y1 - y0) / RULE_SCANLINES;
+    const hits: Array<{ x: number; d: number }> = [];
+    for (let i = 0; i < RULE_SCANLINES; i++) {
+      const y = y0 + (i + 0.5) * dy;
+      hits.length = 0;
+      for (let j = 0; j < ring.length; j++) {
+        const [px, py] = ring[j]!;
+        const [qx, qy] = ring[(j + 1) % ring.length]!;
+        const down = py <= y && qy > y;
+        if (!down && !(qy <= y && py > y)) continue;
+        hits.push({ x: px + ((y - py) / (qy - py)) * (qx - px), d: down ? 1 : -1 });
+      }
+      hits.sort((m, n) => m.x - n.x);
+      let wind = 0;
+      for (let k = 0; k < hits.length - 1; k++) {
+        wind += hits[k]!.d;
+        if (wind === 0) continue;
+        if (Math.abs(wind) > 1 || (sign !== 0 && Math.sign(wind) !== sign)) simple = false;
+        sign = Math.sign(wind);
+        if (!evenodd || (wind & 1) !== 0) area += (hits[k + 1]!.x - hits[k]!.x) * dy;
+      }
+    }
+  }
+  const out = { simple, area };
+  ringFills.set(ring, evenodd ? { ...memo, evenodd: out } : { ...memo, nonzero: out });
+  return out;
+}
+
+/**
+ * The area a unit-space ring paints under its fill rule once scaled by
+ * (sx, sy): the shoelace area while the ring is simple (`ringFill`), else the
+ * rule's own area, scaled.
+ */
+export function ruleArea(ring: ReadonlyArray<readonly [number, number]>, evenodd: boolean, sx: number, sy: number): number {
+  const f = ringFill(ring, evenodd);
+  return f.simple ? polygonArea(ring.map(([x, y]) => ({ x: x * sx, y: y * sy }))) : f.area * Math.abs(sx * sy);
+}
+
+const polygonUnitRings = new WeakMap<object, { key: unknown; ring: Array<[number, number]> }>();
+
+/** A polygon sprite's unit-radius outline as a ring, memoised on the sprite (re-read when its outline source is replaced). */
+export function polygonUnitRing(s: PolygonSprite): Array<[number, number]> {
+  const key = s.path ?? s.points ?? s.sides;
+  const hit = polygonUnitRings.get(s);
+  if (hit && hit.key === key) return hit.ring;
+  const ring = polygonPoints(s, 1).map((q) => [q.x, q.y] as [number, number]);
+  polygonUnitRings.set(s, { key, ring });
+  return ring;
+}
+
+/** The area a polygon sprite paints at circumradius `radius`, by its fill rule (a self-crossing star's centre once, an even-odd hole not at all). */
+export function polygonInkArea(s: PolygonSprite, radius: number): number {
+  const f = ringFill(polygonUnitRing(s), polygonFillRule(s) === 'evenodd');
+  return f.simple ? polygonArea(polygonPoints(s, radius)) : f.area * radius * radius;
 }
 
 function catmullRom(p0: number, p1: number, p2: number, p3: number, u: number): number {
@@ -561,7 +639,7 @@ export function pathParts(s: PolygonSprite): ResolvedPart[] {
  */
 export function partInkArea(part: ResolvedPart, sx: number, sy: number, r: number): { fill: number; stroke: number } {
   if (part.opacity <= 0) return { fill: 0, stroke: 0 };
-  const fill = part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x: x * sx, y: y * sy }))) * part.opacity : 0;
+  const fill = part.fill ? ruleArea(part.flat.points, part.rule === 'evenodd', sx, sy) * part.opacity : 0;
   let stroke = 0;
   if (part.stroke && part.stroke.width > 0) {
     for (const l of strokeLines(part)) {
