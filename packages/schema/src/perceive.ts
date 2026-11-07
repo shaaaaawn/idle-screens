@@ -1353,33 +1353,57 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 }
 
 /**
- * The fraction of an entity's extent inside the viewport. Its box is the
+ * The fraction of a box inside the w × h frame: half extents (hx, hy),
+ * centred at offset (ox, oy) from `p` before the turn, turned by `rot` about
+ * `p` as the renderer turns it. Square to the frame it is the overlap of two
+ * spans; turned, the exact area of the turned box inside the frame (the
+ * frame taken as one cell), not of its bounding box.
+ */
+function turnedBoxOnScreen(w: number, h: number, p: { x: number; y: number }, ox: number, oy: number, hx: number, hy: number, rot: number): number {
+  const cr = Math.cos(rot);
+  const sr = Math.sin(rot);
+  const cx = p.x + ox * cr - oy * sr;
+  const cy = p.y + ox * sr + oy * cr;
+  const level = Math.abs(sr) < 1e-9;
+  if (level || Math.abs(cr) < 1e-9) {
+    const ex = level ? hx : hy;
+    const ey = level ? hy : hx;
+    const fx = Math.max(0, Math.min(cx + ex, w) - Math.max(cx - ex, 0)) / (2 * ex);
+    const fy = Math.max(0, Math.min(cy + ey, h) - Math.max(cy - ey, 0)) / (2 * ey);
+    return fx * fy;
+  }
+  const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => ({ x: cx + u! * cr - v! * sr, y: cy + u! * sr + v! * cr }));
+  return Math.min(1, (convexCellCoverage(corners, w, h, 0, 0, 0, 0)[0]! * w * h) / (4 * hx * hy));
+}
+
+/**
+ * The fraction of an entity's extent inside the viewport. A rect or bar is
+ * its own box, turned as the renderer turns it (the entity's rotation plus
+ * its layer's and group's `transform.rotate`); anything else is the
  * circumradius square (a path drawing's own frame, which `span`/`origin` can
- * stretch and shift), scaled by the paint transform `k`; a text box is judged
- * by the text checks, so text counts whole. Only what lands in the frame is
- * the scene's mass or colour (X616).
+ * stretch and shift). All scale by the paint transform `k`; a text box is
+ * judged by the text checks, so text counts whole. Only what lands in the
+ * frame is the scene's mass or colour (X616).
  */
 function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number, paintRot = 0): number {
   if (s.kind === 'text' || s.kind === 'textBlock') return 1;
   const { w, h } = scene;
   const p = posOf(scene, e, t);
   let cx = p.x, cy = p.y, hx = (sz / 2) * k, hy = hx;
+  const per = e.size > 0 ? sz / e.size : 1;
+  if (s.kind === 'rect') {
+    // Its own box about the entity: width by its own height, not a square.
+    const rh = e.size2 !== undefined ? e.size2 * per : sz;
+    if (!(hx > 0) || !(rh > 0)) return 1;
+    return turnedBoxOnScreen(w, h, p, 0, 0, hx, (rh / 2) * k, rotationAt(e, t) + paintRot);
+  }
   if (s.kind === 'bar') {
-    // A bar reaches outward from the entity in its direction, not about it:
-    // clip its own box, turned by the entity's rotation (as the luminance map does).
+    // A bar reaches outward from the entity in its direction, not about it.
     const len = sz * barFraction(s, e.barIndex ?? 0);
-    const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
+    const th = e.size2 !== undefined ? e.size2 * per : sz * 0.2;
     const b = barBox(s.direction ?? 'right', len * k, th * k);
     if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
-    const rot = rotationAt(e, t);
-    const cr = Math.cos(rot), sr = Math.sin(rot);
-    cx = p.x + b.cx * cr - b.cy * sr;
-    cy = p.y + b.cx * sr + b.cy * cr;
-    const ex = Math.abs(b.halfX * cr) + Math.abs(b.halfY * sr);
-    const ey = Math.abs(b.halfX * sr) + Math.abs(b.halfY * cr);
-    const fx = Math.max(0, Math.min(cx + ex, w) - Math.max(cx - ex, 0)) / (2 * ex);
-    const fy = Math.max(0, Math.min(cy + ey, h) - Math.max(cy - ey, 0)) / (2 * ey);
-    return fx * fy;
+    return turnedBoxOnScreen(w, h, p, b.cx, b.cy, b.halfX, b.halfY, rotationAt(e, t) + paintRot);
   }
   if (s.kind === 'polygon' && isPathPolygon(s)) {
     const fr = pathFrame(s, sz / 2, w, h);

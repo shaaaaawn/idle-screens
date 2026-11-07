@@ -133,6 +133,26 @@ describe('perception reads what is on screen', () => {
     expect(mass(diag) / mass(flat)).toBeCloseTo(1, 3);
   });
 
+  it('a rect or bar is clipped to the frame by its own turned box, not a width-sided square', () => {
+    const area = (sprite: Record<string, unknown>, o: Record<string, unknown>) => perceiveScene(scene('#000000', [L({ key: 'k', sprite, ...o })]), { viewport: { width: 400, height: 400 } }).dominance[0]!.factors.area;
+    const rect = { kind: 'rect', width: [0.6, 0.6], aspect: [0.05, 0.05], color: '#ffffff' };
+    const whole = area(rect, { position: { x: 0.5, y: 0.5 } });
+    // Lying along the bottom edge it is all on screen; stood on end (by
+    // `rotate` or its layer's `transform.rotate`) 0.33 of its 0.6 shows. A
+    // 0.6 square about it read 55 % for both.
+    expect(area(rect, { position: { x: 0.5, y: 0.97 } }) / whole).toBeCloseTo(1, 3);
+    expect(area(rect, { position: { x: 0.5, y: 0.97 }, rotate: 90 }) / whole).toBeCloseTo(0.33 / 0.6, 3);
+    expect(area(rect, { position: { x: 0.5, y: 0.97 }, transform: { rotate: 90, origin: 'anchor' } }) / whole).toBeCloseTo(0.33 / 0.6, 3);
+    // Across the bottom-right corner at −45° both ends are off screen; only a
+    // 0.015-sided triangle at the corner shows (0.015² of 0.6 × 0.03), where
+    // its square or bounding box would keep a quarter.
+    expect(area(rect, { position: { x: 1, y: 1 }, rotate: -45 }) / whole).toBeCloseTo(0.0125, 4);
+    // A bar turns with its layer's transform too: pointing down from y = 0.9, a tenth of its 0.4 shows.
+    const bar = { kind: 'bar', values: [1], max: 1, length: 0.4, thickness: 0.02, color: '#ffffff' };
+    const flat = area(bar, { position: { x: 0.5, y: 0.9 } });
+    expect(area(bar, { position: { x: 0.5, y: 0.9 }, transform: { rotate: 90, origin: 'anchor' } }) / flat).toBeCloseTo(0.25, 3);
+  });
+
   it('a thin turned plank keeps its ink at every angle: exact turned-box coverage, no scanline gaps', () => {
     // 0.96 px tall on 8.3 px grid rows — thinner than one of the four
     // sub-scanlines a polygon outline is sampled on — and barely tilted.

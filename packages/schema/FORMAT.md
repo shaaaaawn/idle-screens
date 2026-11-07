@@ -1181,7 +1181,8 @@ stands still.
   (area × alpha × contrast × glow/motion boosts; links and persistence ink —
   trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
-  line-salience boost so they aren't crushed by filled discs.
+  line-salience boost so they aren't crushed by filled discs. Only what lands
+  in the frame counts, a `rect` or `bar` by its own turned box.
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
