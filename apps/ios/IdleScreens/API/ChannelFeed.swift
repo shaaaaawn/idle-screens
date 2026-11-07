@@ -191,7 +191,7 @@ extension GalleryClient {
         let url = baseURL
             .appendingPathComponent("c").appendingPathComponent(channelId)
             .appendingPathComponent("scene").appendingPathComponent(String(sceneId))
-        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        let (data, http) = try await channelRead(url, channelId: channelId)
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(status: http.statusCode,
                                          body: String(data: data, encoding: .utf8) ?? "")
