@@ -96,6 +96,14 @@ describe('perception reads what is on screen', () => {
     const still = wedge();
     expect(at(still, 3000).centroid).toEqual(at(still, 1000).centroid);
     expect(at(still, 2000).motion[0]!.moving).toBe(false);
+    // Motion counts the turn for every shape but a circle or ring, so a
+    // rocking rect moves even though the maps keep its box unturned.
+    const plank = (rock?: Record<string, unknown>): SaverSpec => scene('#000000', [L({
+      key: 'plank', position: { x: 0.5, y: 0.5 }, ...(rock ? { rock, clock: { phase: 0 } } : {}),
+      sprite: { kind: 'rect', width: [0.4, 0.4], aspect: [0.1, 0.1], color: '#ffffff' },
+    })]);
+    expect(at(plank({ amp: 45, period: 4000 }), 2000).motion[0]!.moving).toBe(true);
+    expect(at(plank(), 2000).motion[0]!.moving).toBe(false);
   });
 
   it('X603: a vertical caption is judged by its rotated box', () => {
