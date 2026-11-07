@@ -500,6 +500,27 @@ export function adviseSpec(
     }
   }
 
+  // The same trap for a path that stops (`loop: 'once' | 'hold'`): its pass
+  // is counted on scene time, so it keeps progressing across timeline
+  // wraps until its pass ends, and a pass that outlasts a lap is not
+  // restarted by the loop. With `emit` the pass
+  // replays per event instead, which is its own clock — not noted.
+  if (authored.timeline?.loop && (authored.timeline.duration ?? 0) > 0) {
+    const lap = Math.round(authored.timeline.duration!);
+    for (let li = 0; li < authored.layers.length; li++) {
+      if (hidden?.[li]) continue;
+      const layer = authored.layers[li]!;
+      const m = layer.motion;
+      if (m.type !== 'path' || (m.loop !== 'once' && m.loop !== 'hold') || layer.emit) continue;
+      const label = layer.key ? `\`${layer.key}\`` : `layers[${li}]`;
+      warnings.push({
+        path: `layers[${li}].motion.loop`,
+        code: 'path-runs-once',
+        message: `informational: ${label}'s path (\`loop: '${m.loop}'\`) runs its pass once on scene time, from when the scene (or its sequence segment) starts — it does not replay when the timeline loops every ${lap} ms; give the layer an \`emit\` to replay the pass on each event`,
+      });
+    }
+  }
+
   // Link starvation: links layer where few edges actually form.
   // Chain mode always forms its edges — only distance-gated modes can starve.
   for (let li = 0; li < spec.layers.length; li++) {

@@ -37,6 +37,7 @@ import {
   textBlockAnchorOffset,
   textMetricsClassFor,
   entityScales,
+  trailSince,
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
@@ -180,10 +181,11 @@ function textBox(
   const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
   // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
-  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614).
-  const head = Array.from(str).slice(0, 48);
-  const wide = head.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
-  const est = Math.max(fh, fh * (0.62 * head.length + 0.38 * wide));
+  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614) — every
+  // glyph of the string, as the renderer paints it, however long.
+  const glyphs = Array.from(str);
+  const wide = glyphs.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
+  const est = Math.max(fh, fh * (0.62 * glyphs.length + 0.38 * wide));
   const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';
@@ -338,6 +340,145 @@ function polygonCellCoverage(
   return cov;
 }
 
+/** The part of polygon `pts` where `axis` is ≥ `v` (`above`) or ≤ `v` — one Sutherland–Hodgman plane (exact for any polygon: the clip window is convex). */
+function clipHalfPlane(pts: Array<{ x: number; y: number }>, axis: 'x' | 'y', v: number, above: boolean): Array<{ x: number; y: number }> {
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const dp = above ? p[axis] - v : v - p[axis];
+    const dq = above ? q[axis] - v : v - q[axis];
+    if (dp >= 0) out.push(p);
+    if ((dp >= 0) !== (dq >= 0)) {
+      const k = dp / (dp - dq);
+      out.push({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+    }
+  }
+  return out;
+}
+
+/** The height of convex polygon `pts` along the vertical line at `x` (0 where it misses). */
+function convexHeightAt(pts: Array<{ x: number; y: number }>, x: number): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const dp = p.x - x;
+    const dq = q.x - x;
+    // An edge lying on the line (dp = dq = 0) is skipped: its neighbours count its ends.
+    if (dp * dq > 0 || dp === dq) continue;
+    const y = p.y + (dp / (dp - dq)) * (q.y - p.y);
+    lo = Math.min(lo, y);
+    hi = Math.max(hi, y);
+  }
+  return hi > lo ? hi - lo : 0;
+}
+
+/**
+ * Fraction of each cell in the window [c0..c1]×[r0..r1] that a CONVEX polygon
+ * covers, row-major within the window — exact. For a turned box (rect, bar, a
+ * text box), where `polygonCellCoverage`'s POLYGON_SCANLINES sub-scanlines
+ * would miss, or double, a plank thinner than a quarter cell tilted a few
+ * degrees off level. Each grid row clips the polygon to its band; between
+ * two of the band's vertex x's both its chains are straight, so its height
+ * is linear there and its area left of any column edge is a sum of
+ * trapezoids — a cell's share is the difference at its two edges.
+ */
+function convexCellCoverage(
+  pts: Array<{ x: number; y: number }>,
+  cellW: number,
+  cellH: number,
+  c0: number,
+  c1: number,
+  r0: number,
+  r1: number,
+): Float64Array {
+  const nc = c1 - c0 + 1;
+  const cov = new Float64Array(nc * (r1 - r0 + 1));
+  const cellA = cellW * cellH;
+  for (let r = r0; r <= r1; r++) {
+    const band = clipHalfPlane(clipHalfPlane(pts, 'y', r * cellH, true), 'y', (r + 1) * cellH, false);
+    if (band.length < 3) continue;
+    const xs = band.map((q) => q.x).sort((m, n) => m - n);
+    const hs = xs.map((x) => convexHeightAt(band, x));
+    const cum = [0];
+    for (let k = 1; k < xs.length; k++) cum.push(cum[k - 1]! + ((hs[k - 1]! + hs[k]!) / 2) * (xs[k]! - xs[k - 1]!));
+    const n = xs.length - 1;
+    let k = 0;
+    // Area left of x; x only grows along a row, so the segment index does too.
+    const areaLeft = (x: number): number => {
+      if (x <= xs[0]!) return 0;
+      while (k < n && xs[k + 1]! <= x) k++;
+      if (k === n) return cum[n]!;
+      const hx = hs[k]! + ((hs[k + 1]! - hs[k]!) * (x - xs[k]!)) / (xs[k + 1]! - xs[k]!);
+      return cum[k]! + ((hs[k]! + hx) / 2) * (x - xs[k]!);
+    };
+    const first = Math.max(c0, Math.floor(xs[0]! / cellW));
+    const last = Math.min(c1, Math.floor(xs[n]! / cellW));
+    let left = areaLeft(first * cellW);
+    for (let c = first; c <= last; c++) {
+      const next = areaLeft((c + 1) * cellW);
+      const f = (next - left) / cellA;
+      if (f > 0) cov[(r - r0) * nc + (c - c0)] = Math.min(1, f);
+      left = next;
+    }
+  }
+  return cov;
+}
+
+/** Cells a side when rasterising one outline for its ink (`rasterFill`). */
+const INK_RASTER_CELLS = 48;
+
+/**
+ * The ink of a filled outline — its area, each part weighted by `weight` at
+ * that point when given — and, with `frame`, the ink of the part inside the
+ * w × h frame. Both are read on one grid laid over the whole outline (the
+ * grid's own scanline rasteriser and fill rule), so the inside share is
+ * measured exactly as the whole is.
+ */
+function rasterFill(ring: Array<{ x: number; y: number }>, evenodd: boolean, weight?: (x: number, y: number) => number, frame?: { w: number; h: number }): { all: number; inside: number } {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of ring) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+  if (ring.length < 3 || !(x1 > x0) || !(y1 > y0)) return { all: 0, inside: 0 };
+  const n = INK_RASTER_CELLS;
+  const cw = (x1 - x0) / n;
+  const ch = (y1 - y0) / n;
+  const ink = (pts: Array<{ x: number; y: number }>): number => {
+    if (pts.length < 3) return 0;
+    const cov = polygonCellCoverage(pts.map((q) => ({ x: q.x - x0, y: q.y - y0 })), cw, ch, 0, n - 1, 0, n - 1, evenodd);
+    let sum = 0;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const f = cov[r * n + c]!;
+      if (f > 0) sum += f * (weight ? weight(x0 + (c + 0.5) * cw, y0 + (r + 0.5) * ch) : 1);
+    }
+    return sum * cw * ch;
+  };
+  const all = ink(ring);
+  if (!frame) return { all, inside: all };
+  const { w, h } = frame;
+  return { all, inside: ink(clipHalfPlane(clipHalfPlane(clipHalfPlane(clipHalfPlane(ring, 'x', 0, true), 'x', w, false), 'y', 0, true), 'y', h, false)) };
+}
+
+const softPolygonFactors = new WeakMap<object, number>();
+
+/**
+ * The share of a `soft` polygon's fill its gradient lays down — the
+ * renderer's radial gradient (`softProfile`) over its circumradius (a path
+ * drawing's unit circle), clipped to the outline. Scale-free, so read once in
+ * unit space per sprite.
+ */
+function softPolygonFactor(s: PolygonSprite): number {
+  const hit = softPolygonFactors.get(s);
+  if (hit !== undefined) return hit;
+  const ring = isPathPolygon(s) ? flattenSprite(s).points.map(([x, y]) => ({ x, y })) : polygonPoints(s, 1);
+  const evenodd = polygonFillRule(s) === 'evenodd';
+  const plain = rasterFill(ring, evenodd).all;
+  const f = plain > 0 ? Math.min(1, rasterFill(ring, evenodd, (x, y) => softProfile(Math.hypot(x, y))).all / plain) : 1;
+  softPolygonFactors.set(s, f);
+  return f;
+}
+
 // ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
@@ -432,6 +573,8 @@ function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, sof
  * re-uses drawTrail's sampling — past positions with decaying alpha and
  * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
  * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Boxes — rect, bar, text, textBlock, emoji — turn with their entity and
+ * light the exact area of the turned box in each cell.
  * Remaining approximations (documented, deliberate): background drift is
  * sampled at its rest position. Good enough to perceive composition, focus,
  * balance — and now smear.
@@ -530,6 +673,56 @@ export function luminanceGrid(
     else cells[idx] = cur * (1 - a) + lum * a;
   };
 
+  // A filled box — fillRect for a rect or bar, the glyph box of text, a
+  // textBlock or an emoji — centred at (cx, cy) before the turn, turned by
+  // `rot` about the entity at `p` (the renderer's translate, then rotate),
+  // and lit in each cell by the area it covers there. Square to the grid (any
+  // quarter turn) that is the box's overlap with each cell; turned, the exact
+  // overlap of its four-corner outline — not its bounding box, which lit a
+  // thin 37° plank with ten times its ink.
+  const splatBox = (p: { x: number; y: number }, cx: number, cy: number, hx: number, hy: number, rot: number, lum: number, a: number, blend: LayerSpec['blend']): void => {
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const ox = cx - p.x;
+    const oy = cy - p.y;
+    const tx = p.x + ox * cr - oy * sr;
+    const ty = p.y + ox * sr + oy * cr;
+    const level = Math.abs(sr) < 1e-9;
+    if (level || Math.abs(cr) < 1e-9) {
+      const ex = level ? hx : hy;
+      const ey = level ? hy : hx;
+      const r0 = Math.max(0, Math.floor((ty - ey) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((ty + ey) / cellH));
+      const c0 = Math.max(0, Math.floor((tx - ex) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((tx + ex) / cellW));
+      for (let r = r0; r <= r1; r++) {
+        const fy = Math.max(0, Math.min((r + 1) * cellH, ty + ey) - Math.max(r * cellH, ty - ey)) / cellH;
+        if (fy <= 0) continue;
+        for (let c = c0; c <= c1; c++) {
+          const fx = Math.max(0, Math.min((c + 1) * cellW, tx + ex) - Math.max(c * cellW, tx - ex)) / cellW;
+          if (fx > 0) compose(r * cols + c, lum, a * fx * fy, blend);
+        }
+      }
+      return;
+    }
+    const ex = Math.abs(hx * cr) + Math.abs(hy * sr);
+    const ey = Math.abs(hx * sr) + Math.abs(hy * cr);
+    const c0 = Math.max(0, Math.floor((tx - ex) / cellW));
+    const c1 = Math.min(cols - 1, Math.floor((tx + ex) / cellW));
+    const r0 = Math.max(0, Math.floor((ty - ey) / cellH));
+    const r1 = Math.min(rows - 1, Math.floor((ty + ey) / cellH));
+    if (!(c0 <= c1 && r0 <= r1)) return;
+    const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => ({ x: tx + u! * cr - v! * sr, y: ty + u! * sr + v! * cr }));
+    const cov = convexCellCoverage(corners, cellW, cellH, c0, c1, r0, r1);
+    const nc = c1 - c0 + 1;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const f = cov[(r - r0) * nc + (c - c0)]!;
+        if (f > 0) compose(r * cols + c, lum, a * f, blend);
+      }
+    }
+  };
+
   // Afterglow behind a moving entity — the analytic mirror of the renderer's
   // drawTrail, from the same sampler (`trailEchoes`): past positions with
   // decaying alpha and shrinking radius, gap-filled where a fast mover's
@@ -545,7 +738,7 @@ export function luminanceGrid(
     const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false,
       // As the renderer: a shape echoes at its time samples only; circles fill
       // (a hard circle's ribbon reads, on the coarse grid, as filled discs).
-      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
+      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter', trailSince(e, tPass));
     for (const ec of echoes) {
       const a = ec.alpha;
       const rad = ec.r;
@@ -772,34 +965,24 @@ export function luminanceGrid(
       let centerY = p.y;
       let halfX = sz / 2;
       let halfY = s.kind === 'rect' ? ((e.size2 ?? sz) * (e.size > 0 ? sz / e.size : 1)) / 2 : sz / 2;
-      if (s.kind === 'text') {
-        const box = textBox(s, e, p, fontScaleFor(spec, w, h), scale);
-        centerX = box.cx;
-        centerY = box.cy;
-        halfX = box.halfX;
-        halfY = box.halfY;
-      } else if (s.kind === 'textBlock') {
-        const box = textBlockBox(s, e, p, w, h);
-        centerX = box.cx;
-        centerY = box.cy;
-        halfX = box.halfX;
-        halfY = box.halfY;
+      if (s.kind === 'text' || s.kind === 'textBlock') {
+        const box = s.kind === 'text' ? textBox(s, e, p, fontScaleFor(spec, w, h), scale) : textBlockBox(s, e, p, w, h);
+        // The renderer scales the glyphs about the (already mapped) anchor (X834).
+        const k = layer.transform || layer.group !== undefined ? paintSize(spec, layer) : 1;
+        centerX = p.x + (box.cx - p.x) * k;
+        centerY = p.y + (box.cy - p.y) * k;
+        halfX = box.halfX * k;
+        halfY = box.halfY * k;
       } else if (s.kind === 'bar') {
         const len = sz * barFraction(s, e.barIndex ?? 0);
         if (len <= 0) continue;
         const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
         const box = barBox(s.direction ?? 'right', len, th);
-        // The renderer rotates the bar about the entity with `spin`; rotate
-        // the box's offset the same way and take the rotated box's AABB.
-        const rot = rotationAt(e, tPass) + paintRotation(spec, layer);
-        const cr = Math.cos(rot);
-        const sr = Math.sin(rot);
-        centerX = p.x + box.cx * cr - box.cy * sr;
-        centerY = p.y + box.cx * sr + box.cy * cr;
-        halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
-        halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
+        centerX = p.x + box.cx;
+        centerY = p.y + box.cy;
+        halfX = box.halfX;
+        halfY = box.halfY;
       }
-      const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
       // A small polygon (under POLYGON_OUTLINE_CELLS) fills only part of its
       // disc; a feathered rect only part of its box. Scale the splat weight
@@ -809,12 +992,6 @@ export function luminanceGrid(
         : s.kind === 'rect' && s.feather
           ? (1 - s.feather / 2) * (1 - s.feather / 2)
           : 1;
-      // The canvas draws a soft sprite as a radial gradient that ends AT its
-      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
-      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
-      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
-      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
-      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
@@ -822,26 +999,29 @@ export function luminanceGrid(
       // rect and bar are fillRect: the canvas paints each cell in proportion
       // to the area the box covers. Without this a 2 px scan line darkened
       // its whole 22 px grid row at full alpha, and 270 of them read as a
-      // black veil (mean 0.035 where the canvas paints 0.41).
-      const byArea = s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock';
+      // black veil (mean 0.035 where the canvas paints 0.41). Every box turns
+      // about its entity as the renderer turns it — rotate, spin, rock and a
+      // layer's or group's transform.rotate — text and emoji included.
+      if (s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock') {
+        splatBox(p, centerX, centerY, halfX, halfY, rotationAt(e, tPass) + paintRotation(spec, layer), lum, a * inkWeight * shapeWeight, layer.blend);
+        continue;
+      }
+      // The canvas draws a soft sprite as a radial gradient that ends AT its
+      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
+      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
+      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
+      // What is left is round: a circle, a ring, a polygon too small to trace.
+      const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
       for (let r = r0; r <= r1; r++) {
-        const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
-        if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
-          if (circular) {
-            const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
-            // The canvas averages each cell, so a disc (or ring) that covers a
-            // quarter of a cell moves that cell's mean by a quarter of its
-            // contrast — light it by the ink it lays there, as rect/bar are.
-            const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
-            if (wgt <= 0) continue;
-            compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
-          } else if (byArea) {
-            const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
-            if (fx > 0) compose(r * cols + c, lum, a * inkWeight * shapeWeight * fx * fy, layer.blend);
-          } else {
-            compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
-          }
+          // The canvas averages each cell, so a disc (or ring) that covers a
+          // quarter of a cell moves that cell's mean by a quarter of its
+          // contrast — light it by the ink it lays there, as rect/bar are.
+          const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
+          if (wgt <= 0) continue;
+          compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
         }
       }
     }
@@ -1160,7 +1340,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     if (layer.sprite.kind === 'textBlock') {
       const s = layer.sprite;
       const unitScale = Math.min(scene.w, scene.h);
-      const sizePx = s.fontSize * unitScale;
+      const sizePx = s.fontSize * unitScale * paintSize(spec, layer);
       const info: TextSpriteInfo = { layerIndex, key: layer.key, strings: [textBlockText(s)], count: entities.length, sizePx: Math.round(sizePx) };
       if (s.reveal) info.revealed = Math.round(textBlockRevealFraction(s, scene.w, scene.h, t) * 100) / 100;
       out.push(info);
@@ -1168,7 +1348,7 @@ export function textSprites(spec: SaverSpec, opts: PerceiveOptions = {}): TextSp
     }
     if (layer.sprite.kind !== 'text') return;
     const s = layer.sprite;
-    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h));
+    const sizePx = textFontPx(s, entities[0] ? sizeAt(entities[0], t) : 0, fontScaleFor(spec, scene.w, scene.h)) * paintSize(spec, layer);
     out.push({ layerIndex, key: layer.key, strings: [...s.strings], count: entities.length, sizePx: Math.round(sizePx) });
   });
   return out;
@@ -1227,50 +1407,294 @@ function rankDominance(raw: RawDominance[]): DominanceEntry[] {
 }
 
 /**
- * The fraction of an entity's extent inside the viewport. Its box is the
- * circumradius square (a path drawing's own frame, which `span`/`origin` can
- * stretch and shift), scaled by the paint transform `k`; a text box is judged
- * by the text checks, so text counts whole. Only what lands in the frame is
- * the scene's mass or colour (X616).
+ * The ink a rect or bar lays down, in px²: its own box (width × height; a
+ * bar's value-scaled length × thickness), less a feathered rect's soft edge.
  */
-function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number, paintRot = 0): number {
-  if (s.kind === 'text' || s.kind === 'textBlock') return 1;
-  const { w, h } = scene;
-  const p = posOf(scene, e, t);
-  let cx = p.x, cy = p.y, hx = (sz / 2) * k, hy = hx;
+function boxInkArea(s: Extract<LayerSpec['sprite'], { kind: 'rect' | 'bar' }>, e: Entity, sz: number): number {
+  const per = e.size > 0 ? sz / e.size : 1;
   if (s.kind === 'bar') {
-    // A bar reaches outward from the entity in its direction, not about it:
-    // clip its own box, turned by the entity's rotation (as the luminance map does).
-    const len = sz * barFraction(s, e.barIndex ?? 0);
-    const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
-    const b = barBox(s.direction ?? 'right', len * k, th * k);
-    if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
-    const rot = rotationAt(e, t);
-    const cr = Math.cos(rot), sr = Math.sin(rot);
-    cx = p.x + b.cx * cr - b.cy * sr;
-    cy = p.y + b.cx * sr + b.cy * cr;
-    const ex = Math.abs(b.halfX * cr) + Math.abs(b.halfY * sr);
-    const ey = Math.abs(b.halfX * sr) + Math.abs(b.halfY * cr);
+    const th = e.size2 !== undefined ? e.size2 * per : sz * 0.2;
+    return sz * barFraction(s, e.barIndex ?? 0) * th;
+  }
+  const h2 = e.size2 !== undefined ? e.size2 * per : sz;
+  const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
+  return sz * h2 * f;
+}
+
+/**
+ * The ink one entity lays down at its own (unscaled) size, in px²: what
+ * dominance weighs (adding LINE_SALIENCE for rings, streaks and strokes) and
+ * what scene colour mixes by. A paint transform scales it by paintSize².
+ */
+function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: number, t: number, w: number, h: number, scale: number): number {
+  // A soft circle is a radial gradient to its radius: SOFT_DISC_MEAN of the disc.
+  if (s.kind === 'circle') return Math.PI * (sz / 2) * (sz / 2) * (s.soft ? SOFT_DISC_MEAN : 1);
+  if (s.kind === 'ring') return Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
+  if (s.kind === 'streak') return sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
+  if (s.kind === 'rect' || s.kind === 'bar') return boxInkArea(s, e, sz);
+  if (s.kind === 'polygon') {
+    // A soft one paints its fill through a radial gradient (softPolygonFactor);
+    // a drawing's part with its own gradient paints that instead.
+    if (!isPathPolygon(s)) return polygonArea(polygonPoints(s, sz / 2)) * (s.soft ? softPolygonFactor(s) : 1);
+    const fr = pathFrame(s, sz / 2, w, h);
+    if (!s.soft || s.parts) return pathInkArea(s, fr.sx, fr.sy, sz / 2);
+    let ink = 0;
+    for (const part of pathParts(s)) {
+      const a = partInkArea(part, fr.sx, fr.sy, sz / 2);
+      ink += a.fill * (part.gradient ? 1 : softPolygonFactor(s)) + a.stroke;
+    }
+    return ink;
+  }
+  if (s.kind === 'stroke') return pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * (s.taper ? 0.64 : 1); // ∫ sin(πu) du = 2/π
+  if (s.kind === 'text') {
+    const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
+    return box.halfX * 2 * box.halfY * 2 * 0.55;
+  }
+  if (s.kind === 'textBlock') {
+    const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
+    return box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
+  }
+  return sz * sz * 0.55; // emoji
+}
+
+/** ∫₀ˣ √(r² − u²) du, x clamped to [−r, r]. */
+function chordIntegral(r: number, x: number): number {
+  const c = Math.max(-r, Math.min(r, x));
+  return (c * Math.sqrt(Math.max(0, r * r - c * c)) + r * r * Math.asin(c / r)) / 2;
+}
+
+/** The area of the disc of radius `r` about the origin where x ≤ X and y ≤ Y — exact. */
+function discQuadrantArea(r: number, X: number, Y: number): number {
+  if (!(r > 0) || X <= -r || Y <= -r) return 0;
+  const strip = (u: number, v: number): number => (v > u ? chordIntegral(r, v) - chordIntegral(r, u) : 0);
+  const x1 = Math.min(X, r);
+  if (Y >= r) return 2 * strip(-r, x1);
+  // Each column runs from −√(r²−x²) up to min(Y, √(r²−x²)); the two meet at |x| = a.
+  const a = Math.sqrt(r * r - Y * Y);
+  const capped = (u: number, v: number): number => (v > u ? Y * (v - u) + strip(u, v) : 0);
+  if (Y < 0) return capped(-a, Math.min(x1, a));
+  return 2 * strip(-r, Math.min(x1, -a)) + capped(-a, Math.min(x1, a)) + 2 * strip(a, x1);
+}
+
+/** The area of the disc of radius `r` about (cx, cy) inside the w × h frame — exact. */
+function discInFrame(cx: number, cy: number, r: number, w: number, h: number): number {
+  const q = (X: number, Y: number): number => discQuadrantArea(r, X, Y);
+  return q(w - cx, h - cy) - q(-cx, h - cy) - q(w - cx, -cy) + q(-cx, -cy);
+}
+
+/**
+ * The share of a soft disc's ink inside the frame. The canvas's gradient
+ * (`softProfile`) is two straight ramps in u = ρ/r, so by parts its ink in a
+ * region is Σ slope · ∫ A(ρ) dρ over each ramp, A(ρ) the area of the radius-ρ
+ * disc in the region; A is smooth, and Simpson's rule takes each ramp.
+ */
+function softDiscShareInFrame(cx: number, cy: number, r: number, w: number, h: number): number {
+  const ramp = (u0: number, u1: number, slope: number): number => {
+    const n = 16;
+    const d = ((u1 - u0) * r) / n;
+    let acc = 0;
+    for (let i = 0; i <= n; i++) acc += (i === 0 || i === n ? 1 : i % 2 ? 4 : 2) * discInFrame(cx, cy, u0 * r + i * d, w, h);
+    return ((acc * d) / 3) * (slope / r);
+  };
+  const ink = ramp(0, 0.35, 0.25 / 0.35) + ramp(0.35, 1, 0.75 / 0.65);
+  return Math.max(0, Math.min(1, ink / (Math.PI * r * r * SOFT_DISC_MEAN)));
+}
+
+/** The parameter span [t0, t1] of segment A→B inside the w × h frame (Liang–Barsky); t0 ≥ t1 when it misses. */
+function segmentInFrame(ax: number, ay: number, bx: number, by: number, w: number, h: number): [number, number] {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [pp, q] of [[-dx, ax], [dx, w - ax], [-dy, ay], [dy, h - ay]] as const) {
+    if (pp === 0) {
+      if (q < 0) return [1, 0];
+      continue;
+    }
+    const k = q / pp;
+    if (pp < 0) t0 = Math.max(t0, k);
+    else t1 = Math.min(t1, k);
+  }
+  return [t0, t1];
+}
+
+/**
+ * The share of a path drawing's ink inside the frame: each part's fill
+ * (`rasterFill`, by its fill rule; a soft drawing's by its gradient) and each
+ * stroke segment (Liang–Barsky, by its width), weighted by the opacity each
+ * paints with — the drawing's own outlines, mapped as the renderer maps
+ * them (frame, origin, turn, paint scale `k`), not its frame box.
+ */
+function pathDrawingOnScreen(s: PolygonSprite, p: { x: number; y: number }, radius: number, k: number, cr: number, sr: number, w: number, h: number): number {
+  const fr = pathFrame(s, radius, w, h);
+  const sx = fr.sx * k;
+  const sy = fr.sy * k;
+  if (!(sx > 0) || !(sy > 0)) return 1;
+  const map = (u: number, v: number): { x: number; y: number } => {
+    const qx = (u - fr.ox) * sx, qy = (v - fr.oy) * sy;
+    return { x: p.x + qx * cr - qy * sr, y: p.y + qx * sr + qy * cr };
+  };
+  const parts = pathParts(s);
+  // Whole inside (or wholly outside) its frame box: no need to trace it.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let reach = 0;
+  for (const part of parts) {
+    for (const [u, v] of part.flat.points) { const q = map(u, v); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+    for (const l of part.stroke ? strokeLines(part) : []) for (const [u, v] of l.points) { const q = map(u, v); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+    if (part.stroke) reach = Math.max(reach, (part.stroke.width * radius * k) / 2);
+  }
+  if (x0 - reach >= 0 && x1 + reach <= w && y0 - reach >= 0 && y1 + reach <= h) return 1;
+  if (x1 + reach <= 0 || x0 - reach >= w || y1 + reach <= 0 || y0 - reach >= h) return 0;
+  // A soft single drawing's gradient is the unit circle about its unit origin.
+  const unitR = (x: number, y: number): number => {
+    const dx = x - p.x, dy = y - p.y;
+    return Math.hypot((dx * cr + dy * sr) / sx + fr.ox, (-dx * sr + dy * cr) / sy + fr.oy);
+  };
+  let all = 0;
+  let inside = 0;
+  for (const part of parts) {
+    if (part.opacity <= 0) continue;
+    if (part.fill && part.flat.points.length >= 3) {
+      const soft = s.soft && !s.parts && !part.gradient;
+      const f = rasterFill(part.flat.points.map(([u, v]) => map(u, v)), part.rule === 'evenodd', soft ? (x, y) => softProfile(unitR(x, y)) : undefined, { w, h });
+      all += f.all * part.opacity;
+      inside += f.inside * part.opacity;
+    }
+    if (part.stroke && part.stroke.width > 0) {
+      const ink = part.stroke.width * radius * k * (part.stroke.opacity ?? 1) * part.opacity;
+      for (const l of strokeLines(part)) {
+        const m = l.points.map(([u, v]) => map(u, v));
+        const segs = l.closed ? m.length : m.length - 1;
+        for (let i = 0; i < segs; i++) {
+          const a = m[i]!, b = m[(i + 1) % m.length]!;
+          const len = Math.hypot(b.x - a.x, b.y - a.y) * ink;
+          const [t0, t1] = segmentInFrame(a.x, a.y, b.x, b.y, w, h);
+          all += len;
+          if (t1 > t0) inside += len * (t1 - t0);
+        }
+      }
+    }
+  }
+  return all > 0 ? Math.min(1, inside / all) : 1;
+}
+
+/**
+ * The fraction of a box inside the w × h frame: half extents (hx, hy),
+ * centred at offset (ox, oy) from `p` before the turn, turned by `rot` about
+ * `p` as the renderer turns it. Square to the frame it is the overlap of two
+ * spans; turned, the exact area of the turned box inside the frame (the
+ * frame taken as one cell), not of its bounding box.
+ */
+function turnedBoxOnScreen(w: number, h: number, p: { x: number; y: number }, ox: number, oy: number, hx: number, hy: number, rot: number): number {
+  const cr = Math.cos(rot);
+  const sr = Math.sin(rot);
+  const cx = p.x + ox * cr - oy * sr;
+  const cy = p.y + ox * sr + oy * cr;
+  const level = Math.abs(sr) < 1e-9;
+  if (level || Math.abs(cr) < 1e-9) {
+    const ex = level ? hx : hy;
+    const ey = level ? hy : hx;
     const fx = Math.max(0, Math.min(cx + ex, w) - Math.max(cx - ex, 0)) / (2 * ex);
     const fy = Math.max(0, Math.min(cy + ey, h) - Math.max(cy - ey, 0)) / (2 * ey);
     return fx * fy;
   }
-  if (s.kind === 'polygon' && isPathPolygon(s)) {
-    const fr = pathFrame(s, sz / 2, w, h);
-    // The frame turns with the entity (and its layer/group), origin included.
-    const rot = rotationAt(e, t) + paintRot;
-    const cr = Math.cos(rot), sr = Math.sin(rot);
-    const ox = -fr.ox * fr.sx * k, oy = -fr.oy * fr.sy * k;
-    cx += ox * cr - oy * sr;
-    cy += ox * sr + oy * cr;
-    const qx = fr.sx * k, qy = fr.sy * k;
-    hx = Math.abs(qx * cr) + Math.abs(qy * sr);
-    hy = Math.abs(qx * sr) + Math.abs(qy * cr);
+  const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => ({ x: cx + u! * cr - v! * sr, y: cy + u! * sr + v! * cr }));
+  return Math.min(1, (convexCellCoverage(corners, w, h, 0, 0, 0, 0)[0]! * w * h) / (4 * hx * hy));
+}
+
+/**
+ * The fraction of an entity's ink inside the viewport, measured on the shape
+ * the renderer paints, turned as it turns it (the entity's rotation plus its
+ * layer's and group's `transform.rotate`) and scaled by the paint transform
+ * `k`: a circle as its disc (a soft one weighted by its gradient), a ring as
+ * its stroked annulus, a rect or bar as its own box and an emoji as its glyph
+ * box, a polygon as its outline (a path drawing as its frame, which
+ * `span`/`origin` can stretch and shift), a streak as its segment from tail
+ * to head weighted by its fade, a stroke as the length of its path. A text
+ * box is judged by the text checks, so text counts whole. Only what lands in
+ * the frame is the scene's mass or colour (X616).
+ */
+function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number, paintRot = 0): number {
+  if (s.kind === 'text' || s.kind === 'textBlock') return 1;
+  const { w, h, scale } = scene;
+  const p = posOf(scene, e, t);
+  const half = (sz / 2) * k;
+  const per = e.size > 0 ? sz / e.size : 1;
+  const rot = rotationAt(e, t) + paintRot;
+  if (s.kind === 'rect') {
+    // Its own box about the entity: width by its own height, not a square.
+    const rh = e.size2 !== undefined ? e.size2 * per : sz;
+    if (!(half > 0) || !(rh > 0)) return 1;
+    return turnedBoxOnScreen(w, h, p, 0, 0, half, (rh / 2) * k, rot);
   }
-  if (!(hx > 0) || !(hy > 0)) return 1;
-  const fx = Math.max(0, Math.min(cx + hx, w) - Math.max(cx - hx, 0)) / (2 * hx);
-  const fy = Math.max(0, Math.min(cy + hy, h) - Math.max(cy - hy, 0)) / (2 * hy);
-  return fx * fy;
+  if (s.kind === 'bar') {
+    // A bar reaches outward from the entity in its direction, not about it.
+    const len = sz * barFraction(s, e.barIndex ?? 0);
+    const th = e.size2 !== undefined ? e.size2 * per : sz * 0.2;
+    const b = barBox(s.direction ?? 'right', len * k, th * k);
+    if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
+    return turnedBoxOnScreen(w, h, p, b.cx, b.cy, b.halfX, b.halfY, rot);
+  }
+  // An emoji's glyph box (its size square) turns with it, as the luminance map turns it.
+  if (s.kind === 'emoji') return half > 0 ? turnedBoxOnScreen(w, h, p, 0, 0, half, half, rot) : 1;
+  if (s.kind === 'circle' || s.kind === 'ring') {
+    // A ring is its stroke: the annulus lineWidth wide about its radius.
+    const lw = s.kind === 'ring' ? Math.max(0.5, (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * k : 0;
+    const outer = half + lw / 2;
+    if (!(outer > 0)) return 1;
+    if (p.x - outer >= 0 && p.x + outer <= w && p.y - outer >= 0 && p.y + outer <= h) return 1;
+    if (p.x + outer <= 0 || p.x - outer >= w || p.y + outer <= 0 || p.y - outer >= h) return 0;
+    if (s.kind === 'ring') {
+      const inner = Math.max(0, half - lw / 2);
+      return (discInFrame(p.x, p.y, outer, w, h) - discInFrame(p.x, p.y, inner, w, h)) / (Math.PI * (outer * outer - inner * inner));
+    }
+    return s.soft ? softDiscShareInFrame(p.x, p.y, half, w, h) : discInFrame(p.x, p.y, half, w, h) / (Math.PI * half * half);
+  }
+  if (s.kind === 'polygon') {
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    const onFrame = (q: { x: number; y: number }): boolean => q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h;
+    if (isPathPolygon(s)) return pathDrawingOnScreen(s, p, sz / 2, k, cr, sr, w, h);
+    const pts = polygonPoints(s, sz / 2).map((q) => ({ x: p.x + (q.x * cr - q.y * sr) * k, y: p.y + (q.x * sr + q.y * cr) * k }));
+    if (pts.every(onFrame)) return 1;
+    if (s.soft) {
+      // Its ink is its gradient's, heaviest at the centre: weigh the clip by it.
+      const r = half;
+      const f = rasterFill(pts, polygonFillRule(s) === 'evenodd', (x, y) => softProfile(Math.hypot(x - p.x, y - p.y) / r), { w, h });
+      return f.all > 0 ? Math.min(1, f.inside / f.all) : 1;
+    }
+    const all = polygonArea(pts);
+    if (!(all > 0)) return 1;
+    const inside = clipHalfPlane(clipHalfPlane(clipHalfPlane(clipHalfPlane(pts, 'x', 0, true), 'x', w, false), 'y', 0, true), 'y', h, false);
+    return Math.min(1, polygonArea(inside) / all);
+  }
+  if (s.kind === 'streak') {
+    // Tail to head along its heading, its fade rising 0 → 1: the ink past a
+    // point a fraction u along it is (1 − u²) of the whole.
+    const len = sz * k;
+    if (!(len > 0)) return 1;
+    const head = (headingAt(e, t, w, h) ?? 0) + rot;
+    const [t0, t1] = segmentInFrame(p.x - Math.cos(head) * len, p.y - Math.sin(head) * len, p.x, p.y, w, h);
+    return t1 > t0 ? t1 * t1 - t0 * t0 : 0;
+  }
+  if (s.kind === 'stroke') {
+    // The share of its drawn path's length (taper-weighted) inside the frame.
+    const local = strokeDrawnSamples(s, sz / 2);
+    if (local.length < 2) return 1;
+    const angle = rot + (s.orient ? headingAt(e, t, w, h) ?? 0 : 0);
+    const cr = Math.cos(angle), sr = Math.sin(angle);
+    const pts = local.map((q) => ({ x: p.x + (q.x * cr - q.y * sr) * k, y: p.y + (q.x * sr + q.y * cr) * k }));
+    let all = 0;
+    let inside = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!, b = pts[i]!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y) * (s.taper ? strokeTaper((i - 0.5) / (pts.length - 1)) : 1);
+      const [t0, t1] = segmentInFrame(a.x, a.y, b.x, b.y, w, h);
+      all += len;
+      if (t1 > t0) inside += len * (t1 - t0);
+    }
+    return all > 0 ? Math.min(1, inside / all) : 1;
+  }
+  return 1;
 }
 
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */
@@ -1319,36 +1743,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei);
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      let entArea: number;
-      if (s.kind === 'circle') entArea = Math.PI * (sz / 2) * (sz / 2);
-      else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
-      else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
-      else if (s.kind === 'rect') {
-        const h2 = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz;
-        const f = s.feather ? (1 - s.feather / 2) * (1 - s.feather / 2) : 1;
-        entArea = sz * h2 * f;
-      }
-      else if (s.kind === 'polygon') {
-        if (isPathPolygon(s)) {
-          const fr = pathFrame(s, sz / 2, w, h);
-          entArea = pathInkArea(s, fr.sx, fr.sy, sz / 2);
-        } else entArea = polygonArea(polygonPoints(s, sz / 2));
-      }
-      else if (s.kind === 'bar') {
-        const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
-        entArea = sz * barFraction(s, e.barIndex ?? 0) * th;
-      }
-      else if (s.kind === 'stroke') {
-        const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
-        entArea = pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
-      }
-      else if (s.kind === 'text') {
-        const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
-      } else if (s.kind === 'textBlock') {
-        const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
-      } else entArea = sz * sz * 0.55; // emoji
+      let entArea = entityInkArea(spec, s, e, sz, t, w, h, scale);
+      // Thin-but-bright lines draw the eye past their ink.
+      if (s.kind === 'ring' || s.kind === 'streak' || s.kind === 'stroke') entArea *= LINE_SALIENCE;
 
       // Only what lands in the frame counts: a layer parked off screen is
       // not the main mass, however big it is (X616).
@@ -1586,7 +1983,8 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       const e = entities[ei]!;
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
+      // A paint transform scales the ink by k² (as dominance weighs it).
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer)) * k * k;
       if (a <= 0) continue;
       // A path drawing is the colours its parts paint, by the ink each lays
       // down: a part at opacity 0 adds nothing (X609).
@@ -1596,14 +1994,17 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
         for (const part of pathParts(s)) {
           const ink = partInkArea(part, fr.sx, fr.sy, sz / 2);
           if (part.gradient) { const gw = gradientStopWeights(part.gradient.stops); part.gradient.stops.forEach((st, i) => add(st.color, a * ink.fill * (st.opacity ?? 1) * gw[i]!)); }
-          else add(part.color ?? base, a * ink.fill);
+          else add(part.color ?? base, a * ink.fill * (s.soft && !s.parts ? softPolygonFactor(s) : 1));
           if (part.stroke) add(part.stroke.color, a * ink.stroke);
         }
         continue;
       }
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
-      add(hex, a * (s.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2) : sz * sz));
+      // By the ink it lays down, as dominance counts it (without the line
+      // boost): a thin rule or ring is a sliver of colour, a long label more
+      // than one glyph, a triangle less than its circumradius square.
+      add(hex, a * entityInkArea(spec, s, e, sz, t, scene.w, scene.h, scene.scale));
     }
   }
   const bg = backgroundRgb(spec);

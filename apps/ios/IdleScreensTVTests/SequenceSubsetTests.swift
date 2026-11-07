@@ -175,4 +175,106 @@ final class SequenceSubsetTests: XCTestCase {
         XCTAssertEqual(seq.crossing(into: 3, wrapped: false), .cut, "act-3 declares a cut")
         XCTAssertEqual(seq.renderSeed(2, fallback: 0), 71, "act-3 renders with the chain root's seed")
     }
+
+    // MARK: - advance: 'input' (sequence.test.ts "holds until released")
+
+    private func decode(_ json: String) -> SequenceSubset {
+        try! JSONDecoder().decode(SequenceSubset.self, from: Data(json.utf8))
+    }
+
+    private var withInput: SequenceSubset {
+        decode("""
+        {"format":"idle-sequence","segments":[
+          {"key":"a","duration":5000,"advance":"input","scene":{"layers":[]}},
+          {"key":"b","duration":3000,"scene":{"layers":[]}}
+        ]}
+        """)
+    }
+
+    func testInputHoldsPastItsDurationAndKeepsAnimating() {
+        let r = withInput.resolve(at: 6)
+        XCTAssertEqual(r.index, 0)
+        XCTAssertTrue(r.held)
+        XCTAssertEqual(r.localT, 6, accuracy: 1e-9, "the held scene's clock is not frozen at duration")
+        XCTAssertNil(withInput.nextBoundary(after: 6), "a hold waits for the clicker, not the timer")
+        XCTAssertNil(withInput.nextBoundary(after: 2.5), "nor does the timer schedule the way into one")
+    }
+
+    func testInputIsNotHeldInsideItsDuration() {
+        let r = withInput.resolve(at: 2.5)
+        XCTAssertEqual(r.index, 0)
+        XCTAssertFalse(r.held)
+    }
+
+    func testAReleaseBelowTheSegmentLetsTheTimerThrough() {
+        let r = withInput.resolve(at: 6, releasedBelow: 1)
+        XCTAssertEqual(r.index, 1)
+        XCTAssertEqual(r.localT, 1, accuracy: 1e-9)
+        XCTAssertEqual(r.startT, 5, accuracy: 1e-9)
+        XCTAssertFalse(r.held)
+    }
+
+    func testAutoAndEitherAdvanceOnTheTimer() {
+        for advance in ["auto", "either"] {
+            let s = decode("""
+            {"format":"idle-sequence","segments":[
+              {"key":"a","duration":5000,"advance":"\(advance)","scene":{"layers":[]}},
+              {"key":"b","duration":3000,"scene":{"layers":[]}}
+            ]}
+            """)
+            XCTAssertEqual(s.resolve(at: 6).index, 1, advance)
+            XCTAssertEqual(try XCTUnwrap(s.nextBoundary(after: 4)), 1, accuracy: 1e-9, advance)
+        }
+    }
+
+    func testALoopHoldBlocksTheWrapAndAFreshLapReArmsIt() {
+        let s = decode("""
+        {"format":"idle-sequence","loop":true,"segments":[
+          {"key":"a","duration":5000,"scene":{"layers":[]}},
+          {"key":"b","duration":3000,"advance":"input","scene":{"layers":[]}}
+        ]}
+        """)
+        let held = s.resolve(at: 9)
+        XCTAssertEqual(held.index, 1); XCTAssertTrue(held.held); XCTAssertEqual(held.localT, 4, accuracy: 1e-9)
+        let released = s.resolve(at: 9, releasedBelow: 2)
+        XCTAssertEqual(released.index, 0); XCTAssertEqual(released.localT, 1, accuracy: 1e-9)
+        // Lap 3: modulo, not a one-lap subtract.
+        XCTAssertEqual(s.resolve(at: 17, releasedBelow: 2).localT, 1, accuracy: 1e-9)
+        let rearmed = s.resolve(at: 8.5)
+        XCTAssertEqual(rearmed.index, 1); XCTAssertTrue(rearmed.held); XCTAssertEqual(rearmed.localT, 3.5, accuracy: 1e-9)
+    }
+
+    func testInputOnADurationlessTailChangesNothing() {
+        let with = decode("""
+        {"format":"idle-sequence","segments":[
+          {"key":"a","duration":5000,"scene":{"layers":[]}},
+          {"key":"b","advance":"input","scene":{"layers":[]}}
+        ]}
+        """)
+        XCTAssertEqual(with.resolve(at: 9), heldTailLike(with).resolve(at: 9))
+    }
+
+    private func heldTailLike(_ s: SequenceSubset) -> SequenceSubset {
+        var copy = s
+        for i in copy.segments.indices { copy.segments[i].advance = nil }
+        return copy
+    }
+
+    func testSegmentStartIsThePrefixSum() {
+        XCTAssertEqual(heldTail.segmentStart(0), 0)
+        XCTAssertEqual(heldTail.segmentStart(1), 10)
+        XCTAssertEqual(heldTail.segmentStart(2), 30)
+        XCTAssertEqual(heldTail.segmentStart(9), 30, "clamped to the last segment")
+    }
+
+    func testTheSegmentCueIsTheTracksLastSequenceSegmentDelta() {
+        let track: JSONValue = .object(["deltas": .array([
+            .object(["path": .string("sequence.segment"), "value": .int(1)]),
+            .object(["path": .string("layers.0.opacity"), "value": .double(0.5)]),
+            .object(["path": .string("sequence.segment"), "value": .int(3)]),
+        ])])
+        XCTAssertEqual(TVAppState.segmentCue(track), .object(["path": .string("sequence.segment"), "value": .int(3)]))
+        XCTAssertNil(TVAppState.segmentCue(.object(["deltas": .array([])])))
+        XCTAssertNil(TVAppState.segmentCue(nil))
+    }
 }

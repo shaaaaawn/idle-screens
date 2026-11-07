@@ -366,6 +366,81 @@ describe('validateSequence', () => {
   });
 });
 
+describe('validateSequence — unknown keys (vork-review A7)', () => {
+  // A scene warns on a key it does not know; an envelope, a segment and a
+  // transition passed every typo silently. Warnings only: a stored sequence
+  // with a stray field must keep loading.
+  const unknowns = (s: unknown) => (validateSequence(s).warnings ?? []).filter((w) => w.code === 'unknown-property');
+  const paths = (s: unknown) => unknowns(s).map((w) => w.path).sort();
+  const env = (o: Record<string, unknown>) => ({ ...seq(), ...o });
+
+  it('a clean sequence has none', () => {
+    expect(unknowns(seq())).toEqual([]);
+  });
+
+  it('warns on a typo in the envelope, a segment and a transition, and stays valid', () => {
+    const s = env({
+      looop: true,
+      segments: [
+        { key: 'a', scene: SCENE, duration: 5000, advnce: 'input', transition: { type: 'fade', dur: 800, ease: 'smooth' } },
+        { key: 'b', scene: SCENE, duration: 3000 },
+      ],
+    });
+    const r = validateSequence(s);
+    expect(r.valid).toBe(true);
+    expect(r.errors).toEqual([]);
+    expect(paths(s)).toEqual(['looop', 'segments[0].advnce', 'segments[0].transition.ease']);
+    // #122: the original wording, with the nearest field appended.
+    expect(unknowns(s).find((w) => w.path === 'looop')!.message).toBe("unknown sequence property 'looop' — will be ignored — did you mean 'loop'?");
+    expect(unknowns(s).find((w) => w.path === 'segments[0].advnce')!.message).toBe("unknown segment property 'advnce' — will be ignored — did you mean 'advance'?");
+  });
+
+  it('points a scene field written one level too high at the scene', () => {
+    // Seen in eval output: `motionIntensity` on the envelope, where nothing reads it.
+    const s = env({ motionIntensity: 'calm', segments: [{ key: 'a', scene: SCENE, duration: 5000, ghosting: 0.3 }, { key: 'b', scene: SCENE }] });
+    const w = unknowns(s);
+    expect(w.map((x) => x.path)).toEqual(['motionIntensity', 'segments[0].ghosting']);
+    expect(w[0]!.message).toContain("each segment's `scene`");
+    expect(w[1]!.message).toContain("under this segment's `scene`");
+  });
+
+  it("tells a segment's `dur` from a cut's", () => {
+    const s = env({ segments: [{ key: 'a', scene: SCENE, dur: 5000, duration: 5000, transition: { type: 'cut', dur: 400 } }, { key: 'b', scene: SCENE }] });
+    const w = unknowns(s);
+    expect(w.map((x) => x.path)).toEqual(['segments[0].dur', 'segments[0].transition.dur']);
+    expect(w[0]!.message).toContain('`duration`');
+    expect(w[1]!.message).toContain('a cut is instant');
+  });
+
+  it("checks each transition type against its own fields, a wipe's origin included", () => {
+    const s = env({ segments: [
+      { key: 'a', scene: SCENE, duration: 5000, transition: { type: 'morph', dur: 600, text: 'dip', shape: 'circle' } },
+      { key: 'b', scene: SCENE, duration: 5000, transition: { type: 'wipe', dur: 600, origin: { x: 0.5, y: 0.5, z: 0 }, spin: 1 } },
+      { key: 'c', scene: SCENE, duration: 5000, transition: { type: 'fade', dur: 600, feather: 0.1 } },
+      { key: 'd', scene: SCENE },
+    ] });
+    expect(validateSequence(s).valid).toBe(true);
+    expect(paths(s)).toEqual(['segments[0].transition.shape', 'segments[1].transition.origin.z', 'segments[1].transition.spin', 'segments[2].transition.feather']);
+    expect(unknowns(s).filter((w) => w.path === 'segments[1].transition.spin')).toHaveLength(1); // the wipe is not checked twice
+  });
+
+  it('does not repeat what is already an error', () => {
+    const s = env({ segments: [
+      { key: 'a', scene: SCENE, duration: 5000, transition: { type: 'fade', dur: 600, text: 'crossfade' } },
+      { key: 'b', scene: SCENE, duration: 5000, transition: { type: 'dissolve', dur: 600, extra: 1 } },
+      { key: 'c', scene: SCENE },
+    ] });
+    expect(validateSequence(s).errors.map((e) => e.path)).toEqual(['segments[0].transition.text', 'segments[1].transition.type']);
+    expect(paths(s)).toEqual([]);
+  });
+
+  it('still reports the envelope when the segments are empty', () => {
+    const r = validateSequence(env({ segments: [], looop: true }));
+    expect(r.valid).toBe(false);
+    expect((r.warnings ?? []).map((w) => w.path)).toEqual(['looop']);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // compileSequence
 // ---------------------------------------------------------------------------

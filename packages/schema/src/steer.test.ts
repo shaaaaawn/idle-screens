@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { EXAMPLE_SEQUENCES, EXAMPLE_SPECS } from './examples';
 import { applyDeltasShared, applyDeltasToSpec, easeSmooth, lerpSpec, resolveSpecPath, sequenceSteerablePaths, steerablePaths, structuralSignature } from './steer';
-import type { SaverSpec } from './types';
+import type { IdleSequence, SaverSpec } from './types';
 import { validateSpec } from './validate';
 import { resolveTimelineAt } from './timeline';
 
@@ -193,6 +196,38 @@ describe('steerablePaths', () => {
     expect(paths).toContain('layers.0.sprite.radius');
   });
 
+  it('does not advertise density, a declared hint resolveSpecPath refuses (vork-review A5)', () => {
+    // `density` changes no pixel, so it is metadata like motionIntensity. It
+    // was advertised while resolveSpecPath refused it, so a setParam on an
+    // advertised path came back 400.
+    const s = { ...spec, density: 'sparse' as const, motionIntensity: 'calm' as const };
+    expect(steerablePaths(s)).not.toContain('density');
+    expect(steerablePaths(s)).not.toContain('motionIntensity');
+    expect(resolveSpecPath(s, 'density')).toBeNull();
+  });
+
+  it('every path it advertises resolves, for a spec that sets every top-level field', () => {
+    // The examples corpus (below) only reaches the root fields some example
+    // happens to set; this one sets them all, so a new root field that is
+    // advertised but not resolvable fails here first.
+    const all = {
+      ...spec,
+      seed: 7,
+      motionIntensity: 'calm',
+      density: 'dense',
+      finish: { grain: 0.2, dither: 0.1 },
+      groups: { moon: { transform: { scale: 1, x: 0, origin: 'viewport' }, opacity: 1 } },
+      timeline: { keys: [{ t: 0, path: 'groups.moon.opacity', value: 1 }] },
+      layers: [{ ...spec.layers[0]!, group: 'moon' }],
+    };
+    expect(validateSpec(structuredClone(all)).errors).toEqual([]);
+    const paths = steerablePaths(all);
+    for (const root of ['ghosting', 'referenceViewport', 'finish.grain', 'groups.moon.opacity', 'background.stops.0.color', 'layers.0.count']) {
+      expect(paths).toContain(root);
+    }
+    expect(paths.filter((p) => !resolveSpecPath(all, p))).toEqual([]);
+  });
+
   it('does not mutate the spec it enumerates', () => {
     const palette = {
       schemaVersion: 1, id: 'p', label: 'P',
@@ -364,4 +399,34 @@ describe('applyDeltasShared (the validator copy)', () => {
     expect(validateSpec(structuredClone(spec)).valid).toBe(true);
     expect(steerablePaths(spec)).toContain('layers.1.sprite.parts.0.path');
   });
+});
+
+describe('steerablePaths ↔ resolveSpecPath (vork-review A5)', () => {
+  // Every advertised path must be one a setParam can deliver: an advertised
+  // path that resolveSpecPath refuses is a knob that 400s. Each scene is
+  // checked against itself — a segment's paths against its own scene, a
+  // bed's against the bed — as SequenceInstance.applyTrack routes them.
+  const fixture = <T>(name: string): T =>
+    JSON.parse(readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}`, import.meta.url)), 'utf8')) as T;
+  const scenesOf = (id: string, seq: IdleSequence): Array<[string, SaverSpec]> => [
+    ...(seq.bed ? [[`${id}/bed`, seq.bed] as [string, SaverSpec]] : []),
+    ...seq.segments.map((seg) => [`${id}/${seg.key}`, seg.scene] as [string, SaverSpec]),
+  ];
+  const corpus: Array<[string, SaverSpec]> = [
+    ...EXAMPLE_SPECS.map((s) => [s.id, s] as [string, SaverSpec]),
+    ...EXAMPLE_SEQUENCES.flatMap((e) => scenesOf(e.id, e.sequence)),
+    ...['timed/ambient-tidepool.json', 'timed/dx-mark.json', 'timed/timed-sunrise.json'].map((f) => [f, fixture<SaverSpec>(f)] as [string, SaverSpec]),
+    ...['deck.sequence.json', 'snow-white.sequence.json', 'timed/wrap-ident.sequence.json'].flatMap((f) => scenesOf(f, fixture<IdleSequence>(f))),
+  ];
+
+  it('covers the shipped examples and fixtures', () => {
+    expect(corpus.map(([n]) => n)).toEqual(expect.arrayContaining(['timed/dx-mark.json', 'timed/timed-sunrise.json']));
+  });
+  for (const [name, scene] of corpus) {
+    it(`${name}: every steerablePaths entry resolves`, () => {
+      const paths = steerablePaths(scene);
+      expect(paths.length).toBeGreaterThan(0);
+      expect(paths.filter((p) => !resolveSpecPath(scene, p))).toEqual([]);
+    });
+  }
 });

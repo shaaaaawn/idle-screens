@@ -92,6 +92,10 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
         /// Duration in ms. Only the final segment may omit this (holds).
         var duration: Double?
         var transition: Transition?
+        /// `auto` (default) and `either` advance on the timer; `input` holds
+        /// at the end of `duration` until a `sequence.segment` steer releases
+        /// it — the clicker (FORMAT.md **Advance mode**).
+        var advance: String?
     }
 
     /// `cut` (default), `fade`, or `morph`, the last two with a duration.
@@ -141,12 +145,27 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
         var localT: TimeInterval
         /// Cumulative start of this segment on the global timeline (seconds).
         var startT: TimeInterval
+        /// The clock has run past this segment's duration, but it is an
+        /// `advance: 'input'` segment no steer has released: the scene keeps
+        /// animating (`localT` keeps growing) while the show waits.
+        var held = false
     }
 
-    /// Map global time T (seconds) to (segment, localT). Segments are
-    /// half-open [start, start+duration); a durationless final segment holds
-    /// indefinitely. With loop, T wraps modulo the timed prefix.
-    func resolve(at T: TimeInterval) -> Resolved {
+    /// Global start of segment `index` (seconds): the durations before it.
+    func segmentStart(_ index: Int) -> TimeInterval {
+        let n = max(0, min(index, segments.count - 1))
+        var t: TimeInterval = 0
+        for seg in segments.prefix(n) { t += (seg.duration ?? 0) / 1000 }
+        return t
+    }
+
+    /// Map global time T (seconds) to (segment, localT) — sequence.ts
+    /// `resolveSegment`. Segments are half-open [start, start+duration); a
+    /// durationless final segment holds indefinitely. An `advance: 'input'`
+    /// segment at or past `releasedBelow` holds at its end instead of
+    /// yielding. With loop, T wraps modulo the timed prefix — but only once
+    /// every hold on the lap is released, and a fresh lap re-arms them all.
+    func resolve(at T: TimeInterval, releasedBelow: Int = 0) -> Resolved {
         guard !segments.isEmpty else { return Resolved(index: 0, localT: 0, startT: 0) }
 
         var totalTimed: TimeInterval = 0
@@ -154,34 +173,46 @@ struct SequenceSubset: Decodable, Equatable, Sendable {
             guard let d = seg.duration else { break }
             totalTimed += d / 1000
         }
+        let t0 = max(0, T)
 
-        var t = max(0, T)
-        if loop == true, totalTimed > 0 {
-            t = t.truncatingRemainder(dividingBy: totalTimed)
+        // Walk the timed prefix once; nil means the clock ran off the end.
+        func walk(_ t: TimeInterval, _ releasedBelow: Int) -> Resolved? {
+            var cumulative: TimeInterval = 0
+            for (i, seg) in segments.enumerated() {
+                guard let d = seg.duration else {
+                    // Unreachable under loop: the clock wraps instead.
+                    return loop == true ? nil : Resolved(index: i, localT: t - cumulative, startT: cumulative)
+                }
+                if t < cumulative + d / 1000 {
+                    return Resolved(index: i, localT: t - cumulative, startT: cumulative)
+                }
+                if seg.advance == "input", i >= releasedBelow {
+                    return Resolved(index: i, localT: t - cumulative, startT: cumulative, held: true)
+                }
+                cumulative += d / 1000
+            }
+            return nil
         }
 
-        var cumulative: TimeInterval = 0
-        for (i, seg) in segments.enumerated() {
-            guard let d = seg.duration else {
-                return Resolved(index: i, localT: t - cumulative, startT: cumulative)
-            }
-            if t < cumulative + d / 1000 {
-                return Resolved(index: i, localT: t - cumulative, startT: cumulative)
-            }
-            cumulative += d / 1000
+        if let first = walk(t0, releasedBelow) { return first }
+        if loop == true, totalTimed > 0, let wrapped = walk(t0.truncatingRemainder(dividingBy: totalTimed), 0) {
+            return wrapped
         }
-
         let last = segments.count - 1
-        let lastStart = cumulative - ((segments[last].duration ?? 0) / 1000)
-        return Resolved(index: last, localT: t - lastStart, startT: lastStart)
+        let lastStart = totalTimed - ((segments[last].duration ?? 0) / 1000)
+        return Resolved(index: last, localT: t0 - lastStart, startT: lastStart)
     }
 
     /// Seconds until the NEXT segment boundary after global time T, or nil
-    /// when the current segment holds forever (durationless tail, no loop).
-    func nextBoundary(after T: TimeInterval) -> TimeInterval? {
+    /// when the current segment holds: a durationless tail with no loop, or an
+    /// unreleased `advance: 'input'` segment (only a steer moves it on).
+    func nextBoundary(after T: TimeInterval, releasedBelow: Int = 0) -> TimeInterval? {
         guard !segments.isEmpty else { return nil }
-        let resolved = resolve(at: T)
-        guard let d = segments[resolved.index].duration else { return nil }
+        let resolved = resolve(at: T, releasedBelow: releasedBelow)
+        if resolved.held { return nil }
+        let segment = segments[resolved.index]
+        guard let d = segment.duration else { return nil }
+        if segment.advance == "input", resolved.index >= releasedBelow { return nil }
         let remaining = d / 1000 - resolved.localT
         // Clamp against pathological zero/negative durations.
         return max(0.05, remaining)

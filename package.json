@@ -44,6 +44,7 @@
     "@vitest/coverage-v8": "^4.1.12",
     "@webgpu/types": "^0.1.74",
     "eslint": "^10.13.0",
+    "eslint-plugin-regexp": "3.3.2",
     "happy-dom": "^21.0.4",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3",

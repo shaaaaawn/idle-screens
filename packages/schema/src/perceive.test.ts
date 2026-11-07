@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap } from './perceive';
+import { diffScenes, dominanceRanking, luminanceGrid, motionStats, perceiveScene, perceiveSequenceFrame, renderBrailleMap, renderDensityMap, textSprites } from './perceive';
 import type { IdleSequence } from './types';
 import { adviseSpec } from './advise';
 import { EXAMPLE_SPECS, POLYGONS_SPEC, WARP_TUNNEL_SPEC } from './examples/index';
@@ -772,5 +772,26 @@ describe('chain links without k/maxDist (X541)', () => {
 
   it('advises the same as the spec that sets them', () => {
     expect(adviseSpec(bare)).toEqual(adviseSpec(POLYGONS_SPEC));
+  });
+});
+
+describe('text under a paint transform (X834)', () => {
+  const block = (key: string, x: number, transform?: SaverSpec['layers'][number]['transform']): SaverSpec['layers'][number] => ({
+    key, count: 1, position: { x, y: 0.5 }, alpha: [1, 1], motion: { type: 'static' },
+    ...(transform ? { transform } : {}),
+    sprite: { kind: 'textBlock', text: 'BIG', fontSize: 0.05, maxWidth: 1, lineHeight: 1.1, align: 'center', anchor: 'center', color: '#ffffff', font: '900 Arial', opacity: 1 },
+  });
+  const unscaled: SaverSpec = { schemaVersion: 1, id: 'tb', label: 'tb', background: { type: 'solid', color: '#000000' }, layers: [block('a', 0.3)] };
+  const scaled: SaverSpec = { ...unscaled, layers: [block('a', 0.3, { scale: 2.5, origin: 'anchor' })] };
+  const opts = { viewport: { width: 480, height: 270 } };
+
+  it('scales the glyph box in the luminance grid', () => {
+    const lit = (s: SaverSpec): number => perceiveScene(s, opts).coverage;
+    expect(lit(scaled)).toBeGreaterThan(lit(unscaled) * 3);
+  });
+
+  it('reports the scaled glyph size', () => {
+    // sizePx is rounded, so allow a pixel either way.
+    expect(Math.abs(textSprites(scaled, opts)[0]!.sizePx - textSprites(unscaled, opts)[0]!.sizePx * 2.5)).toBeLessThanOrEqual(1.5);
   });
 });

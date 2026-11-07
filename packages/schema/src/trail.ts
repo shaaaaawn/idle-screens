@@ -55,7 +55,8 @@ export function trailFillBudget(layerCount: number): number {
  * The echoes behind an entity at scene time `t`, head first. `posAt` is the
  * entity's position at any time; `headAlpha` / `headSize` its alpha and size
  * now. Sampling stops at a wrap seam (a jump of more than half the viewport),
- * at the clock's start, or where an echo would be invisible (`alpha ≤
+ * at the clock's start (or `since`, when the entity's motion restarts there —
+ * see `trailSince`), or where an echo would be invisible (`alpha ≤
  * minAlpha`, radius < 0.2 px). `fillBudget` caps the gap-filling echoes.
  */
 export function trailEchoes(
@@ -70,6 +71,7 @@ export function trailEchoes(
   fillBudget: number,
   minAlpha = 0,
   additive = false,
+  since = 0,
 ): TrailEcho[] {
   const fade = trail.fade ?? 1;
   const n = Math.min(Math.ceil(trail.length / 50), LIMITS.maxTrailSamples);
@@ -84,7 +86,7 @@ export function trailEchoes(
   for (let s = 1; s <= n; s++) {
     const k = s / n;
     const pastT = t - k * trail.length;
-    if (pastT < 0) break;
+    if (pastT < Math.max(0, since)) break;
     const pos = posAt(pastT);
     if (jumps(prev, pos)) break;
     prev = pos;

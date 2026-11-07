@@ -9,6 +9,7 @@ import { LIMITS, type IdleSequence, type SaverSpec, type SpriteSpec } from './ty
 // Cycle (validate.ts imports structuralSignature from here) is safe: neither
 // module touches the other's exports at load time, only inside functions.
 import { ignoredPropertyPaths } from './validate';
+import { nearest, nearestPath } from './nearest';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -434,8 +435,11 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 /**
  * Enumerate all steerable leaf paths in a (resolved) spec. Returns dot-paths
  * like "layers.0.count", "background.stops.1.color", "background.bands.2", etc. Metadata fields
- * (id, label, schemaVersion, seed, units, kind, type, key) are excluded —
- * they describe structure, not tuneable values.
+ * (id, label, schemaVersion, seed, units, kind, type, key, and the declared
+ * hints motionIntensity and density) are excluded — they describe structure
+ * or intent, not tuneable values. Every path returned resolves through
+ * `resolveSpecPath` (pinned over the examples corpus in steer.test.ts), so a
+ * setParam on an advertised path never 400s for being unknown.
  *
  * Properties the validator flags as unknown or misplaced (e.g. `angle` on a
  * gradient background, `blend` inside a sprite) are excluded too: the
@@ -449,10 +453,13 @@ export function morphNothingMorphable(a: SaverSpec, b: SaverSpec, opts: { textCr
 export function steerablePaths(spec: unknown): string[] {
   if (!spec || typeof spec !== 'object') return [];
   // `group` (membership) and `origin` are enums that step, not knobs; the
-  // `timeline` is authored structure, not a steer target (resolveSpecPath
-  // refuses it), so none of them are advertised.
-  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer', 'group', 'origin']);
-  const SKIP_ROOT = new Set(['timeline']);
+  // `timeline` is authored structure, and `density` a declared hint that
+  // changes no pixel. resolveSpecPath refuses all of them, so none is advertised.
+  // A path's `loop` is an enum like `curve`: it resolves (a steer steps it)
+  // but is not advertised. No other scene field is named `loop` (the
+  // timeline's is under the skipped root `timeline`).
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'loop', 'layer', 'group', 'origin']);
+  const SKIP_ROOT = new Set(['timeline', 'density']);
   // `bands` (a field background's palette) is indexed like `stops`, so
   // `background.bands.2` is a hex paint path that glides.
   const INDEXED = new Set(['layers', 'stops', 'bands', 'parts']);
@@ -492,6 +499,39 @@ export function steerablePaths(spec: unknown): string[] {
   const ignored = ignoredPropertyPaths(spec);
   if (ignored.length === 0) return out;
   return out.filter((p) => !ignored.some((ig) => p === ig || p.startsWith(`${ig}.`)));
+}
+
+/**
+ * The path a non-resolving steer was most likely meant to be
+ * (#122) — `layers.0.speed` → `layers.0.motion.speed`, `layers.0.sprite.radious`
+ * → `layers.0.sprite.radius` — or undefined when none is clearly closest
+ * (`nearestPath`'s rule: a tie suggests nothing). A path that starts with a
+ * layer's key (`fireflies.speed`) is matched as that layer's and answered in
+ * the same form (`fireflies.motion.speed`). For the timeline-key error here
+ * and idle-server's setParam/setTrack unknown-path errors, so both suggest
+ * by one rule.
+ */
+export function suggestSpecPath(spec: unknown, path: string, paths?: readonly string[]): string | undefined {
+  // `paths`: the spec's `steerablePaths`, when the caller already has them (one per call otherwise).
+  const candidates = paths ?? steerablePaths(spec);
+  const [head, ...rest] = path.split('.');
+  const layers = (spec as { layers?: unknown } | null)?.layers;
+  const keys = Array.isArray(layers)
+    ? layers.map((l) => (l && typeof l === 'object' && typeof (l as Record<string, unknown>).key === 'string' ? (l as { key: string }).key : undefined))
+    : [];
+  const real = keys.filter((k): k is string => k !== undefined);
+  const skip = head === undefined || head === 'layers' || head === 'background' || rest.length === 0;
+  // An exact layer key, else (a typo'd key) the one key nearest the head — the leaf is then
+  // matched on that layer and the answer keeps the key the author wrote or meant.
+  const layerKey = skip ? undefined : real.includes(head!) ? head : nearest(head!, real);
+  const idx = layerKey === undefined ? -1 : keys.indexOf(layerKey);
+  if (idx === -1 || layerKey === undefined) return nearestPath(path, candidates);
+  const prefix = `layers.${idx}.`;
+  const typed = prefix + rest.join('.');
+  // A typo'd key with an otherwise valid leaf: the path is right once the key is.
+  if (layerKey !== head && candidates.includes(typed)) return `${layerKey}.${rest.join('.')}`;
+  const hit = nearestPath(typed, candidates);
+  return hit?.startsWith(prefix) ? `${layerKey}.${hit.slice(prefix.length)}` : hit;
 }
 
 /**

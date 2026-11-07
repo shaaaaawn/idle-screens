@@ -1,9 +1,10 @@
 import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecError, type SpecWarning, type SpriteSpec, type ValidationResult } from './types';
-import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
+import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 import { scalarWanted } from './validate-hints';
+import { nearest } from './nearest';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -106,10 +107,84 @@ const FOREIGN_FIELD_HINTS: Record<'top' | 'layer' | 'key' | 'motion', Record<str
   },
 };
 
-/** The unknown-property message, with a hint when the field is another tool's vocabulary. */
-function unknownMessage(where: keyof typeof FOREIGN_FIELD_HINTS, k: string, plain: string): string {
+/**
+ * The unknown-property message, with a hint when the field is another tool's
+ * vocabulary — else `fallback` (a `fieldHint`, appended as it is).
+ */
+function unknownMessage(where: keyof typeof FOREIGN_FIELD_HINTS, k: string, plain: string, fallback = ''): string {
   const hint = Object.prototype.hasOwnProperty.call(FOREIGN_FIELD_HINTS[where], k) ? FOREIGN_FIELD_HINTS[where][k] : undefined;
-  return hint ? `${plain} — ${hint}` : plain;
+  return hint ? `${plain} — ${hint}` : plain + fallback;
+}
+
+/** A field → the types that own it, from a type → fields table (the `type`/`kind` discriminant itself excluded). */
+type Owners = { readonly noun: string; readonly of: ReadonlyMap<string, readonly string[]> };
+function ownersOf(noun: string, table: Record<string, Iterable<string>>): Owners {
+  const of = new Map<string, string[]>();
+  for (const [owner, fields] of Object.entries(table)) {
+    for (const f of fields) {
+      if (f === 'type' || f === 'kind') continue;
+      const list = of.get(f);
+      if (list) list.push(owner);
+      else of.set(f, [owner]);
+    }
+  }
+  return { noun, of };
+}
+
+/** Most owners one hint names; `color` alone has nine sprite kinds. */
+const MAX_OWNERS_NAMED = 4;
+
+/**
+ * What to append to an unknown field's message when no curated hint applies
+ * (#122): where the exact name does belong when a sibling type owns it
+ * (` — 'sway' belongs to motion type 'rise'`), else the one known name it is
+ * nearest (` — did you mean 'speed'?`), else nothing. A suggestion is only
+ * made when one candidate is clearly closest — see `nearest`.
+ */
+function fieldHint(k: string, known: Iterable<string>, owners?: Owners): string {
+  const own = owners?.of.get(k);
+  if (owners && own && own.length > 0) {
+    const shown = own.slice(0, MAX_OWNERS_NAMED).map((o) => `'${o}'`).join(', ');
+    const more = own.length > MAX_OWNERS_NAMED ? ` and ${own.length - MAX_OWNERS_NAMED} more` : '';
+    return ` — '${k}' belongs to ${owners.noun}${own.length > 1 ? 's' : ''} ${shown}${more}`;
+  }
+  const near = nearest(k, known);
+  return near ? ` — did you mean '${near}'?` : '';
+}
+
+/**
+ * `must be 'a' | 'b' | 'c'` — quoted or bare options, each optionally glossed
+ * in parentheses, optionally ending `when set`. Two options at least; prose
+ * like `must be an object { type: 'settle' | … }` does not match. Every
+ * piece is delimited (quotes, parentheses, ` | `), so matching is linear.
+ */
+const ENUM_MESSAGE = /^must be ((?:'[^']+'|[A-Za-z][\w-]*)(?: \([^)]*\))?(?: \| (?:'[^']+'|[A-Za-z][\w-]*)(?: \([^)]*\))?)+)(?: when set)?$/;
+
+/** The prose form of the same check: `must be 'cut', 'morph', 'fade' or 'wipe'`. */
+const ENUM_PROSE_MESSAGE = /^must be ('[^']+'(?:, '[^']+')* or '[^']+')$/;
+
+/**
+ * ` — did you mean 'lighter'?` for a string the enum message at `path`
+ * refused (#122), read from the message itself like `shapeHint`, so every
+ * enum check inherits it. Empty when the value is not a string or no option
+ * is clearly closest.
+ */
+function enumHint(root: unknown, path: string, message: string): string {
+  const m = ENUM_MESSAGE.exec(message);
+  const prose = m ? null : ENUM_PROSE_MESSAGE.exec(message);
+  if (!m && !prose) return '';
+  const v = valueAtPath(root, path);
+  if (!isStr(v)) return '';
+  const options = m
+    ? m[1]!.split(' | ').map((o) => {
+        // indexOf, not /\ \(.*$/ — that rescans to the end from every ' (' (CodeQL polynomial ReDoS).
+        const gloss = o.indexOf(' (');
+        const bare = gloss < 0 ? o : o.slice(0, gloss);
+        return bare.length > 1 && bare.startsWith("'") && bare.endsWith("'") ? bare.slice(1, -1) : bare;
+      })
+    : [...prose![1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
+  const near = nearest(v, options);
+  return near ? ` — did you mean '${near}'?` : '';
 }
 const KNOWN_REVEAL_CARET = new Set(['blink', 'color']);
 /**
@@ -125,8 +200,30 @@ export const MOTION_FIELDS = {
   orbit: ['speed', 'radius', 'center'],
   wander: ['speed', 'angle', 'meander', 'coherence', 'ease'],
   warp: ['speed', 'center'],
-  path: ['points', 'duration', 'curve', 'closed', 'scatter'],
+  path: ['points', 'duration', 'curve', 'closed', 'scatter', 'phase', 'loop'],
 } as const satisfies Record<string, readonly string[]>;
+/**
+ * The idle-sequence envelope's fields, a segment's, and each transition
+ * type's besides `type` — validateSequence's allowlist for `unknown-property`
+ * warnings, pinned to saver-spec.schema.json (json-schema.test.ts) as
+ * MOTION_FIELDS is. Unknown keys warn and never error, so a stored sequence
+ * with a stray field keeps loading.
+ */
+export const SEQUENCE_FIELDS = {
+  envelope: ['format', 'schemaVersion', 'id', 'label', 'seed', 'loop', 'sync', 'wrapMorph', 'bed', 'finish', 'segments'],
+  segment: ['key', 'scene', 'duration', 'advance', 'transition'],
+  transition: {
+    cut: [],
+    morph: ['dur', 'text'],
+    fade: ['dur'],
+    wipe: ['dur', 'shape', 'origin', 'angle', 'feather'],
+  },
+} as const satisfies { envelope: readonly string[]; segment: readonly string[]; transition: Record<string, readonly string[]> };
+const KNOWN_SEQUENCE = new Set<string>(SEQUENCE_FIELDS.envelope);
+const KNOWN_SEGMENT = new Set<string>(SEQUENCE_FIELDS.segment);
+const KNOWN_TRANSITION: Record<string, Set<string>> = Object.fromEntries(
+  Object.entries(SEQUENCE_FIELDS.transition).map(([t, f]) => [t, new Set<string>(['type', ...f])]),
+);
 const motionKnown = (t: keyof typeof MOTION_FIELDS): Set<string> => new Set(['type', ...MOTION_FIELDS[t]]);
 const KNOWN_DRIFT = motionKnown('drift');
 const KNOWN_RISE = motionKnown('rise');
@@ -153,6 +250,41 @@ const KNOWN_PATH_STOP = new Set(['at', 'color', 'opacity']);
 
 // Layer-level properties that models commonly misplace inside sprite
 const LAYER_PROPS_ON_SPRITE = new Set(['blend', 'trail', 'alpha', 'pulse', 'spin', 'grow', 'region', 'links', 'flip', 'wrap', 'key', 'emit', 'clock', 'life', 'layout', 'rotate', 'rock']);
+
+/** Each sprite kind's allowlist, in the order the kind error lists them — for naming the kind a stray field belongs to. */
+const SPRITE_KIND_FIELDS: Record<string, Set<string>> = {
+  emoji: KNOWN_EMOJI, text: KNOWN_TEXT, circle: KNOWN_CIRCLE, ring: KNOWN_RING, streak: KNOWN_STREAK, rect: KNOWN_RECT,
+  bar: KNOWN_BAR, polygon: KNOWN_POLYGON, stroke: KNOWN_STROKE, textBlock: KNOWN_TEXT_BLOCK,
+};
+const SPRITE_OWNERS = ownersOf('sprite kind', SPRITE_KIND_FIELDS);
+const MOTION_OWNERS = ownersOf('motion type', MOTION_FIELDS);
+const BACKGROUND_OWNERS = ownersOf('background type', { solid: KNOWN_BG_SOLID, gradient: KNOWN_BG_GRADIENT, field: KNOWN_BG_FIELD });
+const GRADIENT_OWNERS = ownersOf('gradient type', KNOWN_PATH_GRADIENT);
+const TRANSITION_OWNERS = ownersOf('transition type', SEQUENCE_FIELDS.transition);
+/**
+ * A sprite or motion field written on the layer itself (`color`, `speed`):
+ * which of the two it belongs inside. A layer's own fields never reach this.
+ */
+const LAYER_CHILD_OWNERS: Owners = (() => {
+  const of = new Map<string, string[]>();
+  const add = (f: string, owner: string): void => {
+    if (KNOWN_LAYER.has(f)) return;
+    const list = of.get(f) ?? [];
+    if (!list.includes(owner)) list.push(owner);
+    of.set(f, list);
+  };
+  for (const fields of Object.values(SPRITE_KIND_FIELDS)) for (const f of fields) add(f, 'sprite');
+  add('type', 'motion');
+  for (const fields of Object.values(MOTION_FIELDS)) for (const f of fields) add(f, 'motion');
+  return { noun: 'layer child', of };
+})();
+
+/** ` — 'speed' belongs inside \`motion\`` for a sprite/motion field on the layer, else `fieldHint` over the layer's fields. */
+function layerFieldHint(k: string): string {
+  const own = LAYER_CHILD_OWNERS.of.get(k);
+  if (own && own.length > 0) return ` — '${k}' belongs inside ${own.map((o) => `\`${o}\``).join(' or ')}`;
+  return fieldHint(k, KNOWN_LAYER);
+}
 
 function unknownKeys(obj: Record<string, unknown>, known: Set<string>): string[] {
   return Object.keys(obj).filter((k) => !known.has(k));
@@ -406,7 +538,7 @@ function specPathsValid(spec: SaverSpec, paths: Iterable<string>): boolean {
 function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult {
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
-  const err = (path: string, message: string): void => void errors.push({ path, message: message + shapeHint(spec, path, message) });
+  const err = (path: string, message: string): void => void errors.push({ path, message: message + (shapeHint(spec, path, message) || enumHint(spec, path, message)) });
   const warn = (path: string, code: string, message: string): void => void warnings.push({ path, code, message });
 
   if (!isObj(spec)) return { valid: false, errors: [{ path: '', message: 'spec must be an object' }], warnings: [] };
@@ -442,7 +574,7 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
   }
 
   for (const k of unknownKeys(spec, KNOWN_TOP)) {
-    warn(k, 'unknown-property', unknownMessage('top', k, `unknown top-level property '${k}' — will be ignored`));
+    warn(k, 'unknown-property', unknownMessage('top', k, `unknown top-level property '${k}' — will be ignored`, fieldHint(k, KNOWN_TOP)));
   }
 
   if (spec.background !== undefined) validateBackground(spec.background, err, warn);
@@ -489,7 +621,7 @@ function validateSpecCore(spec: unknown, checkApplied = true): ValidationResult 
 /** A paint `transform` (a layer's, or a group's — `anchorOk: false` forbids `origin: 'anchor'`). */
 function validateTransform(tf: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn, spec: unknown, anchorOk: boolean): void {
   if (!isObj(tf)) return err(path, 'must be an object {x?, y?, scale?, scaleX?, scaleY?, rotate?, origin?}');
-  for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored`);
+  for (const k of unknownKeys(tf, KNOWN_TRANSFORM)) warn(`${path}.${k}`, 'unknown-property', `unknown transform property '${k}' — will be ignored${fieldHint(k, KNOWN_TRANSFORM)}`);
   const [off, unit] = offsetBound(spec);
   const sc = LIMITS.maxLayerTransformScale;
   for (const axis of ['x', 'y'] as const) {
@@ -518,7 +650,7 @@ function validateGroups(groups: unknown, err: (p: string, m: string) => void, wa
     if (!GROUP_NAME.test(name)) err(p, 'group names are 1–32 letters, digits, - or _, starting with a letter');
     const g = groups[name];
     if (!isObj(g)) { err(p, 'must be an object {transform?, opacity?}'); continue; }
-    for (const k of unknownKeys(g, KNOWN_GROUP)) warn(`${p}.${k}`, 'unknown-property', `unknown group property '${k}' — will be ignored`);
+    for (const k of unknownKeys(g, KNOWN_GROUP)) warn(`${p}.${k}`, 'unknown-property', `unknown group property '${k}' — will be ignored${fieldHint(k, KNOWN_GROUP)}`);
     if (g.opacity !== undefined && (!isNum(g.opacity) || g.opacity < 0 || g.opacity > 1)) err(`${p}.opacity`, 'must be a number 0..1');
     if (g.transform !== undefined) validateTransform(g.transform, `${p}.transform`, err, warn, spec, false);
   }
@@ -545,7 +677,7 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
   const err = (p: string, m: string): void => { failed = true; errOuter(p, m); };
   const tl = spec.timeline as unknown;
   if (!isObj(tl)) return err('timeline', 'must be an object {loop?, duration?, keys}');
-  for (const k of unknownKeys(tl, KNOWN_TIMELINE)) warn(`timeline.${k}`, 'unknown-property', `unknown timeline property '${k}' — will be ignored`);
+  for (const k of unknownKeys(tl, KNOWN_TIMELINE)) warn(`timeline.${k}`, 'unknown-property', `unknown timeline property '${k}' — will be ignored${fieldHint(k, KNOWN_TIMELINE)}`);
   if (tl.loop !== undefined && typeof tl.loop !== 'boolean') err('timeline.loop', 'must be a boolean');
   if (tl.duration !== undefined && (!isNum(tl.duration) || tl.duration <= 0 || tl.duration > LIMITS.maxTimelineDuration)) {
     err('timeline.duration', `must be a number of ms, 0 < duration <= ${LIMITS.maxTimelineDuration}`);
@@ -556,12 +688,15 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
 
   const base = withoutTimeline(spec);
   const baseSig = structuralSignature(base);
+  // The base's steerable paths, for "did you mean" on keys that do not resolve —
+  // computed once, on the first such key: it costs a validation of the base.
+  let basePaths: string[] | undefined;
   const times = new Map<string, number[]>();
   let latest = 0;
   tl.keys.forEach((key, i) => {
     const p = `timeline.keys[${i}]`;
     if (!isObj(key)) return err(p, 'must be an object {t, path, value, ease?, dur?}');
-    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', unknownMessage('key', k, `unknown key property '${k}' — will be ignored`));
+    for (const k of unknownKeys(key, KNOWN_TIMELINE_KEY)) warn(`${p}.${k}`, 'unknown-property', unknownMessage('key', k, `unknown key property '${k}' — will be ignored`, fieldHint(k, KNOWN_TIMELINE_KEY)));
     let ok = true;
     if (!isNum(key.t) || key.t < 0) { err(`${p}.t`, 'must be a number of ms >= 0'); ok = false; }
     if (key.ease !== undefined && !GLIDE_EASES.has(key.ease as string)) err(`${p}.ease`, "must be 'step' | 'linear' | 'smooth' | 'in' | 'out' | 'spring'");
@@ -575,7 +710,11 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
       err(`${p}.path`, `'${key.path}' is an enum that can only step — group membership and a transform's origin are fixed per scene`);
       ok = false;
     }
-    else if (!cp) { err(`${p}.path`, `'${key.path}' does not resolve on the spec — a key can only animate a field the spec already has`); ok = false; }
+    else if (!cp) {
+      const near = suggestSpecPath(base, key.path, (basePaths ??= steerablePaths(base)));
+      err(`${p}.path`, `'${key.path}' does not resolve on the spec — a key can only animate a field the spec already has${near ? ` — did you mean '${near}'?` : ''}`);
+      ok = false;
+    }
     else if (cp === 'timeline' || cp.startsWith('timeline.') || cp === 'schemaVersion' || cp === 'id' || cp === 'label' || cp === 'seed') {
       err(`${p}.path`, `'${key.path}' is not animatable`);
       ok = false;
@@ -609,7 +748,11 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
           warn(`${p}.path`, 'timeline-key-no-effect', `'${key.path}' is overridden by ${cp.includes('.parts.') ? "that part's" : "the sprite's"} gradient, so this key changes nothing on screen — key its gradient's stops (\`…gradient.stops.N.color\`) instead`);
         }
       }
-      if (structuralSignature(applied) !== baseSig) {
+      // A path's fixed `phase` is structural (it sits in `motion`), but its
+      // rebuild re-places only that layer's entities along their own path —
+      // the seeded draw is kept, so nothing re-seeds and the key glides.
+      const phaseKey = /^layers\.\d+\.motion\.phase$/.test(cp) && (readSpecPath(base, cp.slice(0, -'.phase'.length)) as { type?: unknown } | undefined)?.type === 'path';
+      if (!phaseKey && structuralSignature(applied) !== baseSig) {
         warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
       }
     }
@@ -692,7 +835,7 @@ function validateFinish(f: unknown, path: string, err: (p: string, m: string) =>
   }
   if (f.animate !== undefined && typeof f.animate !== 'boolean') err(`${path}.animate`, 'must be a boolean');
   for (const k of unknownKeys(f, KNOWN_FINISH)) {
-    warn(`${path}.${k}`, 'unknown-property', `unknown finish property '${k}' — will be ignored`);
+    warn(`${path}.${k}`, 'unknown-property', `unknown finish property '${k}' — will be ignored${fieldHint(k, KNOWN_FINISH)}`);
   }
 }
 
@@ -701,7 +844,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
   if (bg.type === 'solid') {
     color(bg.color, 'background.color', err);
     for (const k of unknownKeys(bg, KNOWN_BG_SOLID)) {
-      warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
+      warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored${fieldHint(k, KNOWN_BG_SOLID, BACKGROUND_OWNERS)}`);
     }
   } else if (bg.type === 'gradient') {
     if (!Array.isArray(bg.stops) || bg.stops.length < 2) {
@@ -710,7 +853,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       bg.stops.forEach((s, i) => {
         if (!isObj(s) || !isNum(s.at) || s.at < 0 || s.at > 1) err(`background.stops[${i}].at`, 'must be 0..1');
         color(isObj(s) ? s.color : undefined, `background.stops[${i}].color`, err);
-        if (isObj(s)) for (const k of unknownKeys(s, KNOWN_BG_STOP)) warn(`background.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored`);
+        if (isObj(s)) for (const k of unknownKeys(s, KNOWN_BG_STOP)) warn(`background.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored${fieldHint(k, KNOWN_BG_STOP)}`);
       });
     }
     if (bg.drift !== undefined) {
@@ -722,7 +865,7 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
         if (bg.drift.amount !== undefined && (!isNum(bg.drift.amount) || bg.drift.amount <= 0 || bg.drift.amount > LIMITS.maxDriftAmount)) {
           err('background.drift.amount', `must be > 0 and <= ${LIMITS.maxDriftAmount}`);
         }
-        for (const k of unknownKeys(bg.drift, KNOWN_BG_DRIFT)) warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
+        for (const k of unknownKeys(bg.drift, KNOWN_BG_DRIFT)) warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored${fieldHint(k, KNOWN_BG_DRIFT)}`);
       }
     }
     if (bg.band !== undefined) {
@@ -730,11 +873,11 @@ function validateBackground(bg: unknown, err: (p: string, m: string) => void, wa
       else {
         color(bg.band.color, 'background.band.color', err);
         positiveScalar(bg.band.height, 'background.band.height', err);
-        for (const k of unknownKeys(bg.band, KNOWN_BAND)) warn(`background.band.${k}`, 'unknown-property', `unknown band property '${k}' — will be ignored`);
+        for (const k of unknownKeys(bg.band, KNOWN_BAND)) warn(`background.band.${k}`, 'unknown-property', `unknown band property '${k}' — will be ignored${fieldHint(k, KNOWN_BAND)}`);
       }
     }
     for (const k of unknownKeys(bg, KNOWN_BG_GRADIENT)) {
-      warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
+      warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored${fieldHint(k, KNOWN_BG_GRADIENT, BACKGROUND_OWNERS)}`);
     }
   } else if (bg.type === 'field') {
     validateFieldBackground(bg, err, warn);
@@ -784,13 +927,13 @@ function validateFieldBackground(bg: Record<string, unknown>, err: (p: string, m
         err('background.drift.amount', `must be a number 0..${LIMITS.maxFieldDriftAmount}`);
       }
       for (const k of unknownKeys(bg.drift, KNOWN_FIELD_DRIFT)) {
-        warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored`);
+        warn(`background.drift.${k}`, 'unknown-property', `unknown drift property '${k}' — will be ignored${fieldHint(k, KNOWN_FIELD_DRIFT)}`);
       }
     }
   }
   if (bg.seed !== undefined && !isNum(bg.seed)) err('background.seed', 'must be a number');
   for (const k of unknownKeys(bg, KNOWN_BG_FIELD)) {
-    warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored`);
+    warn(`background.${k}`, 'unknown-property', `unknown background property '${k}' — will be ignored${fieldHint(k, KNOWN_BG_FIELD, BACKGROUND_OWNERS)}`);
   }
 }
 
@@ -803,7 +946,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
     } else if (k === 'depth') {
       warn(`${path}.depth`, 'unknown-property', `'depth' is not a layer property — use motion type 'warp' for true perspective depth, or fake parallax with size/speed/alpha across layers`);
     } else {
-      warn(`${path}.${k}`, 'unknown-property', unknownMessage('layer', k, `unknown layer property '${k}' — will be ignored`));
+      warn(`${path}.${k}`, 'unknown-property', unknownMessage('layer', k, `unknown layer property '${k}' — will be ignored`, layerFieldHint(k)));
     }
   }
   if (!isNum(layer.count) || !Number.isInteger(layer.count) || layer.count < 1) {
@@ -864,7 +1007,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
           err(`${path}.position.${axis}`, `must be a number within ±${off} (${unit})`);
         }
       }
-      for (const k of unknownKeys(layer.position, KNOWN_POSITION)) warn(`${path}.position.${k}`, 'unknown-property', `unknown position property '${k}' — will be ignored`);
+      for (const k of unknownKeys(layer.position, KNOWN_POSITION)) warn(`${path}.position.${k}`, 'unknown-property', `unknown position property '${k}' — will be ignored${fieldHint(k, KNOWN_POSITION)}`);
       const dataLayout = isObj(layer.layout) && (layer.layout.type === 'list' || layer.layout.type === 'table');
       if (isNum(layer.count) && layer.count !== 1 && !dataLayout) {
         err(`${path}.position`, "position requires count: 1 — or a layout of type 'list' / 'table', where it anchors the whole block");
@@ -995,7 +1138,7 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
           if (lay.gap.x !== undefined && !gapOk(lay.gap.x)) err(`${path}.layout.gap.x`, 'must be > 0');
           if (lay.gap.y !== undefined && !gapOk(lay.gap.y)) err(`${path}.layout.gap.y`, 'must be > 0');
           for (const k of unknownKeys(lay.gap, new Set(['x', 'y']))) {
-            warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored`);
+            warn(`${path}.layout.gap.${k}`, 'unknown-property', `unknown gap property '${k}' — will be ignored${fieldHint(k, ['x', 'y'])}`);
           }
           if (lay.type === 'list' && lay.gap.x !== undefined) {
             warn(`${path}.layout.gap.x`, 'no-effect', 'a list is one column, so gap.x has no effect; gap.y is its row pitch (use a table for columns)');
@@ -1004,8 +1147,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
           err(`${path}.layout.gap`, 'must be a number > 0 or { x?, y? }');
         }
       }
-      for (const k of unknownKeys(lay, new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']))) {
-        warn(`${path}.layout.${k}`, 'unknown-property', `unknown layout property '${k}' — will be ignored`);
+      const layoutKnown = new Set(lay.type === 'list' ? ['type', 'gap'] : ['type', 'columns', 'gap']);
+      for (const k of unknownKeys(lay, layoutKnown)) {
+        warn(`${path}.layout.${k}`, 'unknown-property', `unknown layout property '${k}' — will be ignored${fieldHint(k, layoutKnown)}`);
       }
       // A data layout reads variants in order: N labels want N strings.
       const sp = layer.sprite;
@@ -1061,8 +1205,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (layer.life.stagger !== undefined && (!isNum(layer.life.stagger) || layer.life.stagger < 0 || layer.life.stagger > LIMITS.maxLifeStagger)) {
         err(`${path}.life.stagger`, `must be 0..${LIMITS.maxLifeStagger} ms (between successive entities' entrances)`);
       }
-      for (const k of unknownKeys(layer.life, new Set(['enter', 'exit', 'fade', 'stagger']))) {
-        warn(`${path}.life.${k}`, 'unknown-property', `unknown life property '${k}' — will be ignored`);
+      const lifeKnown = new Set(['enter', 'exit', 'fade', 'stagger']);
+      for (const k of unknownKeys(layer.life, lifeKnown)) {
+        warn(`${path}.life.${k}`, 'unknown-property', `unknown life property '${k}' — will be ignored${fieldHint(k, lifeKnown)}`);
       }
     }
   }
@@ -1076,8 +1221,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (!isNum(layer.rock.period) || layer.rock.period < LIMITS.minRockPeriod) {
         err(`${path}.rock.period`, `must be >= ${LIMITS.minRockPeriod} ms (one swing there and back)`);
       }
-      for (const k of unknownKeys(layer.rock, new Set(['amp', 'period']))) {
-        warn(`${path}.rock.${k}`, 'unknown-property', `unknown rock property '${k}' — will be ignored`);
+      const rockKnown = new Set(['amp', 'period']);
+      for (const k of unknownKeys(layer.rock, rockKnown)) {
+        warn(`${path}.rock.${k}`, 'unknown-property', `unknown rock property '${k}' — will be ignored${fieldHint(k, rockKnown)}`);
       }
     }
   }
@@ -1121,8 +1267,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
       if (em.jitter === 0 && isNum(em.every) && isNum(em.life) && isNum(layer.count) && layer.count > 1 && em.life > em.every / layer.count) {
         warn(`${path}.emit.life`, 'emit-overlap', `jitter 0 staggers ${layer.count} entities ${(em.every / layer.count).toFixed(0)} ms apart but each stays lit ${em.life} ms — windows overlap, so more than one event is visible at a time. Shorten life or lengthen every`);
       }
-      for (const k of unknownKeys(em, new Set(['every', 'life', 'jitter', 'grow']))) {
-        warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored`);
+      const emitKnown = new Set(['every', 'life', 'jitter', 'grow']);
+      for (const k of unknownKeys(em, emitKnown)) {
+        warn(`${path}.emit.${k}`, 'unknown-property', `unknown emit property '${k}' — will be ignored${fieldHint(k, emitKnown)}`);
       }
     }
   }
@@ -1154,8 +1301,9 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
           err(`${path}.sprite.cycle.period`, `must be >= ${floor} ms when the layer has a clock (period / rate >= ${LIMITS.minClockedPeriod})`);
         }
       }
-      for (const k of unknownKeys(ck, new Set(['phase', 'rate']))) {
-        warn(`${path}.clock.${k}`, 'unknown-property', `unknown clock property '${k}' — will be ignored`);
+      const clockKnown = new Set(['phase', 'rate']);
+      for (const k of unknownKeys(ck, clockKnown)) {
+        warn(`${path}.clock.${k}`, 'unknown-property', `unknown clock property '${k}' — will be ignored${fieldHint(k, clockKnown)}`);
       }
     }
   }
@@ -1257,7 +1405,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
           validatePathPiece(part, pp, err, warn);
           if (part.color !== undefined) color(part.color, `${pp}.color`, err);
           if (part.opacity !== undefined && (!isNum(part.opacity) || part.opacity < 0 || part.opacity > 1)) err(`${pp}.opacity`, 'must be 0..1');
-          for (const k of unknownKeys(part, KNOWN_PATH_PART)) warn(`${pp}.${k}`, 'unknown-property', `unknown part property '${k}' — will be ignored`);
+          for (const k of unknownKeys(part, KNOWN_PATH_PART)) warn(`${pp}.${k}`, 'unknown-property', `unknown part property '${k}' — will be ignored${fieldHint(k, KNOWN_PATH_PART)}`);
         });
       }
     } else if (sprite.path !== undefined) {
@@ -1344,7 +1492,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         if (n.minDigits !== undefined && (!isNum(n.minDigits) || !Number.isInteger(n.minDigits) || n.minDigits < 1 || n.minDigits > LIMITS.maxTextNumberMinDigits)) {
           err(`${path}.number.minDigits`, `must be a whole number 1..${LIMITS.maxTextNumberMinDigits} (integer digits, zero-padded)`);
         }
-        for (const k of unknownKeys(n, KNOWN_TEXT_NUMBER)) warn(`${path}.number.${k}`, 'unknown-property', `unknown number property '${k}' — will be ignored`);
+        for (const k of unknownKeys(n, KNOWN_TEXT_NUMBER)) warn(`${path}.number.${k}`, 'unknown-property', `unknown number property '${k}' — will be ignored${fieldHint(k, KNOWN_TEXT_NUMBER)}`);
       }
     }
     if (sprite.reveal !== undefined) {
@@ -1353,7 +1501,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
         err(`${path}.reveal`, 'must be an object');
       } else {
         for (const k of Object.keys(rv)) {
-          if (!KNOWN_REVEAL.has(k)) err(`${path}.reveal.${k}`, 'unknown reveal field');
+          if (!KNOWN_REVEAL.has(k)) err(`${path}.reveal.${k}`, `unknown reveal field${fieldHint(k, KNOWN_REVEAL)}`);
         }
         if (rv.progress !== undefined && (!isNum(rv.progress) || rv.progress < 0 || rv.progress > 1)) {
           err(`${path}.reveal.progress`, 'must be a number between 0 and 1');
@@ -1377,7 +1525,7 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
             err(`${path}.reveal.caret`, 'must be a boolean or an object');
           } else {
             for (const k of Object.keys(caret)) {
-              if (!KNOWN_REVEAL_CARET.has(k)) err(`${path}.reveal.caret.${k}`, 'unknown caret field');
+              if (!KNOWN_REVEAL_CARET.has(k)) err(`${path}.reveal.caret.${k}`, `unknown caret field${fieldHint(k, KNOWN_REVEAL_CARET)}`);
             }
             if (caret.blink !== undefined && (!isNum(caret.blink) || caret.blink <= 0 || caret.blink > LIMITS.maxCaretBlinkHz)) {
               err(`${path}.reveal.caret.blink`, `must be between 0 (exclusive) and ${LIMITS.maxCaretBlinkHz} Hz (flash safety)`);
@@ -1399,7 +1547,10 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (LAYER_PROPS_ON_SPRITE.has(k)) {
       warn(`${path}.${k}`, 'misplaced-property', `'${k}' belongs on the layer, not inside sprite — move it up one level`);
     } else {
-      warn(`${path}.${k}`, 'unknown-property', `unknown sprite property '${k}' — will be ignored`);
+      // A layer field (`opacity`, `position`, `transform`, …) outranks a sibling kind
+      // that shares the name: a circle's `opacity` is the layer's, not textBlock's.
+      const hint = KNOWN_LAYER.has(k) ? ` — '${k}' belongs on the layer` : fieldHint(k, knownSet, SPRITE_OWNERS);
+      warn(`${path}.${k}`, 'unknown-property', `unknown sprite property '${k}' — will be ignored${hint}`);
     }
   }
 }
@@ -1572,13 +1723,19 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     if (motion.scatter !== undefined && (!isNum(motion.scatter) || motion.scatter <= 0 || motion.scatter > scatterCap)) {
       err(`${path}.scatter`, `must be > 0 and <= ${isViewport ? scatterCap.toFixed(3) + ' viewport-units' : LIMITS.maxMeander + ' px'}`);
     }
+    if (motion.phase !== undefined && (!isNum(motion.phase) || motion.phase < 0 || motion.phase >= 1)) {
+      err(`${path}.phase`, 'must be a number, 0 <= phase < 1 (the fraction of the lap at t = 0)');
+    }
+    if (motion.loop !== undefined && motion.loop !== 'loop' && motion.loop !== 'once' && motion.loop !== 'hold') {
+      err(`${path}.loop`, "must be 'loop' | 'once' | 'hold'");
+    }
   } else {
     err(`${path}.type`, 'must be drift | rise | bounce | static | orbit | wander | warp | path');
     return;
   }
 
   for (const k of unknownKeys(motion, knownSet)) {
-    warn(`${path}.${k}`, 'unknown-property', unknownMessage('motion', k, `unknown motion property '${k}' — will be ignored`));
+    warn(`${path}.${k}`, 'unknown-property', unknownMessage('motion', k, `unknown motion property '${k}' — will be ignored`, fieldHint(k, knownSet, MOTION_OWNERS)));
   }
 }
 
@@ -1661,7 +1818,8 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
   } else {
     return err(`${path}.type`, "must be 'linear' | 'radial'");
   }
-  for (const k of unknownKeys(g, KNOWN_PATH_GRADIENT[g.type as 'linear' | 'radial'])) warn(`${path}.${k}`, 'unknown-property', `unknown ${g.type} gradient property '${k}' — will be ignored`);
+  const gradientKnown = KNOWN_PATH_GRADIENT[g.type as 'linear' | 'radial'];
+  for (const k of unknownKeys(g, gradientKnown)) warn(`${path}.${k}`, 'unknown-property', `unknown ${g.type} gradient property '${k}' — will be ignored${fieldHint(k, gradientKnown, GRADIENT_OWNERS)}`);
   if (g.units !== undefined && g.units !== 'box' && g.units !== 'part') err(`${path}.units`, "must be 'box' (the drawing's unit box, default) | 'part' (the part's own box, -1..1)");
   if (!Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 8) return err(`${path}.stops`, 'must be 2..8 stops');
   let last = -Infinity;
@@ -1671,7 +1829,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
     else last = st.at;
     color(st.color, `${path}.stops[${i}].color`, err);
     if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.stops[${i}].opacity`, 'must be 0..1');
-    for (const k of unknownKeys(st, KNOWN_PATH_STOP)) warn(`${path}.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored`);
+    for (const k of unknownKeys(st, KNOWN_PATH_STOP)) warn(`${path}.stops[${i}].${k}`, 'unknown-property', `unknown stop property '${k}' — will be ignored${fieldHint(k, KNOWN_PATH_STOP)}`);
   });
 }
 
@@ -1684,7 +1842,7 @@ function validatePathStroke(st: unknown, path: string, err: (p: string, m: strin
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
   if (st.draw !== undefined) validateDraw(st.draw, `${path}.draw`, err, warn);
-  for (const k of unknownKeys(st, KNOWN_PATH_STROKE)) warn(`${path}.${k}`, 'unknown-property', `unknown stroke property '${k}' — will be ignored`);
+  for (const k of unknownKeys(st, KNOWN_PATH_STROKE)) warn(`${path}.${k}`, 'unknown-property', `unknown stroke property '${k}' — will be ignored${fieldHint(k, KNOWN_PATH_STROKE)}`);
 }
 
 /** A wipe transition's edge: shape, origin, angle and feather. */
@@ -1700,9 +1858,45 @@ function validateWipe(tr: Record<string, unknown>, path: string, err: (p: string
     else if (tr.shape !== 'line') err(`${path}.angle`, "applies to shape 'line' only — an iris opens from `origin`");
   }
   if (tr.feather !== undefined && (!isNum(tr.feather) || tr.feather < 0 || tr.feather > 1)) err(`${path}.feather`, 'must be 0..1 (the edge width, as a fraction of the distance it travels)');
-  for (const k of Object.keys(tr)) {
-    if (!['type', 'dur', 'shape', 'origin', 'angle', 'feather'].includes(k)) warn(`${path}.${k}`, 'unknown-property', `unknown wipe property '${k}' — will be ignored`);
+  // The wipe's own keys are checked with every transition's in validateSequence.
+  if (isObj(tr.origin)) {
+    for (const k of Object.keys(tr.origin)) {
+      if (k !== 'x' && k !== 'y') warn(`${path}.origin.${k}`, 'unknown-property', `unknown origin property '${k}' — origin takes x and y; will be ignored${fieldHint(k, ['x', 'y'])}`);
+    }
   }
+}
+
+/**
+ * `unknown-property` warnings for an idle-sequence envelope, its segments
+ * and their transitions (vork-review A7: a typo there used to pass silently
+ * end to end). A scene field written one level too high gets told where it
+ * belongs. `text` on a non-morph transition is already an error, so it is
+ * not reported twice; neither is an unrecognised transition `type`.
+ */
+function warnUnknownSequenceKeys(seq: Record<string, unknown>, warn: WarnFn): void {
+  for (const k of unknownKeys(seq, KNOWN_SEQUENCE)) {
+    const hint = KNOWN_TOP.has(k) ? " — a scene field: it belongs on each segment's `scene` (or the `bed`)" : fieldHint(k, KNOWN_SEQUENCE);
+    warn(k, 'unknown-property', `unknown sequence property '${k}' — will be ignored${hint}`);
+  }
+  if (!Array.isArray(seq.segments)) return;
+  seq.segments.forEach((s: unknown, i: number) => {
+    if (!isObj(s)) return;
+    const p = `segments[${i}]`;
+    for (const k of unknownKeys(s, KNOWN_SEGMENT)) {
+      const hint = k === 'dur'
+        ? " — a segment's length is `duration` (ms); `dur` belongs to its `transition`"
+        : KNOWN_TOP.has(k) ? " — a scene field: put it under this segment's `scene`" : fieldHint(k, KNOWN_SEGMENT);
+      warn(`${p}.${k}`, 'unknown-property', `unknown segment property '${k}' — will be ignored${hint}`);
+    }
+    const tr = s.transition;
+    if (!isObj(tr) || typeof tr.type !== 'string' || !Object.prototype.hasOwnProperty.call(KNOWN_TRANSITION, tr.type)) return;
+    const type = tr.type;
+    for (const k of unknownKeys(tr, KNOWN_TRANSITION[type]!)) {
+      if (k === 'text') continue; // an error on every non-morph transition already
+      const hint = k === 'dur' && type === 'cut' ? ' — a cut is instant; `dur` applies to morph, fade and wipe' : fieldHint(k, KNOWN_TRANSITION[type]!, TRANSITION_OWNERS);
+      warn(`${p}.transition.${k}`, 'unknown-property', `unknown ${type} property '${k}' — will be ignored${hint}`);
+    }
+  });
 }
 
 /** A line's draw-on span: `{ start?, end?, mode? }`, each a fraction of its arc length 0..1. */
@@ -1713,7 +1907,7 @@ function validateDraw(d: unknown, path: string, err: (p: string, m: string) => v
     if (v !== undefined && (!isNum(v) || v < 0 || v > 1)) err(`${path}.${k}`, 'must be 0..1 (a fraction of the line\'s length)');
   }
   if (d.mode !== undefined && d.mode !== 'run' && d.mode !== 'each') err(`${path}.mode`, "must be 'run' (one pen run through every subpath, default) | 'each' (every subpath draws at once)");
-  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end' && k !== 'mode') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start, end and mode; will be ignored`);
+  for (const k of Object.keys(d)) if (k !== 'start' && k !== 'end' && k !== 'mode') warn(`${path}.${k}`, 'unknown-property', `unknown draw property '${k}' — draw takes start, end and mode; will be ignored${fieldHint(k, ['start', 'end', 'mode'])}`);
 }
 
 /** `points` for polygon/stroke: 2..24 (or 3..24) unit pairs inside the −1..1 box. */
@@ -1737,7 +1931,7 @@ function validateEase(ease: unknown, path: string, err: (p: string, m: string) =
     err(`${path}.tau`, `must be ${LIMITS.minEaseTau}..${LIMITS.maxEaseTau} ms`);
   }
   for (const k of unknownKeys(ease, new Set(['type', 'tau']))) {
-    warn(`${path}.${k}`, 'unknown-property', `unknown ease property '${k}' — will be ignored`);
+    warn(`${path}.${k}`, 'unknown-property', `unknown ease property '${k}' — will be ignored${fieldHint(k, ['type', 'tau'])}`);
   }
 }
 
@@ -1767,7 +1961,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (isObj(seq) && isObj(seq.bed)) normalizeColors(seq.bed);
   const errors: SpecError[] = [];
   const warnings: SpecWarning[] = [];
-  const err = (path: string, message: string): void => void errors.push({ path, message });
+  const err = (path: string, message: string): void => void errors.push({ path, message: message + enumHint(seq, path, message) });
 
   if (!isObj(seq)) return { valid: false, errors: [{ path: '', message: 'sequence must be an object' }], warnings: [] };
 
@@ -1780,6 +1974,7 @@ export function validateSequence(seq: unknown): ValidationResult {
   if (seq.sync !== undefined && seq.sync !== 'mount' && seq.sync !== 'epoch') err('sync', "must be 'mount' | 'epoch'");
   if (seq.wrapMorph !== undefined && typeof seq.wrapMorph !== 'boolean') err('wrapMorph', 'must be a boolean');
   if (seq.finish !== undefined) validateFinish(seq.finish, 'finish', err, (p, code, message) => void warnings.push({ path: p, code, message }));
+  warnUnknownSequenceKeys(seq, (p, code, message) => void warnings.push({ path: p, code, message }));
 
   if (!Array.isArray(seq.segments) || seq.segments.length === 0) {
     err('segments', 'must be a non-empty array');

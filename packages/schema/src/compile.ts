@@ -8,7 +8,7 @@ import {
   type SaverPlugin,
 } from '@idle-screens/core';
 import { assertValidSpec, assertValidSequence, validateSpec, validateSpecPaths } from './validate';
-import { alphaAt, breakTextBlock, textBlockText, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, type Entity } from './simulate';
+import { alphaAt, breakTextBlock, textBlockText, buildEntities, entityScales, graphemeClusters, headingAt, lifeAlphaAt, lifeStaggerAt, linkEdges, linkMaxDistPx, positionAt, revealState, rotationAt, sizeAt, spriteIndexAt, textBlockAnchorOffset, textMetricsClassFor, trailSince, type Entity } from './simulate';
 import {
   applyDeltasToSpec,
   canonicalSpecPath,
@@ -787,7 +787,7 @@ class SpecInstance implements SaverInstance {
     // echoes are joined into a ribbon, and a shape's echoes stay at their
     // time samples — so neither draws more than the 24 echoes it always did.
     const fill = shaped || hardCircle ? 0 : trailFillBudget(built.entities.length);
-    const echoes = trailEchoes(trail, t, headAlpha, headSize, posAt, w, h, built.layer.wrap !== false, fill, 0, built.layer.blend === 'lighter');
+    const echoes = trailEchoes(trail, t, headAlpha, headSize, posAt, w, h, built.layer.wrap !== false, fill, 0, built.layer.blend === 'lighter', trailSince(e, t));
     if (echoes.length === 0) return;
     const head = posAt(t);
     if (hardCircle) {

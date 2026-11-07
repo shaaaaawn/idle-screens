@@ -1640,9 +1640,19 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "description": "Seeded per-entity offset (px or viewport-units) so entities sharing a path don't stack."
+            },
+            "phase": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1,
+              "description": "Fixed starting point instead of the seeded one: the fraction of the lap at t = 0 (an open path's lap is there and back, so 0.5 is its last point). Entity i of n starts at (phase + i/n) mod 1, and the layer's count is exact (not density-scaled)."
+            },
+            "loop": {
+              "enum": ["loop", "once", "hold"],
+              "description": "'loop' (default) repeats; 'once' runs to the end of its lap (the first point) and rests there; 'hold' runs to the last point and rests there. Until it stops the motion is the loop's. With emit, the pass replays every event."
             }
           },
-          "description": "Choreographed spline motion \u2014 figure-eights, sweeping arcs, patrol routes. Each entity gets a seeded phase offset along the path."
+          "description": "Choreographed spline motion \u2014 figure-eights, sweeping arcs, patrol routes. Each entity gets a seeded phase offset along the path, or a fixed one with phase."
         }
       ]
     },

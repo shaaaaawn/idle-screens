@@ -5,11 +5,13 @@
  * is deliberately STRICTER in one way — unknown properties are rejected to
  * catch authoring typos — so agreement is asserted one-way for valid specs.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { Ajv } from 'ajv';
 import schema from '../saver-spec.schema.json';
-import { EXAMPLE_SPECS } from './examples';
-import { validateSequence, validateSpec } from './validate';
+import { EXAMPLE_SEQUENCES, EXAMPLE_SPECS } from './examples';
+import { SEQUENCE_FIELDS, validateSequence, validateSpec } from './validate';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 const check = ajv.compile(schema);
@@ -307,6 +309,57 @@ describe('saver-spec.schema.json', () => {
     for (const bad of [{ type: 'morph', dur: 600, text: 'dissolve' }, { type: 'fade', dur: 600, text: 'crossfade' }, { type: 'cut', text: 'step' }]) {
       expect(validateSequence(seq(bad)).valid).toBe(false);
       expect(check(seq(bad))).toBe(false);
+    }
+  });
+});
+
+describe('SEQUENCE_FIELDS is the JSON Schema\'s sequence vocabulary (vork-review A7)', () => {
+  // validateSequence warns on any key outside SEQUENCE_FIELDS; the schema
+  // refuses any key outside its `properties`. Pin the two together so the
+  // runtime's warning and the authoring gate cannot drift apart.
+  type Node = { properties?: Record<string, { const?: unknown; properties?: Record<string, unknown> }>; oneOf?: Node[] };
+  const defs = (schema as unknown as { definitions: Record<string, Node> }).definitions;
+  const keys = (n: Node | undefined): string[] => Object.keys(n?.properties ?? {}).sort();
+
+  it('envelope and segment', () => {
+    expect(keys(defs.idleSequence)).toEqual([...SEQUENCE_FIELDS.envelope].sort());
+    expect(keys(defs.sequenceSegment)).toEqual([...SEQUENCE_FIELDS.segment].sort());
+  });
+
+  it('each transition type, and a wipe\'s origin', () => {
+    const branches = (defs.sequenceSegment!.properties!.transition as Node).oneOf ?? [];
+    const byType = Object.fromEntries(branches.map((b) => [String(b.properties?.type?.const), keys(b).filter((k) => k !== 'type')]));
+    expect(Object.keys(byType).sort()).toEqual(Object.keys(SEQUENCE_FIELDS.transition).sort());
+    for (const [type, fields] of Object.entries(SEQUENCE_FIELDS.transition)) {
+      expect([type, byType[type]]).toEqual([type, [...fields].sort()]);
+    }
+    const wipe = branches.find((b) => b.properties?.type?.const === 'wipe')!;
+    expect(Object.keys(wipe.properties!.origin!.properties ?? {}).sort()).toEqual(['x', 'y']);
+  });
+
+  it('a key the schema refuses is one the runtime warns on, and still accepts', () => {
+    const scene = { schemaVersion: 1, id: 's', label: 'S', layers: [{ count: 1, sprite: { kind: 'emoji', glyphs: ['⭐'] }, motion: { type: 'static' } }] };
+    const base = { format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq', loop: false };
+    for (const [seq, path] of [
+      [{ ...base, looop: true, segments: [{ key: 'a', scene }] }, 'looop'],
+      [{ ...base, segments: [{ key: 'a', scene, durration: 2000 }] }, 'segments[0].durration'],
+      [{ ...base, segments: [{ key: 'a', scene, duration: 2000, transition: { type: 'cut', dur: 300 } }, { key: 'b', scene }] }, 'segments[0].transition.dur'],
+    ] as const) {
+      expect(check(seq)).toBe(false);
+      const r = validateSequence(seq);
+      expect(r.valid).toBe(true);
+      expect((r.warnings ?? []).filter((w) => w.code === 'unknown-property').map((w) => w.path)).toEqual([path]);
+    }
+  });
+
+  it('no shipped example or fixture sequence carries an unknown key', () => {
+    const fixture = (name: string): unknown => JSON.parse(readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}`, import.meta.url)), 'utf8'));
+    const all: Array<[string, unknown]> = [
+      ...EXAMPLE_SEQUENCES.map((e) => [e.id, e.sequence] as [string, unknown]),
+      ...['deck.sequence.json', 'snow-white.sequence.json', 'timed/wrap-ident.sequence.json'].map((f) => [f, fixture(f)] as [string, unknown]),
+    ];
+    for (const [name, seq] of all) {
+      expect([name, (validateSequence(seq).warnings ?? []).filter((w) => w.code === 'unknown-property')]).toEqual([name, []]);
     }
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { adviseSpec } from './advise';
-import { motionStats, perceiveScene } from './perceive';
+import { luminanceGrid, motionStats, perceiveScene, type LuminanceGrid } from './perceive';
 import type { SaverSpec } from './types';
 
 // Each case is a third-party report (X-number) of perception reading
@@ -10,6 +10,8 @@ const L = (o: Record<string, unknown>): Record<string, unknown> => ({ count: 1, 
 const scene = (bg: unknown, layers: unknown[], extra: Record<string, unknown> = {}): SaverSpec =>
   ({ schemaVersion: 1, id: 'p', label: 'p', background: typeof bg === 'string' ? { type: 'solid', color: bg } : bg, layers, ...extra }) as unknown as SaverSpec;
 const codes = (s: SaverSpec, w: number, h: number, t?: number): string[] => adviseSpec(s, { width: w, height: h }, t === undefined ? {} : { t }).map((x) => x.code);
+/** Total ink of a grid on a black ground (each cell is the share of it a white shape covers). */
+const mass = (g: LuminanceGrid): number => g.cells.reduce((m, v) => m + v, 0);
 const share = (s: SaverSpec, key: string, w: number, h: number): number =>
   perceiveScene(s, { viewport: { width: w, height: h } }).dominance.find((d) => d.key === key)?.share ?? 0;
 
@@ -21,6 +23,153 @@ describe('perception reads what is on screen', () => {
     ]);
     expect(share(s, 'offscreen', 1080, 1080)).toBe(0);
     expect(perceiveScene(s, { viewport: { width: 1080, height: 1080 } }).colour.hex).toBe('#ff3a4a');
+  });
+
+  it('a thin rule or a short bar adds the colour of its own ink, not of a square as long as it is', () => {
+    // 0.9 × 0.009 of red (or a bar at a twentieth of its 0.9) beside a 0.2 × 0.2 blue tile:
+    // the tile lays ~5× (or ~40×) the ink, so the scene reads blue.
+    const tile = L({ key: 'tile', position: { x: 0.5, y: 0.7 }, sprite: { kind: 'rect', width: [0.2, 0.2], color: '#0000ff' } });
+    const rule = L({ key: 'rule', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.9, 0.9], aspect: [0.01, 0.01], color: '#ff0000' } });
+    const bar = L({ key: 'bar', position: { x: 0.05, y: 0.3 }, sprite: { kind: 'bar', values: [0.05], max: 1, length: 0.9, thickness: 0.02, color: '#ff0000' } });
+    const rgb = (s: SaverSpec) => { const hex = perceiveScene(s, { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); };
+    for (const red of [rule, bar]) {
+      const [r, , b] = rgb(scene('#000000', [red, tile]));
+      expect(b).toBeGreaterThan(r!);
+    }
+    // A square red tile of the same width as the rule still outweighs the blue one.
+    const [r, , b] = rgb(scene('#000000', [L({ key: 'big', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.4, 0.4], color: '#ff0000' } }), tile]));
+    expect(r).toBeGreaterThan(b!);
+  });
+
+  it('every sprite adds colour by the ink it lays down, scaled by its layer transform', () => {
+    const rgb = (layers: unknown[]) => { const hex = perceiveScene(scene('#000000', layers), { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]; };
+    const tile = (side: number) => L({ key: 'tile', position: { x: 0.5, y: 0.8 }, sprite: { kind: 'rect', width: [side, side], color: '#0000ff' } });
+    // A 0.6-wide ring 0.002 thick is 0.0038 of ink, not a 0.36 square: a 0.1 blue tile outweighs it.
+    const ring = L({ key: 'ring', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'ring', radius: [0.3, 0.3], width: 0.002, color: '#ff0000' } });
+    // A triangle of circumradius 0.1 is 0.013 of ink, not 0.04: a 0.15 tile (0.0225) outweighs it.
+    const tri = L({ key: 'tri', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ff0000' } });
+    for (const [red, side] of [[ring, 0.1], [tri, 0.15]] as const) {
+      const [r, , b] = rgb([red, tile(side)]);
+      expect(b).toBeGreaterThan(r);
+    }
+    // A 20-glyph label is a line of ink (~0.02), not one 0.05 glyph square: it outweighs a 0.1 tile.
+    const label = L({ key: 'label', position: { x: 0.5, y: 0.3 }, size: [0.05, 0.05], sprite: { kind: 'text', strings: ['ABCDEFGHIJKLMNOPQRST'], color: '#ff0000' } });
+    const [lr, , lb] = rgb([label, tile(0.1)]);
+    expect(lr).toBeGreaterThan(lb);
+    // A layer drawn at twice the size lays four times the ink.
+    const red = L({ key: 'red', position: { x: 0.3, y: 0.3 }, transform: { scale: 2, origin: 'anchor' }, sprite: { kind: 'rect', width: [0.1, 0.1], color: '#ff0000' } });
+    const [sr, , sb] = rgb([red, tile(0.1)]);
+    expect(sr).toBeGreaterThan(sb * 2);
+  });
+
+  it('a soft circle weighs the ink of its gradient, not a full disc', () => {
+    // The canvas fades a soft disc to 0 at its radius: 0.378 of the disc's area (∫ softProfile · 2u du).
+    const disc = (soft: boolean, color = '#ffffff', y = 0.5) => L({ key: soft ? 'soft' : 'hard', position: { x: soft ? 0.3 : 0.7, y }, sprite: { kind: 'circle', radius: [0.15, 0.15], color, ...(soft ? { soft: true } : {}) } });
+    const area = (layer: unknown) => perceiveScene(scene('#000000', [layer]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    expect(area(disc(true)) / area(disc(false))).toBeCloseTo(0.378, 3);
+    // So a soft red glow beside a hard blue disc of the same size reads blue.
+    const hex = perceiveScene(scene('#000000', [disc(true, '#ff0000'), disc(false, '#0000ff')]), { viewport: { width: 1000, height: 1000 } }).colour.hex;
+    expect(parseInt(hex.slice(5, 7), 16)).toBeGreaterThan(parseInt(hex.slice(1, 3), 16));
+  });
+
+  it('an emoji is clipped to the frame by its turned glyph box', () => {
+    // A 0.2 glyph box centred 0.1 in from the right edge fits; turned 45° its
+    // corner pokes 0.1·(√2 − 1) past the edge, a triangle of that height.
+    const area = (rotate: number) => perceiveScene(scene('#000000', [L({ key: 'fish', position: { x: 0.9, y: 0.5 }, rotate, size: [0.2, 0.2], sprite: { kind: 'emoji', glyphs: ['🐟'] } })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    const over = 100 * (Math.SQRT2 - 1);
+    expect(area(45) / area(0)).toBeCloseTo(1 - (over * over) / (200 * 200), 4);
+    expect(area(90) / area(0)).toBeCloseTo(1, 6);
+  });
+
+  it('every shape is clipped to the frame as it is painted, not as a square about it', () => {
+    // On a 1000 px square frame, the share of each shape's on-screen area (its
+    // dominance area at the edge over the same shape well inside).
+    const share = (sprite: Record<string, unknown>, at: { x: number; y: number }, o: Record<string, unknown> = {}) => {
+      const area = (position: { x: number; y: number }) => perceiveScene(scene('#000000', [L({ key: 'k', position, sprite, ...o })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+      return area(at) / area({ x: 0.5, y: 0.5 });
+    };
+    // A disc whose centre is half its radius in from the edge keeps all but
+    // the segment past it: 1 − (acos ½ − ½·√¾)/π. Its square kept 3/4.
+    const disc = { kind: 'circle', radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(disc, { x: 0.05, y: 0.5 })).toBeCloseTo(1 - (Math.acos(0.5) - 0.5 * Math.sqrt(0.75)) / Math.PI, 4);
+    expect(share(disc, { x: 0, y: 0 })).toBeCloseTo(0.25, 4);
+    // A soft disc keeps more there (its ink is at the centre) — checked against a brute-force sum of its gradient.
+    const soft = { ...disc, soft: true };
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    let inFrame = 0, all = 0;
+    for (let i = 0; i < 400; i++) for (let j = 0; j < 400; j++) {
+      const x = -100 + (i + 0.5) / 2, y = -100 + (j + 0.5) / 2;
+      const v = profile(Math.hypot(x, y) / 100);
+      all += v;
+      if (x + 50 >= 0) inFrame += v;
+    }
+    expect(share(soft, { x: 0.05, y: 0.5 })).toBeCloseTo(inFrame / all, 3);
+    expect(share(soft, { x: 0, y: 0.5 })).toBeCloseTo(0.5, 4);
+    // A thin ring crossing the edge there keeps the arc inside: 2/3 of it.
+    expect(share({ kind: 'ring', radius: [0.1, 0.1], width: 0.0005, color: '#ffffff' }, { x: 0.05, y: 0.5 })).toBeCloseTo(2 / 3, 2);
+    // A triangle centred on the top edge: point up, 5/9 of it hangs inside; point down, 4/9.
+    const tri = { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(tri, { x: 0.5, y: 0 })).toBeCloseTo(5 / 9, 4);
+    expect(share(tri, { x: 0.5, y: 0 }, { rotate: 180 })).toBeCloseTo(4 / 9, 4);
+    // A streak runs back from its head: head 0.1 in from the left edge, 0.2
+    // long, the inner half shows — the brighter half, 3/4 of its fade. Turned to
+    // trail into the frame, all of it.
+    const streak = { kind: 'streak', length: [0.2, 0.2], color: '#ffffff' };
+    expect(share(streak, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(streak, { x: 0.1, y: 0.5 }, { rotate: 180 })).toBeCloseTo(1, 6);
+    // A 0.4 straight stroke centred 0.1 in: level, 3/4 of it is inside; stood upright, all of it.
+    const stroke = { kind: 'stroke', length: [0.4, 0.4], points: [[-1, 0], [1, 0]], curve: 'linear', color: '#ffffff' };
+    expect(share(stroke, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(stroke, { x: 0.1, y: 0.5 }, { rotate: 90 })).toBeCloseTo(1, 6);
+    // A path drawing turned 45° at the right edge loses the corner of its
+    // turned frame past the edge, not of that frame's bounding box.
+    const over = 100 * Math.SQRT2 - 50;
+    expect(share({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: sq }, { x: 0.95, y: 0.5 }, { rotate: 45 })).toBeCloseTo(1 - (over * over) / 40000, 4);
+  });
+
+  it('a soft polygon weighs its gradient, a label every glyph, a drawing the outlines it paints', () => {
+    const view = { viewport: { width: 1000, height: 1000 } };
+    const area = (sprite: Record<string, unknown>, position = { x: 0.5, y: 0.5 }, o: Record<string, unknown> = {}) => perceiveScene(scene('#000000', [L({ key: 'k', position, sprite, ...o })]), view).dominance[0]!.factors.area;
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    // Brute force: the mean gradient over a shape's points inside `keep`, over the same shape's mean.
+    const gradientShare = (inShape: (x: number, y: number) => boolean, r: (x: number, y: number) => number, keep: (x: number, y: number) => boolean = () => true) => {
+      let kept = 0, all = 0, n = 0;
+      for (let i = 0; i < 600; i++) for (let j = 0; j < 600; j++) {
+        const x = -1 + (i + 0.5) / 300, y = -1 + (j + 0.5) / 300;
+        if (!inShape(x, y)) continue;
+        const v = profile(r(x, y));
+        n++; all += v; if (keep(x, y)) kept += v;
+      }
+      return { mean: all / n, kept: kept / all };
+    };
+    // A soft square (circumradius 1, so a diamond's corners touch the gradient's edge) lays this share of its area.
+    const diamond = (x: number, y: number) => Math.abs(x) + Math.abs(y) <= 1;
+    const square = { kind: 'polygon', sides: 4, radius: [0.1, 0.1], color: '#ffffff' };
+    const softSquare = { ...square, soft: true };
+    const bf = gradientShare(diamond, (x, y) => Math.hypot(x, y), (x) => x >= -0.5);
+    expect(area(softSquare) / area(square)).toBeCloseTo(bf.mean, 2);
+    // …and crossing the left edge (centre 0.05 in, half its radius) keeps its brighter middle.
+    expect(area(softSquare, { x: 0.05, y: 0.5 }) / area(softSquare)).toBeCloseTo(bf.kept, 2);
+    // A soft path drawing's gradient is its unit circle: a unit square's corners lie past it.
+    const sqPath = { kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: sq };
+    expect(area({ ...sqPath, soft: true }) / area(sqPath)).toBeCloseTo(gradientShare(() => true, (x, y) => Math.hypot(x, y)).mean, 2);
+    // So a soft red square beside a hard blue one reads blue.
+    const hex = perceiveScene(scene('#000000', [L({ key: 'a', position: { x: 0.3, y: 0.5 }, sprite: { ...softSquare, color: '#ff0000' } }), L({ key: 'b', position: { x: 0.7, y: 0.5 }, sprite: { ...square, color: '#0000ff' } })]), view).colour.hex;
+    expect(parseInt(hex.slice(5, 7), 16)).toBeGreaterThan(parseInt(hex.slice(1, 3), 16));
+
+    // A 96-glyph label lays twice the ink of a 48-glyph one (it was capped at 48).
+    const label = (n: number) => area({ kind: 'text', strings: ['A'.repeat(n)], color: '#ffffff' }, { x: 0.5, y: 0.5 }, { size: [0.005, 0.005] });
+    expect(label(96) / label(48)).toBeCloseTo(2, 6);
+
+    // A drawing's ink, not its frame box: a small square inside a 0.2 frame
+    // whose box crosses the left edge is all on screen; moved to straddle it,
+    // the share of its own square that shows.
+    const inner = { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', path: 'M -0.2 -0.2 L 0.2 -0.2 L 0.2 0.2 L -0.2 0.2 Z' };
+    expect(area(inner, { x: 0.05, y: 0.5 }) / area(inner)).toBeCloseTo(1, 6);
+    expect(area(inner, { x: 0.02, y: 0.5 }) / area(inner)).toBeCloseTo(0.06 / 0.08, 3);
+    // An open stroked line centred on the edge: half its length.
+    const rule = { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', fill: false, path: 'M -1 0 L 1 0', stroke: { color: '#ffffff', width: 0.05 } };
+    expect(area(rule, { x: 0, y: 0.5 }) / area(rule)).toBeCloseTo(0.5, 3);
   });
 
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
@@ -77,6 +226,101 @@ describe('perception reads what is on screen', () => {
     const c = perceiveScene(s, { viewport: { width: 400, height: 400 }, t: 1000 }).centroid!;
     expect(c.x).toBeCloseTo(0.6, 1);
     expect(c.y).toBeGreaterThan(0.55);
+  });
+
+  it('vork-review A6: a rocking polygon swings its ink in the maps, and moves while its centre stands still', () => {
+    // FORMAT.md once said rock (and all sprite rotation) was invisible to
+    // perception; the outline path turns it. The wedge is large enough to be
+    // traced by its outline, and the clock pins the phase: rotationAt is
+    // amp · sin(2πt / period), so +45° at a quarter period, −45° at three.
+    const wedge = (rock?: Record<string, unknown>): SaverSpec => scene('#000000', [L({
+      key: 'sign', position: { x: 0.5, y: 0.5 }, ...(rock ? { rock, clock: { phase: 0 } } : {}),
+      sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#ffffff', path: 'M 0 0 L 0.95 -0.15 L 0.95 0.15 Z' },
+    })]);
+    const at = (s: SaverSpec, t: number) => perceiveScene(s, { viewport: { width: 400, height: 400 }, t });
+    const rocking = wedge({ amp: 45, period: 4000 });
+    expect(at(rocking, 1000).centroid!.y).toBeGreaterThan(0.55); // tip swung down
+    expect(at(rocking, 3000).centroid!.y).toBeLessThan(0.45); // …and up
+    expect(at(rocking, 2000).motion[0]!.moving).toBe(true); // mid-swing, fastest
+    const still = wedge();
+    expect(at(still, 3000).centroid).toEqual(at(still, 1000).centroid);
+    expect(at(still, 2000).motion[0]!.moving).toBe(false);
+    // Motion counts the turn for every shape but a circle or ring, so a
+    // rocking rect moves — and its box swings in the maps with it.
+    const plank = (rock?: Record<string, unknown>): SaverSpec => scene('#000000', [L({
+      key: 'plank', position: { x: 0.5, y: 0.5 }, ...(rock ? { rock, clock: { phase: 0 } } : {}),
+      sprite: { kind: 'rect', width: [0.4, 0.4], aspect: [0.1, 0.1], color: '#ffffff' },
+    })]);
+    expect(at(plank({ amp: 45, period: 4000 }), 2000).motion[0]!.moving).toBe(true);
+    expect(at(plank(), 2000).motion[0]!.moving).toBe(false);
+    expect(at(plank({ amp: 45, period: 4000 }), 1000).braille).not.toBe(at(plank({ amp: 45, period: 4000 }), 3000).braille);
+    expect(at(plank(), 1000).braille).toBe(at(plank(), 3000).braille);
+  });
+
+  it('a turned rect lands in the maps where it is painted: its turned box, not its unturned one or its bounding box', () => {
+    // A plank lying along the bottom edge is all on screen; stood on end —
+    // by `rotate` or by its layer's `transform.rotate` — half of it hangs
+    // below the frame, and the half that shows runs up to y = 0.6.
+    const plank = (o: Record<string, unknown> = {}, y = 0.9): SaverSpec => scene('#000000', [L({ key: 'plank', position: { x: 0.5, y }, sprite: { kind: 'rect', width: [0.6, 0.6], aspect: [0.05, 0.05], color: '#ffffff' }, ...o })]);
+    const centroid = (s: SaverSpec) => perceiveScene(s, { viewport: { width: 400, height: 400 } }).centroid!;
+    expect(centroid(plank()).y).toBeCloseTo(0.9, 2);
+    expect(centroid(plank({ rotate: 90 })).y).toBeCloseTo(0.8, 1);
+    expect(centroid(plank({ transform: { rotate: 90, origin: 'anchor' } })).y).toBeCloseTo(0.8, 1);
+    expect(centroid(plank({ rotate: 90 })).x).toBeCloseTo(0.5, 2);
+    // At 45° it is a diagonal from top-left to bottom-right, so its bounding
+    // box's other two corners stay dark, and it lays the same ink as flat.
+    const grid = (s: SaverSpec) => luminanceGrid(s, { viewport: { width: 400, height: 400 }, cols: 40, rows: 40 });
+    const at = (g: LuminanceGrid, x: number, y: number) => g.cells[Math.floor(y * g.rows) * g.cols + Math.floor(x * g.cols)]!;
+    const flat = grid(plank({}, 0.5));
+    const diag = grid(plank({ rotate: 45 }, 0.5));
+    expect(at(diag, 0.65, 0.65)).toBeGreaterThan(0.5);
+    expect(at(diag, 0.35, 0.35)).toBeGreaterThan(0.5);
+    expect(at(diag, 0.65, 0.35)).toBe(0);
+    expect(at(diag, 0.35, 0.65)).toBe(0);
+    expect(mass(diag) / mass(flat)).toBeCloseTo(1, 3);
+  });
+
+  it('a rect or bar is clipped to the frame by its own turned box, not a width-sided square', () => {
+    const area = (sprite: Record<string, unknown>, o: Record<string, unknown>) => perceiveScene(scene('#000000', [L({ key: 'k', sprite, ...o })]), { viewport: { width: 400, height: 400 } }).dominance[0]!.factors.area;
+    const rect = { kind: 'rect', width: [0.6, 0.6], aspect: [0.05, 0.05], color: '#ffffff' };
+    const whole = area(rect, { position: { x: 0.5, y: 0.5 } });
+    // Lying along the bottom edge it is all on screen; stood on end (by
+    // `rotate` or its layer's `transform.rotate`) 0.33 of its 0.6 shows. A
+    // 0.6 square about it read 55 % for both.
+    expect(area(rect, { position: { x: 0.5, y: 0.97 } }) / whole).toBeCloseTo(1, 3);
+    expect(area(rect, { position: { x: 0.5, y: 0.97 }, rotate: 90 }) / whole).toBeCloseTo(0.33 / 0.6, 3);
+    expect(area(rect, { position: { x: 0.5, y: 0.97 }, transform: { rotate: 90, origin: 'anchor' } }) / whole).toBeCloseTo(0.33 / 0.6, 3);
+    // Across the bottom-right corner at −45° both ends are off screen; only a
+    // 0.015-sided triangle at the corner shows (0.015² of 0.6 × 0.03), where
+    // its square or bounding box would keep a quarter.
+    expect(area(rect, { position: { x: 1, y: 1 }, rotate: -45 }) / whole).toBeCloseTo(0.0125, 4);
+    // A bar turns with its layer's transform too: pointing down from y = 0.9, a tenth of its 0.4 shows.
+    const bar = { kind: 'bar', values: [1], max: 1, length: 0.4, thickness: 0.02, color: '#ffffff' };
+    const flat = area(bar, { position: { x: 0.5, y: 0.9 } });
+    expect(area(bar, { position: { x: 0.5, y: 0.9 }, transform: { rotate: 90, origin: 'anchor' } }) / flat).toBeCloseTo(0.25, 3);
+  });
+
+  it('a thin turned plank keeps its ink at every angle: exact turned-box coverage, no scanline gaps', () => {
+    // 0.96 px tall on 8.3 px grid rows — thinner than one of the four
+    // sub-scanlines a polygon outline is sampled on — and barely tilted.
+    const line = (rotate: number, sprite: Record<string, unknown>) => luminanceGrid(scene('#000000', [L({ key: 'scan', position: { x: 0.5, y: 0.5 }, rotate, sprite })]), { viewport: { width: 400, height: 400 } });
+    const rect = { kind: 'rect', width: [0.6, 0.6], aspect: [0.004, 0.004], color: '#ffffff' };
+    const bar = { kind: 'bar', values: [1], max: 1, length: 0.4, thickness: 0.002, color: '#ffffff' };
+    for (const sprite of [rect, bar]) {
+      const level = mass(line(0, sprite));
+      for (const angle of [0.5, 2, 5, 37, 45, 90, 180]) expect(mass(line(angle, sprite)) / level).toBeCloseTo(1, 2);
+    }
+    // Measured by its turned box's bounding box, as before, its coverage ballooned at 37°.
+    expect(line(37, bar).coverage).toBeLessThan(line(0, bar).coverage * 2);
+  });
+
+  it('text turns about its anchor in the maps, as the renderer turns it', () => {
+    // A left-aligned label runs right of its anchor; turned a quarter it runs down.
+    const label = (rotate: number) => perceiveScene(scene('#000000', [L({ key: 'cap', position: { x: 0.5, y: 0.3 }, rotate, size: [0.08, 0.08], sprite: { kind: 'text', strings: ['VERTICAL'], align: 'left', color: '#ffffff' } })]), { viewport: { width: 400, height: 400 } }).centroid!;
+    expect(label(0).x).toBeGreaterThan(0.6);
+    expect(label(0).y).toBeCloseTo(0.3, 1);
+    expect(label(90).x).toBeCloseTo(0.5, 1);
+    expect(label(90).y).toBeGreaterThan(0.4);
   });
 
   it('X603: a vertical caption is judged by its rotated box', () => {

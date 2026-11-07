@@ -55,7 +55,8 @@ live steers), `rock`, `life.stagger`, `reveal.rise`, `textBlock.number`, the
 `wipe` transition, `scenePeriod` and the `loop-seam` advisory
 (2026-10-25 — motion vocabulary); path paint on `points` polygons,
 `textBlock.number.minDigits`, `stroke.draw.mode` and `transform.scaleY`
-(2026-10-27 — small format adds).
+(2026-10-27 — small format adds); `phase` and `loop` (`once` / `hold`) on
+`path` motion (2026-11-06 — choreographed paths).
 
 ## Safety invariants
 
@@ -155,6 +156,12 @@ its `unknown-property` warning: `delay` on a layer names `life.enter`,
 `duration` on a timeline key names `dur`, `fps` or `bpm` at the top level
 says a scene is a pure function of time in ms. The code and path are the
 same as any unknown field's; only the message says what to write instead.
+Otherwise the message names where an exact name does belong (`sway` on a
+drift: "belongs to motion type 'rise'"; `speed` on a layer: "belongs inside
+`motion`"), or the one known field a typo is nearest (`raduis`: "did you mean
+'radius'?"). Enum errors (`blend: 'lightr'`) and timeline keys on a path that
+does not resolve suggest the same way. Two equally close names suggest
+neither.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
@@ -365,7 +372,7 @@ on the sprite tier (the `basic` tier rule).
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
 | `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** rendered |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Rotation is not in the luminance grid, so perception does not see it. **Native:** rendered |
+| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Perception counts the swing as motion for every sprite but a circle or ring, and turns the sprite with it in the luminance maps: a `rect`, `bar`, text box or emoji box by its turned box, a `stroke` and a `streak` along their turned path, a `polygon` by its outline once it is large enough to be traced (see **Seeing without eyes — the perception API**). **Native:** rendered |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` (`gap`: a number or `{x?, y?}`) | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}` — a list is one column, so only its `y`, the row pitch, applies). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
@@ -728,7 +735,7 @@ fractions of `min(w, h)` like every size (px under `units: "px"`).
 | `orbit` | **`speed`**, **`radius`**, `center` | `speed` [min,max] **degrees** per second (negative turns the other way, ≤ 180); `radius` [min,max]; `center` `{x, y}` 0..1 or `{layer}` |
 | `wander` | **`speed`**, `angle`, `meander`, `coherence`, `ease` | `speed` [min,max] per second; `angle` degrees (omit for a seeded heading); `meander` amplitude ≤ 0.463; `coherence` 0..1 |
 | `warp` | **`speed`**, `center` | `speed` [min,max] **depth-units** per second (≤ 1.5); `center` `{x, y}` 0..1 |
-| `path` | **`points`**, **`duration`**, `curve`, `closed`, `scatter` | `points` 2..24 `{x, y}` 0..1; `duration` ms per lap (≥ 2000); `curve` `"smooth"` \| `"linear"`; `closed` boolean; `scatter` > 0 |
+| `path` | **`points`**, **`duration`**, `curve`, `closed`, `scatter`, `phase`, `loop` | `points` 2..24 `{x, y}` 0..1; `duration` ms per lap (≥ 2000); `curve` `"smooth"` \| `"linear"`; `closed` boolean; `scatter` > 0; `phase` 0 ≤ phase < 1; `loop` `"loop"` \| `"once"` \| `"hold"` |
 
 `ease` is `{ "type": "settle" | "buoyant", "tau": ms }` (below). `bob` and
 `sway` warn `motion-amplitude` above 0.25: `bob: 4` swings the layer four
@@ -765,6 +772,50 @@ screen-heights each way, a px value written into a viewport-unit spec.
   rather than writing `0`); each entity gets a seeded phase along it. A single
   entity cannot show a curve — use `count` ≥ 12 (plus `trail`/`ghosting`) to
   make the whole path read
+- **Choreographed paths** — `{ "type": "path", "points": [...], "duration": 6000, "phase": 0, "loop": "hold" }`:
+  - **`phase`** fixes where on its lap the entity is at t = 0 (0 ≤ phase < 1,
+    a fraction of the lap), in place of the seeded phase. A closed lap passes
+    point *k* of *n* at `k / n`; an open lap is there and back, so it reaches
+    its last point at 0.5 and passes point *k* at `k / (n − 1) / 2` on the
+    way out. With `count` > 1, entity *i* starts at `(phase + i / count) mod 1`
+    — an evenly spaced procession — and the layer's `count` is exact: a
+    fixed-phase layer is never thinned or thickened by viewport density (as
+    a grid is not), so a count-1 dancer stays one dancer on a 4K wall. The
+    seeded draw is still consumed, so declaring `phase` moves no other
+    seeded value (at the reference viewport; elsewhere it can change how many
+    entities the layer builds, as changing `count` would).
+  - **`loop`** says where the motion stops. `"loop"` (default) never does:
+    closed paths go round, open ones ping-pong. `"once"` runs to the end of
+    its lap — back at the first point — and rests there. `"hold"` runs to the
+    **last** point and rests there: arrive and stay (a closed path does not
+    run its closing segment). An entity that starts past its stopping point
+    gets there on the next lap. Until it stops, the motion is exactly the
+    loop's — the same speed and the same knot times — so switching `loop`
+    changes only where it ends. It stops at speed: put the last two points
+    close together to decelerate into the rest. A resting `streak` or
+    oriented `stroke` keeps the heading it arrived with.
+  - **Time.** The pass is counted from scene time 0 — a pure function of
+    `t`, so seeks, `renderFrame(t)`, previews and ghosting warm-ups agree, and
+    seeking back before the stop shows it moving again. In a sequence that is
+    the segment's own clock: each segment starts its pass when it starts.
+    A looping `timeline` does not replay the pass (scene time keeps running
+    past the lap; `adviseSpec` notes it as `path-runs-once`), and a layer
+    `clock` never touches path timing. With
+    **`emit`**, the pass replays from `phase` on every event (as `ease`
+    restarts its travel) — a meteor that crosses on each event; its `trail`
+    starts at the event, so it never ribbons back across the replay. Without
+    `emit` a scene with a `once` / `hold` path has no repeat period.
+  - **Steering.** `phase` is a number, so `setParam` glides it — numerically:
+    0.9 → 0.1 runs back through the lap, it does not cross the seam. Because
+    `motion` is structural the scene is re-placed every frame of the glide
+    (the cost of any structural glide); nothing re-seeds, since the draw is
+    kept, so only that layer's entities move. A `timeline` key on `phase`
+    glides the same way and does not warn `timeline-structural-key`. `loop` is
+    an enum: a steer on it steps, and it is not listed in `steerablePaths`
+    (like `curve`). Two sequence segments that differ in `phase` are not
+    structural twins, so a `morph` between them falls back to a cut, with a
+    `morph-structural-mismatch` warning.
+  - **Native:** rendered (tvOS / iOS place, stop and orient the same way).
 
 All speeds are ranges; each entity draws its own value (seeded).
 
@@ -1137,7 +1188,22 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
 A `timeline` is resolved at the sample time `t` before anything is measured,
 so every output below describes the scene as it is at that moment of the
 piece. Layer `opacity` scales a layer's ink and weight; a layer `transform`
-moves and scales its positions and sizes (sprite rotation is not modelled).
+moves, scales and turns its positions and sizes.
+
+Sprite rotation (`spin`, `rotate`, `rock`, and a layer's or group's
+`transform.rotate`) turns sprites in the luminance maps as the renderer turns
+them, about their entity. A `rect`, `bar`, `text`, `textBlock` and `emoji`
+count by their **turned box**: the exact share of each grid cell the box
+covers, not its bounding box. So a thin plank at 45° reads as a diagonal
+line, and a left-aligned label turned a quarter runs down from its anchor. A
+glyph box is still a box: the maps show where text lies, not its letterforms.
+A `stroke` and a `streak` turn along their path. A `polygon` turns once it is
+large enough to be traced by its outline (about 3 grid cells across, or a
+path drawing with a `span` or `origin`); a smaller one is measured as its
+circumscribed disc, which turning does not change. Motion counts the turn as
+well: a spinning or rocking sprite's turn counts toward its speed for every
+kind but a circle or ring (which look the same turned), even when its centre
+stands still.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
   **`t` is in milliseconds** (the MCP `previewScene` tool takes seconds and
@@ -1166,7 +1232,14 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   (area × alpha × contrast × glow/motion boosts; links and persistence ink —
   trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
-  line-salience boost so they aren't crushed by filled discs.
+  line-salience boost so they aren't crushed by filled discs; a `soft` circle
+  or polygon counts the ink of its gradient (about 38 % of a disc), and a
+  label every glyph it paints. A shape's base area counts only where it lands
+  in the frame, clipped as it is painted and turned: a circle as its disc (a
+  soft one by its gradient), a ring as its stroke, a `rect`, `bar` or `emoji`
+  as its box, a polygon as its outline (a path drawing as its parts' fills and
+  strokes), a streak along its fade, a stroke along its path (text boxes and
+  persistence ink are not clipped).
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
@@ -1238,6 +1311,9 @@ moves and scales its positions and sizes (sprite rotation is not modelled).
   `life-runs-once` (informational) notes a layer whose `life` envelope sits
   under a looping timeline: `life` runs on scene time from mount, so it plays
   once and never replays when the lap wraps.
+  `path-runs-once` (informational) is the same note for a `path` with
+  `loop: "once"` or `"hold"` (and no `emit`): its pass runs on scene time, so
+  its pass is not replayed when the timeline loops.
   `uniform-motion` fires when every entity of a moving layer travels at
   nearly the same on-screen speed; an orbit's is its angular speed × its
   radius, so one angular speed over a spread of radii is not uniform.
@@ -1302,7 +1378,9 @@ reported directly.
 **Colour is its own channel.** `perceiveScene(...).colour` and
 `diffScenes(...).colour` carry the hue / saturation / warmth (red minus blue,
 −1 cold … 1 warm) of the alpha × area weighted sprite mass and of the
-background plate. Judge "warmer / cooler" on `colour.warmthDelta`, not on
+background plate. Each sprite counts by the ink it lays down (scaled by its
+layer's `transform.scale`), so a thin line adds a sliver of colour however
+long it is, and a label counts by its whole line of glyphs. Judge "warmer / cooler" on `colour.warmthDelta`, not on
 `meanLuminance` — plausible cool tones weigh MORE under luma than the reds they
 replace, so a calming edit pushes luminance up. `diffScenes` also reports a
 `motion` channel (overall and per-layer speed deltas with headings) and
@@ -1337,12 +1415,21 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
 be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
 the final segment may omit duration (holds indefinitely).
 
+**Unknown fields** on the envelope, a segment or a transition are ignored with
+an `unknown-property` warning, as they are in a scene (a warning, never an
+error, so a stored sequence keeps loading). The exception is `text` on a
+non-`morph` transition, which is invalid and reported as an error. A scene
+field written one level too high, such
+as `motionIntensity` on the envelope or `ghosting` on a segment, does nothing
+there: it belongs inside each segment's `scene`, or in the `bed`.
+
 **Advance mode:** `auto` (default) and `either` advance on the timer. `input`
 makes a timed segment **hold** at the end of its `duration` until a
 `sequence.segment` steer releases it — the clicker (see Steering below). The
 held scene keeps animating (its `localT` keeps growing), so a slide waiting for
 the presenter never freezes. A durationless final segment holds regardless of
-`advance`.
+`advance`. **Native:** tvOS holds the same way and takes the
+`sequence.segment` cue, including a kept cue when a screen mounts.
 
 **Transitions:** `{ type: 'cut' }` (default) performs a hard switch.
 `{ type: 'morph', dur: number, text?: 'step' | 'crossfade' | 'dip' }` interpolates

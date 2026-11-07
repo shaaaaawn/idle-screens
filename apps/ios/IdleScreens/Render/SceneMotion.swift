@@ -48,7 +48,7 @@ enum SceneMotion {
 
         case "path" where entity.path != nil:
             let p = entity.path!
-            let pt = pathPoint(p, at: t, in: size)
+            let pt = pathPoint(p, at: t, in: size, emit: entity.emit)
             return CGPoint(x: pt.x + p.offX * dim, y: pt.y + p.offY * dim)
 
         case "orbit":
@@ -128,8 +128,24 @@ enum SceneMotion {
     static func heading(of entity: CompiledEntity, at t: TimeInterval, in size: CGSize, dim: CGFloat,
                         wrap: Bool, parent: CompiledEntity? = nil) -> Double? {
         let step = 0.032
-        let t1 = t < step ? t + step : t
-        let a = position(of: entity, at: t1 - step, in: size, dim: dim, wrap: wrap, parent: parent)
+        var t0: TimeInterval, t1: TimeInterval
+        if let p = entity.path, let stop = p.stop,
+           case let tl = pathPassMs(at: t, emit: entity.emit),
+           case let tStop = (stop - p.phase) * p.duration, tl > tStop {
+            // At rest the difference is zero: keep the heading it arrived with,
+            // sampled one-sided over the last step of the pass.
+            if tStop <= 0 { return nil }
+            let base = t - tl / 1000
+            t1 = base + tStop / 1000
+            t0 = base + Swift.max(0, tStop / 1000 - step)
+        } else {
+            // Under `emit` a stopping path restarts every event: look forward, not
+            // back across the restart jump, for the first step of each pass.
+            let lead = entity.path?.stop != nil ? pathPassMs(at: t, emit: entity.emit) / 1000 : t
+            t1 = lead < step ? t + step : t
+            t0 = t1 - step
+        }
+        let a = position(of: entity, at: t0, in: size, dim: dim, wrap: wrap, parent: parent)
         let b = position(of: entity, at: t1, in: size, dim: dim, wrap: wrap, parent: parent)
         let dx = b.x - a.x, dy = b.y - a.y
         if abs(dx) > size.width / 2 || abs(dy) > size.height / 2 { return nil }
@@ -169,14 +185,22 @@ enum SceneMotion {
 
     /// Position along a path loop at `t` (seconds), in view pixels. Closed
     /// loops cycle; open ones ping-pong so they reverse instead of teleporting.
-    static func pathPoint(_ p: PathParams, at t: TimeInterval, in size: CGSize) -> CGPoint {
+    static func pathPoint(_ p: PathParams, at t: TimeInterval, in size: CGSize,
+                          emit: EmitParams? = nil) -> CGPoint {
         let n = p.points.count
         guard n >= 2 else {
             let only = p.points.first ?? (x: 0.5, y: 0.5)
             return CGPoint(x: only.x * size.width, y: only.y * size.height)
         }
-        var s = (t * 1000 / p.duration + p.phase).truncatingRemainder(dividingBy: 1)
-        if s < 0 { s += 1 }
+        var s: Double
+        if let stop = p.stop {
+            // once / hold: the loop's own lap progress, stopped at `stop`.
+            s = Swift.min(p.phase + pathPassMs(at: t, emit: emit) / p.duration, stop)
+                .truncatingRemainder(dividingBy: 1)
+        } else {
+            s = (t * 1000 / p.duration + p.phase).truncatingRemainder(dividingBy: 1)
+            if s < 0 { s += 1 }
+        }
         if !p.closed {
             let pp = s * 2
             s = pp < 1 ? pp : 2 - pp
@@ -200,6 +224,26 @@ enum SceneMotion {
             fy = p1.y + (p2.y - p1.y) * local
         }
         return CGPoint(x: fx * size.width, y: fy * size.height)
+    }
+
+    /// simulate.ts `trailSince` (seconds): under `emit` a once / hold path
+    /// replays its pass every event, jumping back to `phase`, so its trail
+    /// starts at the event; every other entity's at the clock's start, 0.
+    static func trailSince(of e: CompiledEntity, at t: TimeInterval) -> TimeInterval {
+        guard let p = e.path, p.stop != nil, let emit = e.emit, emit.every > 0 else { return 0 }
+        return t - pathPassMs(at: t, emit: emit) / 1000
+    }
+
+    /// simulate.ts `pathPassTime`: ms into a once / hold pass — scene time,
+    /// or with `emit` the time into the current event (each event replays
+    /// the pass). Never negative.
+    static func pathPassMs(at t: TimeInterval, emit: EmitParams?) -> Double {
+        var tl = t * 1000
+        if let emit, emit.every > 0 {
+            tl = ((tl - emit.phase).truncatingRemainder(dividingBy: emit.every) + emit.every)
+                .truncatingRemainder(dividingBy: emit.every)
+        }
+        return tl > 0 ? tl : 0
     }
 
     static func catmullRom(_ p0: Double, _ p1: Double, _ p2: Double,

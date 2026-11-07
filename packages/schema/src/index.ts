@@ -3,6 +3,7 @@ export * from './validate';
 export * from './simulate';
 export * from './compile';
 export * from './steer';
+export { nearest, nearestPath } from './nearest';
 export * from './advise';
 export * from './cohesion';
 export * from './describe';
