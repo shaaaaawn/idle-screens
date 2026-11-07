@@ -390,7 +390,9 @@ describe('validateSequence — unknown keys (vork-review A7)', () => {
     expect(r.valid).toBe(true);
     expect(r.errors).toEqual([]);
     expect(paths(s)).toEqual(['looop', 'segments[0].advnce', 'segments[0].transition.ease']);
-    expect(unknowns(s).find((w) => w.path === 'looop')!.message).toBe("unknown sequence property 'looop' — will be ignored");
+    // #122: the original wording, with the nearest field appended.
+    expect(unknowns(s).find((w) => w.path === 'looop')!.message).toBe("unknown sequence property 'looop' — will be ignored — did you mean 'loop'?");
+    expect(unknowns(s).find((w) => w.path === 'segments[0].advnce')!.message).toBe("unknown segment property 'advnce' — will be ignored — did you mean 'advance'?");
   });
 
   it('points a scene field written one level too high at the scene', () => {

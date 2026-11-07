@@ -9,6 +9,7 @@ import { LIMITS, type IdleSequence, type SaverSpec, type SpriteSpec } from './ty
 // Cycle (validate.ts imports structuralSignature from here) is safe: neither
 // module touches the other's exports at load time, only inside functions.
 import { ignoredPropertyPaths } from './validate';
+import { nearestPath } from './nearest';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -495,6 +496,29 @@ export function steerablePaths(spec: unknown): string[] {
   const ignored = ignoredPropertyPaths(spec);
   if (ignored.length === 0) return out;
   return out.filter((p) => !ignored.some((ig) => p === ig || p.startsWith(`${ig}.`)));
+}
+
+/**
+ * The steerable path a path that does not resolve was most likely meant to be
+ * (#122) — `layers.0.speed` → `layers.0.motion.speed`, `layers.0.sprite.radious`
+ * → `layers.0.sprite.radius` — or undefined when none is clearly closest
+ * (`nearestPath`'s rule: a tie suggests nothing). A path that starts with a
+ * layer's key (`fireflies.speed`) is matched as that layer's and answered in
+ * the same form (`fireflies.motion.speed`). For the timeline-key error here
+ * and idle-server's setParam/setTrack unknown-path errors, so both suggest
+ * by one rule.
+ */
+export function suggestSpecPath(spec: unknown, path: string): string | undefined {
+  const candidates = steerablePaths(spec);
+  const [head, ...rest] = path.split('.');
+  const layers = (spec as { layers?: unknown } | null)?.layers;
+  const idx = head !== undefined && head !== 'layers' && head !== 'background' && Array.isArray(layers)
+    ? layers.findIndex((l) => !!l && typeof l === 'object' && (l as Record<string, unknown>).key === head)
+    : -1;
+  if (idx === -1) return nearestPath(path, candidates);
+  const prefix = `layers.${idx}.`;
+  const hit = nearestPath(prefix + rest.join('.'), candidates);
+  return hit?.startsWith(prefix) ? `${head}.${hit.slice(prefix.length)}` : hit;
 }
 
 /**

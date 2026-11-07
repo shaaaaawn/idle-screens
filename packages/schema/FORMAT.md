@@ -155,6 +155,12 @@ its `unknown-property` warning: `delay` on a layer names `life.enter`,
 `duration` on a timeline key names `dur`, `fps` or `bpm` at the top level
 says a scene is a pure function of time in ms. The code and path are the
 same as any unknown field's; only the message says what to write instead.
+Otherwise the message names where an exact name does belong (`sway` on a
+drift: "belongs to motion type 'rise'"; `speed` on a layer: "belongs inside
+`motion`"), or the one known field a typo is nearest (`raduis`: "did you mean
+'radius'?"). Enum errors (`blend: 'lightr'`) and timeline keys on a path that
+does not resolve suggest the same way. Two equally close names suggest
+neither.
 
 Rules the JSON Schema cannot fully express (the runtime enforces them):
 total entities across all layers ≤ 800; every `[min, max]` range must satisfy
