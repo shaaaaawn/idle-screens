@@ -338,6 +338,93 @@ function polygonCellCoverage(
   return cov;
 }
 
+/** The part of convex polygon `pts` where `axis` is ≥ `v` (`above`) or ≤ `v` — one Sutherland–Hodgman plane. */
+function clipConvex(pts: Array<{ x: number; y: number }>, axis: 'x' | 'y', v: number, above: boolean): Array<{ x: number; y: number }> {
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const dp = above ? p[axis] - v : v - p[axis];
+    const dq = above ? q[axis] - v : v - q[axis];
+    if (dp >= 0) out.push(p);
+    if ((dp >= 0) !== (dq >= 0)) {
+      const k = dp / (dp - dq);
+      out.push({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k });
+    }
+  }
+  return out;
+}
+
+/** The height of convex polygon `pts` along the vertical line at `x` (0 where it misses). */
+function convexHeightAt(pts: Array<{ x: number; y: number }>, x: number): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    const dp = p.x - x;
+    const dq = q.x - x;
+    // An edge lying on the line (dp = dq = 0) is skipped: its neighbours count its ends.
+    if (dp * dq > 0 || dp === dq) continue;
+    const y = p.y + (dp / (dp - dq)) * (q.y - p.y);
+    lo = Math.min(lo, y);
+    hi = Math.max(hi, y);
+  }
+  return hi > lo ? hi - lo : 0;
+}
+
+/**
+ * Fraction of each cell in the window [c0..c1]×[r0..r1] that a CONVEX polygon
+ * covers, row-major within the window — exact. For a turned box (rect, bar, a
+ * text box), where `polygonCellCoverage`'s POLYGON_SCANLINES sub-scanlines
+ * would miss, or double, a plank thinner than a quarter cell tilted a few
+ * degrees off level. Each grid row clips the polygon to its band; between
+ * two of the band's vertex x's both its chains are straight, so its height
+ * is linear there and its area left of any column edge is a sum of
+ * trapezoids — a cell's share is the difference at its two edges.
+ */
+function convexCellCoverage(
+  pts: Array<{ x: number; y: number }>,
+  cellW: number,
+  cellH: number,
+  c0: number,
+  c1: number,
+  r0: number,
+  r1: number,
+): Float64Array {
+  const nc = c1 - c0 + 1;
+  const cov = new Float64Array(nc * (r1 - r0 + 1));
+  const cellA = cellW * cellH;
+  for (let r = r0; r <= r1; r++) {
+    const band = clipConvex(clipConvex(pts, 'y', r * cellH, true), 'y', (r + 1) * cellH, false);
+    if (band.length < 3) continue;
+    const xs = band.map((q) => q.x).sort((m, n) => m - n);
+    const hs = xs.map((x) => convexHeightAt(band, x));
+    const cum = [0];
+    for (let k = 1; k < xs.length; k++) cum.push(cum[k - 1]! + ((hs[k - 1]! + hs[k]!) / 2) * (xs[k]! - xs[k - 1]!));
+    const n = xs.length - 1;
+    let k = 0;
+    // Area left of x; x only grows along a row, so the segment index does too.
+    const areaLeft = (x: number): number => {
+      if (x <= xs[0]!) return 0;
+      while (k < n && xs[k + 1]! <= x) k++;
+      if (k === n) return cum[n]!;
+      const hx = hs[k]! + ((hs[k + 1]! - hs[k]!) * (x - xs[k]!)) / (xs[k + 1]! - xs[k]!);
+      return cum[k]! + ((hs[k]! + hx) / 2) * (x - xs[k]!);
+    };
+    const first = Math.max(c0, Math.floor(xs[0]! / cellW));
+    const last = Math.min(c1, Math.floor(xs[n]! / cellW));
+    let left = areaLeft(first * cellW);
+    for (let c = first; c <= last; c++) {
+      const next = areaLeft((c + 1) * cellW);
+      const f = (next - left) / cellA;
+      if (f > 0) cov[(r - r0) * nc + (c - c0)] = Math.min(1, f);
+      left = next;
+    }
+  }
+  return cov;
+}
+
 // ---------------------------------------------------------------------------
 // Luminance grid
 // ---------------------------------------------------------------------------
@@ -432,6 +519,8 @@ function discCellInk(cx: number, cy: number, rOuter: number, rInner: number, sof
  * re-uses drawTrail's sampling — past positions with decaying alpha and
  * shrinking radius. Polygons larger than POLYGON_OUTLINE_CELLS are scanned by
  * their real (rotated) outline; smaller ones splat as a fill-weighted disc.
+ * Boxes — rect, bar, text, textBlock, emoji — turn with their entity and
+ * light the exact area of the turned box in each cell.
  * Remaining approximations (documented, deliberate): background drift is
  * sampled at its rest position. Good enough to perceive composition, focus,
  * balance — and now smear.
@@ -528,6 +617,56 @@ export function luminanceGrid(
     if (blend === 'lighter' || blend === 'screen') cells[idx] = Math.min(1, cur + lum * a);
     else if (blend === 'multiply') cells[idx] = cur * (1 - a * (1 - lum));
     else cells[idx] = cur * (1 - a) + lum * a;
+  };
+
+  // A filled box — fillRect for a rect or bar, the glyph box of text, a
+  // textBlock or an emoji — centred at (cx, cy) before the turn, turned by
+  // `rot` about the entity at `p` (the renderer's translate, then rotate),
+  // and lit in each cell by the area it covers there. Square to the grid (any
+  // quarter turn) that is the box's overlap with each cell; turned, the exact
+  // overlap of its four-corner outline — not its bounding box, which lit a
+  // thin 37° plank with ten times its ink.
+  const splatBox = (p: { x: number; y: number }, cx: number, cy: number, hx: number, hy: number, rot: number, lum: number, a: number, blend: LayerSpec['blend']): void => {
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const ox = cx - p.x;
+    const oy = cy - p.y;
+    const tx = p.x + ox * cr - oy * sr;
+    const ty = p.y + ox * sr + oy * cr;
+    const level = Math.abs(sr) < 1e-9;
+    if (level || Math.abs(cr) < 1e-9) {
+      const ex = level ? hx : hy;
+      const ey = level ? hy : hx;
+      const r0 = Math.max(0, Math.floor((ty - ey) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((ty + ey) / cellH));
+      const c0 = Math.max(0, Math.floor((tx - ex) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((tx + ex) / cellW));
+      for (let r = r0; r <= r1; r++) {
+        const fy = Math.max(0, Math.min((r + 1) * cellH, ty + ey) - Math.max(r * cellH, ty - ey)) / cellH;
+        if (fy <= 0) continue;
+        for (let c = c0; c <= c1; c++) {
+          const fx = Math.max(0, Math.min((c + 1) * cellW, tx + ex) - Math.max(c * cellW, tx - ex)) / cellW;
+          if (fx > 0) compose(r * cols + c, lum, a * fx * fy, blend);
+        }
+      }
+      return;
+    }
+    const ex = Math.abs(hx * cr) + Math.abs(hy * sr);
+    const ey = Math.abs(hx * sr) + Math.abs(hy * cr);
+    const c0 = Math.max(0, Math.floor((tx - ex) / cellW));
+    const c1 = Math.min(cols - 1, Math.floor((tx + ex) / cellW));
+    const r0 = Math.max(0, Math.floor((ty - ey) / cellH));
+    const r1 = Math.min(rows - 1, Math.floor((ty + ey) / cellH));
+    if (!(c0 <= c1 && r0 <= r1)) return;
+    const corners = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(([u, v]) => ({ x: tx + u! * cr - v! * sr, y: ty + u! * sr + v! * cr }));
+    const cov = convexCellCoverage(corners, cellW, cellH, c0, c1, r0, r1);
+    const nc = c1 - c0 + 1;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const f = cov[(r - r0) * nc + (c - c0)]!;
+        if (f > 0) compose(r * cols + c, lum, a * f, blend);
+      }
+    }
   };
 
   // Afterglow behind a moving entity — the analytic mirror of the renderer's
@@ -785,17 +924,11 @@ export function luminanceGrid(
         if (len <= 0) continue;
         const th = e.size2 !== undefined ? e.size2 * (e.size > 0 ? sz / e.size : 1) : sz * 0.2;
         const box = barBox(s.direction ?? 'right', len, th);
-        // The renderer rotates the bar about the entity with `spin`; rotate
-        // the box's offset the same way and take the rotated box's AABB.
-        const rot = rotationAt(e, tPass) + paintRotation(spec, layer);
-        const cr = Math.cos(rot);
-        const sr = Math.sin(rot);
-        centerX = p.x + box.cx * cr - box.cy * sr;
-        centerY = p.y + box.cx * sr + box.cy * cr;
-        halfX = Math.abs(box.halfX * cr) + Math.abs(box.halfY * sr);
-        halfY = Math.abs(box.halfX * sr) + Math.abs(box.halfY * cr);
+        centerX = p.x + box.cx;
+        centerY = p.y + box.cy;
+        halfX = box.halfX;
+        halfY = box.halfY;
       }
-      const circular = s.kind === 'circle' || s.kind === 'ring' || s.kind === 'polygon';
       const soft = (s.kind === 'circle' || s.kind === 'polygon') && !!s.soft;
       // A small polygon (under POLYGON_OUTLINE_CELLS) fills only part of its
       // disc; a feathered rect only part of its box. Scale the splat weight
@@ -805,12 +938,6 @@ export function luminanceGrid(
         : s.kind === 'rect' && s.feather
           ? (1 - s.feather / 2) * (1 - s.feather / 2)
           : 1;
-      // The canvas draws a soft sprite as a radial gradient that ends AT its
-      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
-      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
-      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
-      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
-      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
       // Glyphs don't fill their box — ink is sparse. A revealing textBlock
       // has proportionally less ink lit.
       const inkWeight = (s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock' ? 0.55 : 1)
@@ -818,26 +945,29 @@ export function luminanceGrid(
       // rect and bar are fillRect: the canvas paints each cell in proportion
       // to the area the box covers. Without this a 2 px scan line darkened
       // its whole 22 px grid row at full alpha, and 270 of them read as a
-      // black veil (mean 0.035 where the canvas paints 0.41).
-      const byArea = s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock';
+      // black veil (mean 0.035 where the canvas paints 0.41). Every box turns
+      // about its entity as the renderer turns it — rotate, spin, rock and a
+      // layer's or group's transform.rotate — text and emoji included.
+      if (s.kind === 'rect' || s.kind === 'bar' || s.kind === 'text' || s.kind === 'emoji' || s.kind === 'textBlock') {
+        splatBox(p, centerX, centerY, halfX, halfY, rotationAt(e, tPass) + paintRotation(spec, layer), lum, a * inkWeight * shapeWeight, layer.blend);
+        continue;
+      }
+      // The canvas draws a soft sprite as a radial gradient that ends AT its
+      // radius (compile.ts), additive or not — no halo (perception-lab S1-03b).
+      const c0 = Math.max(0, Math.floor((centerX - halfX) / cellW));
+      const c1 = Math.min(cols - 1, Math.floor((centerX + halfX) / cellW));
+      const r0 = Math.max(0, Math.floor((centerY - halfY) / cellH));
+      const r1 = Math.min(rows - 1, Math.floor((centerY + halfY) / cellH));
+      // What is left is round: a circle, a ring, a polygon too small to trace.
+      const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
       for (let r = r0; r <= r1; r++) {
-        const fy = byArea ? Math.max(0, Math.min((r + 1) * cellH, centerY + halfY) - Math.max(r * cellH, centerY - halfY)) / cellH : 1;
-        if (fy <= 0) continue;
         for (let c = c0; c <= c1; c++) {
-          if (circular) {
-            const inner = s.kind === 'ring' ? Math.max(0, halfX - (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) : 0;
-            // The canvas averages each cell, so a disc (or ring) that covers a
-            // quarter of a cell moves that cell's mean by a quarter of its
-            // contrast — light it by the ink it lays there, as rect/bar are.
-            const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
-            if (wgt <= 0) continue;
-            compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
-          } else if (byArea) {
-            const fx = Math.max(0, Math.min((c + 1) * cellW, centerX + halfX) - Math.max(c * cellW, centerX - halfX)) / cellW;
-            if (fx > 0) compose(r * cols + c, lum, a * inkWeight * shapeWeight * fx * fy, layer.blend);
-          } else {
-            compose(r * cols + c, lum, a * inkWeight * shapeWeight, layer.blend);
-          }
+          // The canvas averages each cell, so a disc (or ring) that covers a
+          // quarter of a cell moves that cell's mean by a quarter of its
+          // contrast — light it by the ink it lays there, as rect/bar are.
+          const wgt = discCellInk(centerX, centerY, halfX, inner, soft, c * cellW, r * cellH, cellW, cellH);
+          if (wgt <= 0) continue;
+          compose(r * cols + c, lum, a * wgt * shapeWeight, layer.blend);
         }
       }
     }
