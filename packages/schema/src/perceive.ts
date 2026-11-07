@@ -180,10 +180,11 @@ function textBox(
   const fh = textFontPx(s, e.size, fontScale);
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
   // `maxWidth` squeezes the string to fit (fillText's maxWidth), so the box does too.
-  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614).
-  const head = Array.from(str).slice(0, 48);
-  const wide = head.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
-  const est = Math.max(fh, fh * (0.62 * head.length + 0.38 * wide));
+  // 0.62 em a glyph, but a full-width (CJK) glyph a whole em (X614) — every
+  // glyph of the string, as the renderer paints it, however long.
+  const glyphs = Array.from(str);
+  const wide = glyphs.reduce((n, c) => n + (isFullWidth(c.codePointAt(0)!) ? 1 : 0), 0);
+  const est = Math.max(fh, fh * (0.62 * glyphs.length + 0.38 * wide));
   const fw = s.maxWidth ? Math.min(est, s.maxWidth * unitScale) : est;
   const align = s.align ?? 'center';
   const baseline = s.baseline ?? 'middle';
@@ -423,6 +424,58 @@ function convexCellCoverage(
     }
   }
   return cov;
+}
+
+/** Cells a side when rasterising one outline for its ink (`rasterFill`). */
+const INK_RASTER_CELLS = 48;
+
+/**
+ * The ink of a filled outline — its area, each part weighted by `weight` at
+ * that point when given — and, with `frame`, the ink of the part inside the
+ * w × h frame. Both are read on one grid laid over the whole outline (the
+ * grid's own scanline rasteriser and fill rule), so the inside share is
+ * measured exactly as the whole is.
+ */
+function rasterFill(ring: Array<{ x: number; y: number }>, evenodd: boolean, weight?: (x: number, y: number) => number, frame?: { w: number; h: number }): { all: number; inside: number } {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of ring) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+  if (ring.length < 3 || !(x1 > x0) || !(y1 > y0)) return { all: 0, inside: 0 };
+  const n = INK_RASTER_CELLS;
+  const cw = (x1 - x0) / n;
+  const ch = (y1 - y0) / n;
+  const ink = (pts: Array<{ x: number; y: number }>): number => {
+    if (pts.length < 3) return 0;
+    const cov = polygonCellCoverage(pts.map((q) => ({ x: q.x - x0, y: q.y - y0 })), cw, ch, 0, n - 1, 0, n - 1, evenodd);
+    let sum = 0;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const f = cov[r * n + c]!;
+      if (f > 0) sum += f * (weight ? weight(x0 + (c + 0.5) * cw, y0 + (r + 0.5) * ch) : 1);
+    }
+    return sum * cw * ch;
+  };
+  const all = ink(ring);
+  if (!frame) return { all, inside: all };
+  const { w, h } = frame;
+  return { all, inside: ink(clipHalfPlane(clipHalfPlane(clipHalfPlane(clipHalfPlane(ring, 'x', 0, true), 'x', w, false), 'y', 0, true), 'y', h, false)) };
+}
+
+const softPolygonFactors = new WeakMap<object, number>();
+
+/**
+ * The share of a `soft` polygon's fill its gradient lays down — the
+ * renderer's radial gradient (`softProfile`) over its circumradius (a path
+ * drawing's unit circle), clipped to the outline. Scale-free, so read once in
+ * unit space per sprite.
+ */
+function softPolygonFactor(s: PolygonSprite): number {
+  const hit = softPolygonFactors.get(s);
+  if (hit !== undefined) return hit;
+  const ring = isPathPolygon(s) ? flattenSprite(s).points.map(([x, y]) => ({ x, y })) : polygonPoints(s, 1);
+  const evenodd = polygonFillRule(s) === 'evenodd';
+  const plain = rasterFill(ring, evenodd).all;
+  const f = plain > 0 ? Math.min(1, rasterFill(ring, evenodd, (x, y) => softProfile(Math.hypot(x, y))).all / plain) : 1;
+  softPolygonFactors.set(s, f);
+  return f;
 }
 
 // ---------------------------------------------------------------------------
@@ -1379,9 +1432,17 @@ function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: n
   if (s.kind === 'streak') return sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
   if (s.kind === 'rect' || s.kind === 'bar') return boxInkArea(s, e, sz);
   if (s.kind === 'polygon') {
-    if (!isPathPolygon(s)) return polygonArea(polygonPoints(s, sz / 2));
+    // A soft one paints its fill through a radial gradient (softPolygonFactor);
+    // a drawing's part with its own gradient paints that instead.
+    if (!isPathPolygon(s)) return polygonArea(polygonPoints(s, sz / 2)) * (s.soft ? softPolygonFactor(s) : 1);
     const fr = pathFrame(s, sz / 2, w, h);
-    return pathInkArea(s, fr.sx, fr.sy, sz / 2);
+    if (!s.soft || s.parts) return pathInkArea(s, fr.sx, fr.sy, sz / 2);
+    let ink = 0;
+    for (const part of pathParts(s)) {
+      const a = partInkArea(part, fr.sx, fr.sy, sz / 2);
+      ink += a.fill * (part.gradient ? 1 : softPolygonFactor(s)) + a.stroke;
+    }
+    return ink;
   }
   if (s.kind === 'stroke') return pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * (s.taper ? 0.64 : 1); // ∫ sin(πu) du = 2/π
   if (s.kind === 'text') {
@@ -1454,6 +1515,66 @@ function segmentInFrame(ax: number, ay: number, bx: number, by: number, w: numbe
     else t1 = Math.min(t1, k);
   }
   return [t0, t1];
+}
+
+/**
+ * The share of a path drawing's ink inside the frame: each part's fill
+ * (`rasterFill`, by its fill rule; a soft drawing's by its gradient) and each
+ * stroke segment (Liang–Barsky, by its width), weighted by the opacity each
+ * paints with — the drawing's own outlines, mapped as the renderer maps
+ * them (frame, origin, turn, paint scale `k`), not its frame box.
+ */
+function pathDrawingOnScreen(s: PolygonSprite, p: { x: number; y: number }, radius: number, k: number, cr: number, sr: number, w: number, h: number): number {
+  const fr = pathFrame(s, radius, w, h);
+  const sx = fr.sx * k;
+  const sy = fr.sy * k;
+  if (!(sx > 0) || !(sy > 0)) return 1;
+  const map = (u: number, v: number): { x: number; y: number } => {
+    const qx = (u - fr.ox) * sx, qy = (v - fr.oy) * sy;
+    return { x: p.x + qx * cr - qy * sr, y: p.y + qx * sr + qy * cr };
+  };
+  const parts = pathParts(s);
+  // Whole inside (or wholly outside) its frame box: no need to trace it.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let reach = 0;
+  for (const part of parts) {
+    for (const [u, v] of part.flat.points) { const q = map(u, v); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+    for (const l of part.stroke ? strokeLines(part) : []) for (const [u, v] of l.points) { const q = map(u, v); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+    if (part.stroke) reach = Math.max(reach, (part.stroke.width * radius * k) / 2);
+  }
+  if (x0 - reach >= 0 && x1 + reach <= w && y0 - reach >= 0 && y1 + reach <= h) return 1;
+  if (x1 + reach <= 0 || x0 - reach >= w || y1 + reach <= 0 || y0 - reach >= h) return 0;
+  // A soft single drawing's gradient is the unit circle about its unit origin.
+  const unitR = (x: number, y: number): number => {
+    const dx = x - p.x, dy = y - p.y;
+    return Math.hypot((dx * cr + dy * sr) / sx + fr.ox, (-dx * sr + dy * cr) / sy + fr.oy);
+  };
+  let all = 0;
+  let inside = 0;
+  for (const part of parts) {
+    if (part.opacity <= 0) continue;
+    if (part.fill && part.flat.points.length >= 3) {
+      const soft = s.soft && !s.parts && !part.gradient;
+      const f = rasterFill(part.flat.points.map(([u, v]) => map(u, v)), part.rule === 'evenodd', soft ? (x, y) => softProfile(unitR(x, y)) : undefined, { w, h });
+      all += f.all * part.opacity;
+      inside += f.inside * part.opacity;
+    }
+    if (part.stroke && part.stroke.width > 0) {
+      const ink = part.stroke.width * radius * k * (part.stroke.opacity ?? 1) * part.opacity;
+      for (const l of strokeLines(part)) {
+        const m = l.points.map(([u, v]) => map(u, v));
+        const segs = l.closed ? m.length : m.length - 1;
+        for (let i = 0; i < segs; i++) {
+          const a = m[i]!, b = m[(i + 1) % m.length]!;
+          const len = Math.hypot(b.x - a.x, b.y - a.y) * ink;
+          const [t0, t1] = segmentInFrame(a.x, a.y, b.x, b.y, w, h);
+          all += len;
+          if (t1 > t0) inside += len * (t1 - t0);
+        }
+      }
+    }
+  }
+  return all > 0 ? Math.min(1, inside / all) : 1;
 }
 
 /**
@@ -1530,14 +1651,16 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
   }
   if (s.kind === 'polygon') {
     const cr = Math.cos(rot), sr = Math.sin(rot);
-    if (isPathPolygon(s)) {
-      // A drawing as its frame box, turned with the entity (origin included).
-      const fr = pathFrame(s, sz / 2, w, h);
-      const qx = fr.sx * k, qy = fr.sy * k;
-      return qx > 0 && qy > 0 ? turnedBoxOnScreen(w, h, p, -fr.ox * qx, -fr.oy * qy, qx, qy, rot) : 1;
-    }
+    const onFrame = (q: { x: number; y: number }): boolean => q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h;
+    if (isPathPolygon(s)) return pathDrawingOnScreen(s, p, sz / 2, k, cr, sr, w, h);
     const pts = polygonPoints(s, sz / 2).map((q) => ({ x: p.x + (q.x * cr - q.y * sr) * k, y: p.y + (q.x * sr + q.y * cr) * k }));
-    if (pts.every((q) => q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h)) return 1;
+    if (pts.every(onFrame)) return 1;
+    if (s.soft) {
+      // Its ink is its gradient's, heaviest at the centre: weigh the clip by it.
+      const r = half;
+      const f = rasterFill(pts, polygonFillRule(s) === 'evenodd', (x, y) => softProfile(Math.hypot(x - p.x, y - p.y) / r), { w, h });
+      return f.all > 0 ? Math.min(1, f.inside / f.all) : 1;
+    }
     const all = polygonArea(pts);
     if (!(all > 0)) return 1;
     const inside = clipHalfPlane(clipHalfPlane(clipHalfPlane(clipHalfPlane(pts, 'x', 0, true), 'x', w, false), 'y', 0, true), 'y', h, false);
@@ -1870,7 +1993,7 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
         for (const part of pathParts(s)) {
           const ink = partInkArea(part, fr.sx, fr.sy, sz / 2);
           if (part.gradient) { const gw = gradientStopWeights(part.gradient.stops); part.gradient.stops.forEach((st, i) => add(st.color, a * ink.fill * (st.opacity ?? 1) * gw[i]!)); }
-          else add(part.color ?? base, a * ink.fill);
+          else add(part.color ?? base, a * ink.fill * (s.soft && !s.parts ? softPolygonFactor(s) : 1));
           if (part.stroke) add(part.stroke.color, a * ink.stroke);
         }
         continue;
