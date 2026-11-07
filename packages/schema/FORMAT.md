@@ -1187,9 +1187,14 @@ stands still.
   (area × alpha × contrast × glow/motion boosts; links and persistence ink —
   trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
-  line-salience boost so they aren't crushed by filled discs. A shape's
-  base area counts only where it lands in the frame, a `rect` or `bar` by its
-  own turned box (text boxes and persistence ink are not clipped).
+  line-salience boost so they aren't crushed by filled discs; a `soft` circle
+  or polygon counts the ink of its gradient (about 38 % of a disc), and a
+  label every glyph it paints. A shape's base area counts only where it lands
+  in the frame, clipped as it is painted and turned: a circle as its disc (a
+  soft one by its gradient), a ring as its stroke, a `rect`, `bar` or `emoji`
+  as its box, a polygon as its outline (a path drawing as its parts' fills and
+  strokes), a streak along its fade, a stroke along its path (text boxes and
+  persistence ink are not clipped).
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**
@@ -1325,7 +1330,9 @@ reported directly.
 **Colour is its own channel.** `perceiveScene(...).colour` and
 `diffScenes(...).colour` carry the hue / saturation / warmth (red minus blue,
 −1 cold … 1 warm) of the alpha × area weighted sprite mass and of the
-background plate. Judge "warmer / cooler" on `colour.warmthDelta`, not on
+background plate. Each sprite counts by the ink it lays down (scaled by its
+layer's `transform.scale`), so a thin line adds a sliver of colour however
+long it is, and a label counts by its whole line of glyphs. Judge "warmer / cooler" on `colour.warmthDelta`, not on
 `meanLuminance` — plausible cool tones weigh MORE under luma than the reds they
 replace, so a calming edit pushes luminance up. `diffScenes` also reports a
 `motion` channel (overall and per-layer speed deltas with headings) and

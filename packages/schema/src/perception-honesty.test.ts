@@ -25,6 +25,153 @@ describe('perception reads what is on screen', () => {
     expect(perceiveScene(s, { viewport: { width: 1080, height: 1080 } }).colour.hex).toBe('#ff3a4a');
   });
 
+  it('a thin rule or a short bar adds the colour of its own ink, not of a square as long as it is', () => {
+    // 0.9 × 0.009 of red (or a bar at a twentieth of its 0.9) beside a 0.2 × 0.2 blue tile:
+    // the tile lays ~5× (or ~40×) the ink, so the scene reads blue.
+    const tile = L({ key: 'tile', position: { x: 0.5, y: 0.7 }, sprite: { kind: 'rect', width: [0.2, 0.2], color: '#0000ff' } });
+    const rule = L({ key: 'rule', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.9, 0.9], aspect: [0.01, 0.01], color: '#ff0000' } });
+    const bar = L({ key: 'bar', position: { x: 0.05, y: 0.3 }, sprite: { kind: 'bar', values: [0.05], max: 1, length: 0.9, thickness: 0.02, color: '#ff0000' } });
+    const rgb = (s: SaverSpec) => { const hex = perceiveScene(s, { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); };
+    for (const red of [rule, bar]) {
+      const [r, , b] = rgb(scene('#000000', [red, tile]));
+      expect(b).toBeGreaterThan(r!);
+    }
+    // A square red tile of the same width as the rule still outweighs the blue one.
+    const [r, , b] = rgb(scene('#000000', [L({ key: 'big', position: { x: 0.5, y: 0.3 }, sprite: { kind: 'rect', width: [0.4, 0.4], color: '#ff0000' } }), tile]));
+    expect(r).toBeGreaterThan(b!);
+  });
+
+  it('every sprite adds colour by the ink it lays down, scaled by its layer transform', () => {
+    const rgb = (layers: unknown[]) => { const hex = perceiveScene(scene('#000000', layers), { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]; };
+    const tile = (side: number) => L({ key: 'tile', position: { x: 0.5, y: 0.8 }, sprite: { kind: 'rect', width: [side, side], color: '#0000ff' } });
+    // A 0.6-wide ring 0.002 thick is 0.0038 of ink, not a 0.36 square: a 0.1 blue tile outweighs it.
+    const ring = L({ key: 'ring', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'ring', radius: [0.3, 0.3], width: 0.002, color: '#ff0000' } });
+    // A triangle of circumradius 0.1 is 0.013 of ink, not 0.04: a 0.15 tile (0.0225) outweighs it.
+    const tri = L({ key: 'tri', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ff0000' } });
+    for (const [red, side] of [[ring, 0.1], [tri, 0.15]] as const) {
+      const [r, , b] = rgb([red, tile(side)]);
+      expect(b).toBeGreaterThan(r);
+    }
+    // A 20-glyph label is a line of ink (~0.02), not one 0.05 glyph square: it outweighs a 0.1 tile.
+    const label = L({ key: 'label', position: { x: 0.5, y: 0.3 }, size: [0.05, 0.05], sprite: { kind: 'text', strings: ['ABCDEFGHIJKLMNOPQRST'], color: '#ff0000' } });
+    const [lr, , lb] = rgb([label, tile(0.1)]);
+    expect(lr).toBeGreaterThan(lb);
+    // A layer drawn at twice the size lays four times the ink.
+    const red = L({ key: 'red', position: { x: 0.3, y: 0.3 }, transform: { scale: 2, origin: 'anchor' }, sprite: { kind: 'rect', width: [0.1, 0.1], color: '#ff0000' } });
+    const [sr, , sb] = rgb([red, tile(0.1)]);
+    expect(sr).toBeGreaterThan(sb * 2);
+  });
+
+  it('a soft circle weighs the ink of its gradient, not a full disc', () => {
+    // The canvas fades a soft disc to 0 at its radius: 0.378 of the disc's area (∫ softProfile · 2u du).
+    const disc = (soft: boolean, color = '#ffffff', y = 0.5) => L({ key: soft ? 'soft' : 'hard', position: { x: soft ? 0.3 : 0.7, y }, sprite: { kind: 'circle', radius: [0.15, 0.15], color, ...(soft ? { soft: true } : {}) } });
+    const area = (layer: unknown) => perceiveScene(scene('#000000', [layer]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    expect(area(disc(true)) / area(disc(false))).toBeCloseTo(0.378, 3);
+    // So a soft red glow beside a hard blue disc of the same size reads blue.
+    const hex = perceiveScene(scene('#000000', [disc(true, '#ff0000'), disc(false, '#0000ff')]), { viewport: { width: 1000, height: 1000 } }).colour.hex;
+    expect(parseInt(hex.slice(5, 7), 16)).toBeGreaterThan(parseInt(hex.slice(1, 3), 16));
+  });
+
+  it('an emoji is clipped to the frame by its turned glyph box', () => {
+    // A 0.2 glyph box centred 0.1 in from the right edge fits; turned 45° its
+    // corner pokes 0.1·(√2 − 1) past the edge, a triangle of that height.
+    const area = (rotate: number) => perceiveScene(scene('#000000', [L({ key: 'fish', position: { x: 0.9, y: 0.5 }, rotate, size: [0.2, 0.2], sprite: { kind: 'emoji', glyphs: ['🐟'] } })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+    const over = 100 * (Math.SQRT2 - 1);
+    expect(area(45) / area(0)).toBeCloseTo(1 - (over * over) / (200 * 200), 4);
+    expect(area(90) / area(0)).toBeCloseTo(1, 6);
+  });
+
+  it('every shape is clipped to the frame as it is painted, not as a square about it', () => {
+    // On a 1000 px square frame, the share of each shape's on-screen area (its
+    // dominance area at the edge over the same shape well inside).
+    const share = (sprite: Record<string, unknown>, at: { x: number; y: number }, o: Record<string, unknown> = {}) => {
+      const area = (position: { x: number; y: number }) => perceiveScene(scene('#000000', [L({ key: 'k', position, sprite, ...o })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+      return area(at) / area({ x: 0.5, y: 0.5 });
+    };
+    // A disc whose centre is half its radius in from the edge keeps all but
+    // the segment past it: 1 − (acos ½ − ½·√¾)/π. Its square kept 3/4.
+    const disc = { kind: 'circle', radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(disc, { x: 0.05, y: 0.5 })).toBeCloseTo(1 - (Math.acos(0.5) - 0.5 * Math.sqrt(0.75)) / Math.PI, 4);
+    expect(share(disc, { x: 0, y: 0 })).toBeCloseTo(0.25, 4);
+    // A soft disc keeps more there (its ink is at the centre) — checked against a brute-force sum of its gradient.
+    const soft = { ...disc, soft: true };
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    let inFrame = 0, all = 0;
+    for (let i = 0; i < 400; i++) for (let j = 0; j < 400; j++) {
+      const x = -100 + (i + 0.5) / 2, y = -100 + (j + 0.5) / 2;
+      const v = profile(Math.hypot(x, y) / 100);
+      all += v;
+      if (x + 50 >= 0) inFrame += v;
+    }
+    expect(share(soft, { x: 0.05, y: 0.5 })).toBeCloseTo(inFrame / all, 3);
+    expect(share(soft, { x: 0, y: 0.5 })).toBeCloseTo(0.5, 4);
+    // A thin ring crossing the edge there keeps the arc inside: 2/3 of it.
+    expect(share({ kind: 'ring', radius: [0.1, 0.1], width: 0.0005, color: '#ffffff' }, { x: 0.05, y: 0.5 })).toBeCloseTo(2 / 3, 2);
+    // A triangle centred on the top edge: point up, 5/9 of it hangs inside; point down, 4/9.
+    const tri = { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(tri, { x: 0.5, y: 0 })).toBeCloseTo(5 / 9, 4);
+    expect(share(tri, { x: 0.5, y: 0 }, { rotate: 180 })).toBeCloseTo(4 / 9, 4);
+    // A streak runs back from its head: head 0.1 in from the left edge, 0.2
+    // long, the inner half shows — the brighter half, 3/4 of its fade. Turned to
+    // trail into the frame, all of it.
+    const streak = { kind: 'streak', length: [0.2, 0.2], color: '#ffffff' };
+    expect(share(streak, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(streak, { x: 0.1, y: 0.5 }, { rotate: 180 })).toBeCloseTo(1, 6);
+    // A 0.4 straight stroke centred 0.1 in: level, 3/4 of it is inside; stood upright, all of it.
+    const stroke = { kind: 'stroke', length: [0.4, 0.4], points: [[-1, 0], [1, 0]], curve: 'linear', color: '#ffffff' };
+    expect(share(stroke, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(stroke, { x: 0.1, y: 0.5 }, { rotate: 90 })).toBeCloseTo(1, 6);
+    // A path drawing turned 45° at the right edge loses the corner of its
+    // turned frame past the edge, not of that frame's bounding box.
+    const over = 100 * Math.SQRT2 - 50;
+    expect(share({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: sq }, { x: 0.95, y: 0.5 }, { rotate: 45 })).toBeCloseTo(1 - (over * over) / 40000, 4);
+  });
+
+  it('a soft polygon weighs its gradient, a label every glyph, a drawing the outlines it paints', () => {
+    const view = { viewport: { width: 1000, height: 1000 } };
+    const area = (sprite: Record<string, unknown>, position = { x: 0.5, y: 0.5 }, o: Record<string, unknown> = {}) => perceiveScene(scene('#000000', [L({ key: 'k', position, sprite, ...o })]), view).dominance[0]!.factors.area;
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    // Brute force: the mean gradient over a shape's points inside `keep`, over the same shape's mean.
+    const gradientShare = (inShape: (x: number, y: number) => boolean, r: (x: number, y: number) => number, keep: (x: number, y: number) => boolean = () => true) => {
+      let kept = 0, all = 0, n = 0;
+      for (let i = 0; i < 600; i++) for (let j = 0; j < 600; j++) {
+        const x = -1 + (i + 0.5) / 300, y = -1 + (j + 0.5) / 300;
+        if (!inShape(x, y)) continue;
+        const v = profile(r(x, y));
+        n++; all += v; if (keep(x, y)) kept += v;
+      }
+      return { mean: all / n, kept: kept / all };
+    };
+    // A soft square (circumradius 1, so a diamond's corners touch the gradient's edge) lays this share of its area.
+    const diamond = (x: number, y: number) => Math.abs(x) + Math.abs(y) <= 1;
+    const square = { kind: 'polygon', sides: 4, radius: [0.1, 0.1], color: '#ffffff' };
+    const softSquare = { ...square, soft: true };
+    const bf = gradientShare(diamond, (x, y) => Math.hypot(x, y), (x) => x >= -0.5);
+    expect(area(softSquare) / area(square)).toBeCloseTo(bf.mean, 2);
+    // …and crossing the left edge (centre 0.05 in, half its radius) keeps its brighter middle.
+    expect(area(softSquare, { x: 0.05, y: 0.5 }) / area(softSquare)).toBeCloseTo(bf.kept, 2);
+    // A soft path drawing's gradient is its unit circle: a unit square's corners lie past it.
+    const sqPath = { kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: sq };
+    expect(area({ ...sqPath, soft: true }) / area(sqPath)).toBeCloseTo(gradientShare(() => true, (x, y) => Math.hypot(x, y)).mean, 2);
+    // So a soft red square beside a hard blue one reads blue.
+    const hex = perceiveScene(scene('#000000', [L({ key: 'a', position: { x: 0.3, y: 0.5 }, sprite: { ...softSquare, color: '#ff0000' } }), L({ key: 'b', position: { x: 0.7, y: 0.5 }, sprite: { ...square, color: '#0000ff' } })]), view).colour.hex;
+    expect(parseInt(hex.slice(5, 7), 16)).toBeGreaterThan(parseInt(hex.slice(1, 3), 16));
+
+    // A 96-glyph label lays twice the ink of a 48-glyph one (it was capped at 48).
+    const label = (n: number) => area({ kind: 'text', strings: ['A'.repeat(n)], color: '#ffffff' }, { x: 0.5, y: 0.5 }, { size: [0.005, 0.005] });
+    expect(label(96) / label(48)).toBeCloseTo(2, 6);
+
+    // A drawing's ink, not its frame box: a small square inside a 0.2 frame
+    // whose box crosses the left edge is all on screen; moved to straddle it,
+    // the share of its own square that shows.
+    const inner = { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', path: 'M -0.2 -0.2 L 0.2 -0.2 L 0.2 0.2 L -0.2 0.2 Z' };
+    expect(area(inner, { x: 0.05, y: 0.5 }) / area(inner)).toBeCloseTo(1, 6);
+    expect(area(inner, { x: 0.02, y: 0.5 }) / area(inner)).toBeCloseTo(0.06 / 0.08, 3);
+    // An open stroked line centred on the edge: half its length.
+    const rule = { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', fill: false, path: 'M -1 0 L 1 0', stroke: { color: '#ffffff', width: 0.05 } };
+    expect(area(rule, { x: 0, y: 0.5 }) / area(rule)).toBeCloseTo(0.5, 3);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),
