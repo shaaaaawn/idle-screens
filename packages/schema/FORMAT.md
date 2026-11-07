@@ -1189,8 +1189,11 @@ stands still.
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
   line-salience boost so they aren't crushed by filled discs; a `soft` circle
   counts the ink of its gradient (about 38 % of its disc). A shape's base area
-  counts only where it lands in the frame, a `rect`, `bar` or `emoji` by its
-  own turned box (text boxes and persistence ink are not clipped).
+  counts only where it lands in the frame, clipped as it is painted and turned:
+  a circle as its disc (a soft one by its gradient), a ring as its stroke, a
+  `rect`, `bar` or `emoji` as its box, a polygon as its outline (a path drawing
+  as its frame), a streak along its fade, a stroke along its path (text boxes
+  and persistence ink are not clipped).
 - `motionStats(spec, opts)` — per-layer mean/max on-screen speed from analytic
   displacement — choreography as numbers.
 - `layerCohesion(spec, opts)` — **does a layer read as one form or as N marks?**

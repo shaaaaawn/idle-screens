@@ -338,8 +338,8 @@ function polygonCellCoverage(
   return cov;
 }
 
-/** The part of convex polygon `pts` where `axis` is ≥ `v` (`above`) or ≤ `v` — one Sutherland–Hodgman plane. */
-function clipConvex(pts: Array<{ x: number; y: number }>, axis: 'x' | 'y', v: number, above: boolean): Array<{ x: number; y: number }> {
+/** The part of polygon `pts` where `axis` is ≥ `v` (`above`) or ≤ `v` — one Sutherland–Hodgman plane (exact for any polygon: the clip window is convex). */
+function clipHalfPlane(pts: Array<{ x: number; y: number }>, axis: 'x' | 'y', v: number, above: boolean): Array<{ x: number; y: number }> {
   const out: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i]!;
@@ -396,7 +396,7 @@ function convexCellCoverage(
   const cov = new Float64Array(nc * (r1 - r0 + 1));
   const cellA = cellW * cellH;
   for (let r = r0; r <= r1; r++) {
-    const band = clipConvex(clipConvex(pts, 'y', r * cellH, true), 'y', (r + 1) * cellH, false);
+    const band = clipHalfPlane(clipHalfPlane(pts, 'y', r * cellH, true), 'y', (r + 1) * cellH, false);
     if (band.length < 3) continue;
     const xs = band.map((q) => q.x).sort((m, n) => m - n);
     const hs = xs.map((x) => convexHeightAt(band, x));
@@ -1395,6 +1395,67 @@ function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: n
   return sz * sz * 0.55; // emoji
 }
 
+/** ∫₀ˣ √(r² − u²) du, x clamped to [−r, r]. */
+function chordIntegral(r: number, x: number): number {
+  const c = Math.max(-r, Math.min(r, x));
+  return (c * Math.sqrt(Math.max(0, r * r - c * c)) + r * r * Math.asin(c / r)) / 2;
+}
+
+/** The area of the disc of radius `r` about the origin where x ≤ X and y ≤ Y — exact. */
+function discQuadrantArea(r: number, X: number, Y: number): number {
+  if (!(r > 0) || X <= -r || Y <= -r) return 0;
+  const strip = (u: number, v: number): number => (v > u ? chordIntegral(r, v) - chordIntegral(r, u) : 0);
+  const x1 = Math.min(X, r);
+  if (Y >= r) return 2 * strip(-r, x1);
+  // Each column runs from −√(r²−x²) up to min(Y, √(r²−x²)); the two meet at |x| = a.
+  const a = Math.sqrt(r * r - Y * Y);
+  const capped = (u: number, v: number): number => (v > u ? Y * (v - u) + strip(u, v) : 0);
+  if (Y < 0) return capped(-a, Math.min(x1, a));
+  return 2 * strip(-r, Math.min(x1, -a)) + capped(-a, Math.min(x1, a)) + 2 * strip(a, x1);
+}
+
+/** The area of the disc of radius `r` about (cx, cy) inside the w × h frame — exact. */
+function discInFrame(cx: number, cy: number, r: number, w: number, h: number): number {
+  const q = (X: number, Y: number): number => discQuadrantArea(r, X, Y);
+  return q(w - cx, h - cy) - q(-cx, h - cy) - q(w - cx, -cy) + q(-cx, -cy);
+}
+
+/**
+ * The share of a soft disc's ink inside the frame. The canvas's gradient
+ * (`softProfile`) is two straight ramps in u = ρ/r, so by parts its ink in a
+ * region is Σ slope · ∫ A(ρ) dρ over each ramp, A(ρ) the area of the radius-ρ
+ * disc in the region; A is smooth, and Simpson's rule takes each ramp.
+ */
+function softDiscShareInFrame(cx: number, cy: number, r: number, w: number, h: number): number {
+  const ramp = (u0: number, u1: number, slope: number): number => {
+    const n = 16;
+    const d = ((u1 - u0) * r) / n;
+    let acc = 0;
+    for (let i = 0; i <= n; i++) acc += (i === 0 || i === n ? 1 : i % 2 ? 4 : 2) * discInFrame(cx, cy, u0 * r + i * d, w, h);
+    return ((acc * d) / 3) * (slope / r);
+  };
+  const ink = ramp(0, 0.35, 0.25 / 0.35) + ramp(0.35, 1, 0.75 / 0.65);
+  return Math.max(0, Math.min(1, ink / (Math.PI * r * r * SOFT_DISC_MEAN)));
+}
+
+/** The parameter span [t0, t1] of segment A→B inside the w × h frame (Liang–Barsky); t0 ≥ t1 when it misses. */
+function segmentInFrame(ax: number, ay: number, bx: number, by: number, w: number, h: number): [number, number] {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [pp, q] of [[-dx, ax], [dx, w - ax], [-dy, ay], [dy, h - ay]] as const) {
+    if (pp === 0) {
+      if (q < 0) return [1, 0];
+      continue;
+    }
+    const k = q / pp;
+    if (pp < 0) t0 = Math.max(t0, k);
+    else t1 = Math.min(t1, k);
+  }
+  return [t0, t1];
+}
+
 /**
  * The fraction of a box inside the w × h frame: half extents (hx, hy),
  * centred at offset (ox, oy) from `p` before the turn, turned by `rot` about
@@ -1420,25 +1481,29 @@ function turnedBoxOnScreen(w: number, h: number, p: { x: number; y: number }, ox
 }
 
 /**
- * The fraction of an entity's extent inside the viewport. A rect or bar is
- * its own box, and an emoji its glyph box, turned as the renderer turns it
- * (the entity's rotation plus its layer's and group's `transform.rotate`);
- * anything else is the circumradius square (a path drawing's own frame, which `span`/`origin` can
- * stretch and shift). All scale by the paint transform `k`; a text box is
- * judged by the text checks, so text counts whole. Only what lands in the
- * frame is the scene's mass or colour (X616).
+ * The fraction of an entity's ink inside the viewport, measured on the shape
+ * the renderer paints, turned as it turns it (the entity's rotation plus its
+ * layer's and group's `transform.rotate`) and scaled by the paint transform
+ * `k`: a circle as its disc (a soft one weighted by its gradient), a ring as
+ * its stroked annulus, a rect or bar as its own box and an emoji as its glyph
+ * box, a polygon as its outline (a path drawing as its frame, which
+ * `span`/`origin` can stretch and shift), a streak as its segment from tail
+ * to head weighted by its fade, a stroke as the length of its path. A text
+ * box is judged by the text checks, so text counts whole. Only what lands in
+ * the frame is the scene's mass or colour (X616).
  */
 function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, sz: number, k: number, t: number, paintRot = 0): number {
   if (s.kind === 'text' || s.kind === 'textBlock') return 1;
-  const { w, h } = scene;
+  const { w, h, scale } = scene;
   const p = posOf(scene, e, t);
-  let cx = p.x, cy = p.y, hx = (sz / 2) * k, hy = hx;
+  const half = (sz / 2) * k;
   const per = e.size > 0 ? sz / e.size : 1;
+  const rot = rotationAt(e, t) + paintRot;
   if (s.kind === 'rect') {
     // Its own box about the entity: width by its own height, not a square.
     const rh = e.size2 !== undefined ? e.size2 * per : sz;
-    if (!(hx > 0) || !(rh > 0)) return 1;
-    return turnedBoxOnScreen(w, h, p, 0, 0, hx, (rh / 2) * k, rotationAt(e, t) + paintRot);
+    if (!(half > 0) || !(rh > 0)) return 1;
+    return turnedBoxOnScreen(w, h, p, 0, 0, half, (rh / 2) * k, rot);
   }
   if (s.kind === 'bar') {
     // A bar reaches outward from the entity in its direction, not about it.
@@ -1446,26 +1511,66 @@ function onScreenFraction(scene: BuiltScene, s: LayerSpec['sprite'], e: Entity, 
     const th = e.size2 !== undefined ? e.size2 * per : sz * 0.2;
     const b = barBox(s.direction ?? 'right', len * k, th * k);
     if (!(b.halfX > 0) || !(b.halfY > 0)) return 1;
-    return turnedBoxOnScreen(w, h, p, b.cx, b.cy, b.halfX, b.halfY, rotationAt(e, t) + paintRot);
+    return turnedBoxOnScreen(w, h, p, b.cx, b.cy, b.halfX, b.halfY, rot);
   }
   // An emoji's glyph box (its size square) turns with it, as the luminance map turns it.
-  if (s.kind === 'emoji') return hx > 0 ? turnedBoxOnScreen(w, h, p, 0, 0, hx, hx, rotationAt(e, t) + paintRot) : 1;
-  if (s.kind === 'polygon' && isPathPolygon(s)) {
-    const fr = pathFrame(s, sz / 2, w, h);
-    // The frame turns with the entity (and its layer/group), origin included.
-    const rot = rotationAt(e, t) + paintRot;
-    const cr = Math.cos(rot), sr = Math.sin(rot);
-    const ox = -fr.ox * fr.sx * k, oy = -fr.oy * fr.sy * k;
-    cx += ox * cr - oy * sr;
-    cy += ox * sr + oy * cr;
-    const qx = fr.sx * k, qy = fr.sy * k;
-    hx = Math.abs(qx * cr) + Math.abs(qy * sr);
-    hy = Math.abs(qx * sr) + Math.abs(qy * cr);
+  if (s.kind === 'emoji') return half > 0 ? turnedBoxOnScreen(w, h, p, 0, 0, half, half, rot) : 1;
+  if (s.kind === 'circle' || s.kind === 'ring') {
+    // A ring is its stroke: the annulus lineWidth wide about its radius.
+    const lw = s.kind === 'ring' ? Math.max(0.5, (s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * k : 0;
+    const outer = half + lw / 2;
+    if (!(outer > 0)) return 1;
+    if (p.x - outer >= 0 && p.x + outer <= w && p.y - outer >= 0 && p.y + outer <= h) return 1;
+    if (p.x + outer <= 0 || p.x - outer >= w || p.y + outer <= 0 || p.y - outer >= h) return 0;
+    if (s.kind === 'ring') {
+      const inner = Math.max(0, half - lw / 2);
+      return (discInFrame(p.x, p.y, outer, w, h) - discInFrame(p.x, p.y, inner, w, h)) / (Math.PI * (outer * outer - inner * inner));
+    }
+    return s.soft ? softDiscShareInFrame(p.x, p.y, half, w, h) : discInFrame(p.x, p.y, half, w, h) / (Math.PI * half * half);
   }
-  if (!(hx > 0) || !(hy > 0)) return 1;
-  const fx = Math.max(0, Math.min(cx + hx, w) - Math.max(cx - hx, 0)) / (2 * hx);
-  const fy = Math.max(0, Math.min(cy + hy, h) - Math.max(cy - hy, 0)) / (2 * hy);
-  return fx * fy;
+  if (s.kind === 'polygon') {
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    if (isPathPolygon(s)) {
+      // A drawing as its frame box, turned with the entity (origin included).
+      const fr = pathFrame(s, sz / 2, w, h);
+      const qx = fr.sx * k, qy = fr.sy * k;
+      return qx > 0 && qy > 0 ? turnedBoxOnScreen(w, h, p, -fr.ox * qx, -fr.oy * qy, qx, qy, rot) : 1;
+    }
+    const pts = polygonPoints(s, sz / 2).map((q) => ({ x: p.x + (q.x * cr - q.y * sr) * k, y: p.y + (q.x * sr + q.y * cr) * k }));
+    if (pts.every((q) => q.x >= 0 && q.x <= w && q.y >= 0 && q.y <= h)) return 1;
+    const all = polygonArea(pts);
+    if (!(all > 0)) return 1;
+    const inside = clipHalfPlane(clipHalfPlane(clipHalfPlane(clipHalfPlane(pts, 'x', 0, true), 'x', w, false), 'y', 0, true), 'y', h, false);
+    return Math.min(1, polygonArea(inside) / all);
+  }
+  if (s.kind === 'streak') {
+    // Tail to head along its heading, its fade rising 0 → 1: the ink past a
+    // point a fraction u along it is (1 − u²) of the whole.
+    const len = sz * k;
+    if (!(len > 0)) return 1;
+    const head = (headingAt(e, t, w, h) ?? 0) + rot;
+    const [t0, t1] = segmentInFrame(p.x - Math.cos(head) * len, p.y - Math.sin(head) * len, p.x, p.y, w, h);
+    return t1 > t0 ? t1 * t1 - t0 * t0 : 0;
+  }
+  if (s.kind === 'stroke') {
+    // The share of its drawn path's length (taper-weighted) inside the frame.
+    const local = strokeDrawnSamples(s, sz / 2);
+    if (local.length < 2) return 1;
+    const angle = rot + (s.orient ? headingAt(e, t, w, h) ?? 0 : 0);
+    const cr = Math.cos(angle), sr = Math.sin(angle);
+    const pts = local.map((q) => ({ x: p.x + (q.x * cr - q.y * sr) * k, y: p.y + (q.x * sr + q.y * cr) * k }));
+    let all = 0;
+    let inside = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!, b = pts[i]!;
+      const len = Math.hypot(b.x - a.x, b.y - a.y) * (s.taper ? strokeTaper((i - 0.5) / (pts.length - 1)) : 1);
+      const [t0, t1] = segmentInFrame(a.x, a.y, b.x, b.y, w, h);
+      all += len;
+      if (t1 > t0) inside += len * (t1 - t0);
+    }
+    return all > 0 ? Math.min(1, inside / all) : 1;
+  }
+  return 1;
 }
 
 /** Per-layer un-normalized visual weight at `opts.t` — the body of dominanceRanking. */

@@ -81,6 +81,52 @@ describe('perception reads what is on screen', () => {
     expect(area(90) / area(0)).toBeCloseTo(1, 6);
   });
 
+  it('every shape is clipped to the frame as it is painted, not as a square about it', () => {
+    // On a 1000 px square frame, the share of each shape's on-screen area (its
+    // dominance area at the edge over the same shape well inside).
+    const share = (sprite: Record<string, unknown>, at: { x: number; y: number }, o: Record<string, unknown> = {}) => {
+      const area = (position: { x: number; y: number }) => perceiveScene(scene('#000000', [L({ key: 'k', position, sprite, ...o })]), { viewport: { width: 1000, height: 1000 } }).dominance[0]!.factors.area;
+      return area(at) / area({ x: 0.5, y: 0.5 });
+    };
+    // A disc whose centre is half its radius in from the edge keeps all but
+    // the segment past it: 1 − (acos ½ − ½·√¾)/π. Its square kept 3/4.
+    const disc = { kind: 'circle', radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(disc, { x: 0.05, y: 0.5 })).toBeCloseTo(1 - (Math.acos(0.5) - 0.5 * Math.sqrt(0.75)) / Math.PI, 4);
+    expect(share(disc, { x: 0, y: 0 })).toBeCloseTo(0.25, 4);
+    // A soft disc keeps more there (its ink is at the centre) — checked against a brute-force sum of its gradient.
+    const soft = { ...disc, soft: true };
+    const profile = (u: number) => (u >= 1 ? 0 : u <= 0.35 ? 1 - (0.25 * u) / 0.35 : 0.75 * (1 - (u - 0.35) / 0.65));
+    let inFrame = 0, all = 0;
+    for (let i = 0; i < 400; i++) for (let j = 0; j < 400; j++) {
+      const x = -100 + (i + 0.5) / 2, y = -100 + (j + 0.5) / 2;
+      const v = profile(Math.hypot(x, y) / 100);
+      all += v;
+      if (x + 50 >= 0) inFrame += v;
+    }
+    expect(share(soft, { x: 0.05, y: 0.5 })).toBeCloseTo(inFrame / all, 3);
+    expect(share(soft, { x: 0, y: 0.5 })).toBeCloseTo(0.5, 4);
+    // A thin ring crossing the edge there keeps the arc inside: 2/3 of it.
+    expect(share({ kind: 'ring', radius: [0.1, 0.1], width: 0.0005, color: '#ffffff' }, { x: 0.05, y: 0.5 })).toBeCloseTo(2 / 3, 2);
+    // A triangle centred on the top edge: point up, 5/9 of it hangs inside; point down, 4/9.
+    const tri = { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ffffff' };
+    expect(share(tri, { x: 0.5, y: 0 })).toBeCloseTo(5 / 9, 4);
+    expect(share(tri, { x: 0.5, y: 0 }, { rotate: 180 })).toBeCloseTo(4 / 9, 4);
+    // A streak runs back from its head: head 0.1 in from the left edge, 0.2
+    // long, the inner half shows — the brighter half, 3/4 of its fade. Turned to
+    // trail into the frame, all of it.
+    const streak = { kind: 'streak', length: [0.2, 0.2], color: '#ffffff' };
+    expect(share(streak, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(streak, { x: 0.1, y: 0.5 }, { rotate: 180 })).toBeCloseTo(1, 6);
+    // A 0.4 straight stroke centred 0.1 in: level, 3/4 of it is inside; stood upright, all of it.
+    const stroke = { kind: 'stroke', length: [0.4, 0.4], points: [[-1, 0], [1, 0]], curve: 'linear', color: '#ffffff' };
+    expect(share(stroke, { x: 0.1, y: 0.5 })).toBeCloseTo(0.75, 4);
+    expect(share(stroke, { x: 0.1, y: 0.5 }, { rotate: 90 })).toBeCloseTo(1, 6);
+    // A path drawing turned 45° at the right edge loses the corner of its
+    // turned frame past the edge, not of that frame's bounding box.
+    const over = 100 * Math.SQRT2 - 50;
+    expect(share({ kind: 'polygon', radius: [0.1, 0.1], color: '#ffffff', path: sq }, { x: 0.95, y: 0.5 }, { rotate: 45 })).toBeCloseTo(1 - (over * over) / 40000, 4);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),
