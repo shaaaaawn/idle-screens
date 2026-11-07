@@ -176,7 +176,12 @@ function enumHint(root: unknown, path: string, message: string): string {
   const v = valueAtPath(root, path);
   if (!isStr(v)) return '';
   const options = m
-    ? m[1]!.split(' | ').map((o) => o.replace(/ \(.*$/, '').replace(/^'(.*)'$/, '$1'))
+    ? m[1]!.split(' | ').map((o) => {
+        // indexOf, not /\ \(.*$/ — that rescans to the end from every ' (' (CodeQL polynomial ReDoS).
+        const gloss = o.indexOf(' (');
+        const bare = gloss < 0 ? o : o.slice(0, gloss);
+        return bare.length > 1 && bare.startsWith("'") && bare.endsWith("'") ? bare.slice(1, -1) : bare;
+      })
     : [...prose![1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
   const near = nearest(v, options);
   return near ? ` — did you mean '${near}'?` : '';
