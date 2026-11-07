@@ -1349,8 +1349,10 @@ be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
 the final segment may omit duration (holds indefinitely).
 
 **Unknown fields** on the envelope, a segment or a transition are ignored with
-an `unknown-property` warning, as they are in a scene (never an error, so a
-stored sequence keeps loading). A scene field written one level too high, such
+an `unknown-property` warning, as they are in a scene (a warning, never an
+error, so a stored sequence keeps loading). The exception is `text` on a
+non-`morph` transition, which is invalid and reported as an error. A scene
+field written one level too high, such
 as `motionIntensity` on the envelope or `ghosting` on a segment, does nothing
 there: it belongs inside each segment's `scene`, or in the `bed`.
 
