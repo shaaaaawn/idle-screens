@@ -486,6 +486,8 @@ export function applyNpcMaterials(root: Object3D, rng: Rng, reflective = true, l
       const body = lit
         ? new MeshLambertMaterial({ color: new Color(coat) })
         : new MeshBasicMaterial({ color: new Color(coat) });
+      // Baked ambient occlusion on a coat (breeds.json `ao`, the starfish's): its creases darken, as a skin's do.
+      body.vertexColors = !!mesh.geometry.getAttribute('color');
       body.name = m.name;
       body.userData.mqOwned = true;
       return body;
