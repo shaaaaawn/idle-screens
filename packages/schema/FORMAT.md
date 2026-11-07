@@ -1325,7 +1325,9 @@ reported directly.
 **Colour is its own channel.** `perceiveScene(...).colour` and
 `diffScenes(...).colour` carry the hue / saturation / warmth (red minus blue,
 −1 cold … 1 warm) of the alpha × area weighted sprite mass and of the
-background plate. Judge "warmer / cooler" on `colour.warmthDelta`, not on
+background plate. Each sprite counts by the ink it lays down (scaled by its
+layer's `transform.scale`), so a thin line adds a sliver of colour however
+long it is, and a label counts by its whole line of glyphs. Judge "warmer / cooler" on `colour.warmthDelta`, not on
 `meanLuminance` — plausible cool tones weigh MORE under luma than the reds they
 replace, so a calming edit pushes luminance up. `diffScenes` also reports a
 `motion` channel (overall and per-layer speed deltas with headings) and

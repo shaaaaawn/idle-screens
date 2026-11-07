@@ -1368,6 +1368,33 @@ function boxInkArea(s: Extract<LayerSpec['sprite'], { kind: 'rect' | 'bar' }>, e
 }
 
 /**
+ * The ink one entity lays down at its own (unscaled) size, in px²: what
+ * dominance weighs (adding LINE_SALIENCE for rings, streaks and strokes) and
+ * what scene colour mixes by. A paint transform scales it by paintSize².
+ */
+function entityInkArea(spec: SaverSpec, s: LayerSpec['sprite'], e: Entity, sz: number, t: number, w: number, h: number, scale: number): number {
+  if (s.kind === 'circle') return Math.PI * (sz / 2) * (sz / 2);
+  if (s.kind === 'ring') return Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
+  if (s.kind === 'streak') return sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale);
+  if (s.kind === 'rect' || s.kind === 'bar') return boxInkArea(s, e, sz);
+  if (s.kind === 'polygon') {
+    if (!isPathPolygon(s)) return polygonArea(polygonPoints(s, sz / 2));
+    const fr = pathFrame(s, sz / 2, w, h);
+    return pathInkArea(s, fr.sx, fr.sy, sz / 2);
+  }
+  if (s.kind === 'stroke') return pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * (s.taper ? 0.64 : 1); // ∫ sin(πu) du = 2/π
+  if (s.kind === 'text') {
+    const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
+    return box.halfX * 2 * box.halfY * 2 * 0.55;
+  }
+  if (s.kind === 'textBlock') {
+    const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
+    return box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
+  }
+  return sz * sz * 0.55; // emoji
+}
+
+/**
  * The fraction of a box inside the w × h frame: half extents (hx, hy),
  * centred at offset (ox, oy) from `p` before the turn, turned by `rot` about
  * `p` as the renderer turns it. Square to the frame it is the overlap of two
@@ -1484,29 +1511,9 @@ function rawDominance(spec: SaverSpec, opts: PerceiveOptions = {}): RawDominance
       const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei);
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      let entArea: number;
-      if (s.kind === 'circle') entArea = Math.PI * (sz / 2) * (sz / 2);
-      else if (s.kind === 'ring') entArea = Math.PI * sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
-      else if (s.kind === 'streak') entArea = sz * ((s.width ?? (scale === 1 ? 2 : 0.002)) * scale) * LINE_SALIENCE;
-      else if (s.kind === 'rect') entArea = boxInkArea(s, e, sz);
-      else if (s.kind === 'polygon') {
-        if (isPathPolygon(s)) {
-          const fr = pathFrame(s, sz / 2, w, h);
-          entArea = pathInkArea(s, fr.sx, fr.sy, sz / 2);
-        } else entArea = polygonArea(polygonPoints(s, sz / 2));
-      }
-      else if (s.kind === 'bar') entArea = boxInkArea(s, e, sz);
-      else if (s.kind === 'stroke') {
-        const meanTaper = s.taper ? 0.64 : 1; // ∫ sin(πu) du = 2/π
-        entArea = pathLength(strokeDrawnSamples(s, sz / 2)) * strokeWidthPx(s, scale) * meanTaper * LINE_SALIENCE;
-      }
-      else if (s.kind === 'text') {
-        const box = textBox(s, e, { x: 0, y: 0 }, fontScaleFor(spec, w, h), scale);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55;
-      } else if (s.kind === 'textBlock') {
-        const box = textBlockBox(s, e, { x: 0, y: 0 }, w, h);
-        entArea = box.halfX * 2 * box.halfY * 2 * 0.55 * textBlockRevealFraction(s, w, h, t) * (s.opacity ?? 1);
-      } else entArea = sz * sz * 0.55; // emoji
+      let entArea = entityInkArea(spec, s, e, sz, t, w, h, scale);
+      // Thin-but-bright lines draw the eye past their ink.
+      if (s.kind === 'ring' || s.kind === 'streak' || s.kind === 'stroke') entArea *= LINE_SALIENCE;
 
       // Only what lands in the frame counts: a layer parked off screen is
       // not the main mass, however big it is (X616).
@@ -1744,7 +1751,8 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       const e = entities[ei]!;
       const sz = sizeAt(e, t);
       const s = layer.sprite;
-      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer));
+      // A paint transform scales the ink by k² (as dominance weighs it).
+      const a = alphaAt(e, t) * lifeA * lifeStaggerAt(layer.life, t, ei) * onScreenFraction(scene, s, e, sz, k, t, paintRotation(spec, layer)) * k * k;
       if (a <= 0) continue;
       // A path drawing is the colours its parts paint, by the ink each lays
       // down: a part at opacity 0 adds nothing (X609).
@@ -1761,12 +1769,10 @@ export function sceneColour(spec: SaverSpec, opts: PerceiveOptions = {}): SceneC
       }
       const hex = spriteHex(layer, e);
       if (hex === null) continue;
-      // A rect or bar by the ink of its own box (as dominance counts it), not
-      // a square as wide as it is long: a thin rule is a sliver of colour.
-      const area = s.kind === 'circle' ? Math.PI * (sz / 2) * (sz / 2)
-        : s.kind === 'rect' || s.kind === 'bar' ? boxInkArea(s, e, sz)
-          : sz * sz;
-      add(hex, a * area);
+      // By the ink it lays down, as dominance counts it (without the line
+      // boost): a thin rule or ring is a sliver of colour, a long label more
+      // than one glyph, a triangle less than its circumradius square.
+      add(hex, a * entityInkArea(spec, s, e, sz, t, scene.w, scene.h, scene.scale));
     }
   }
   const bg = backgroundRgb(spec);

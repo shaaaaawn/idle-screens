@@ -41,6 +41,27 @@ describe('perception reads what is on screen', () => {
     expect(r).toBeGreaterThan(b!);
   });
 
+  it('every sprite adds colour by the ink it lays down, scaled by its layer transform', () => {
+    const rgb = (layers: unknown[]) => { const hex = perceiveScene(scene('#000000', layers), { viewport: { width: 1000, height: 1000 } }).colour.hex; return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]; };
+    const tile = (side: number) => L({ key: 'tile', position: { x: 0.5, y: 0.8 }, sprite: { kind: 'rect', width: [side, side], color: '#0000ff' } });
+    // A 0.6-wide ring 0.002 thick is 0.0038 of ink, not a 0.36 square: a 0.1 blue tile outweighs it.
+    const ring = L({ key: 'ring', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'ring', radius: [0.3, 0.3], width: 0.002, color: '#ff0000' } });
+    // A triangle of circumradius 0.1 is 0.013 of ink, not 0.04: a 0.15 tile (0.0225) outweighs it.
+    const tri = L({ key: 'tri', position: { x: 0.5, y: 0.4 }, sprite: { kind: 'polygon', sides: 3, radius: [0.1, 0.1], color: '#ff0000' } });
+    for (const [red, side] of [[ring, 0.1], [tri, 0.15]] as const) {
+      const [r, , b] = rgb([red, tile(side)]);
+      expect(b).toBeGreaterThan(r);
+    }
+    // A 20-glyph label is a line of ink (~0.02), not one 0.05 glyph square: it outweighs a 0.1 tile.
+    const label = L({ key: 'label', position: { x: 0.5, y: 0.3 }, size: [0.05, 0.05], sprite: { kind: 'text', strings: ['ABCDEFGHIJKLMNOPQRST'], color: '#ff0000' } });
+    const [lr, , lb] = rgb([label, tile(0.1)]);
+    expect(lr).toBeGreaterThan(lb);
+    // A layer drawn at twice the size lays four times the ink.
+    const red = L({ key: 'red', position: { x: 0.3, y: 0.3 }, transform: { scale: 2, origin: 'anchor' }, sprite: { kind: 'rect', width: [0.1, 0.1], color: '#ff0000' } });
+    const [sr, , sb] = rgb([red, tile(0.1)]);
+    expect(sr).toBeGreaterThan(sb * 2);
+  });
+
   it('X609: a drawing whose parts are all opacity 0 has no share and no colour', () => {
     const s = scene('#10082a', [
       L({ key: 'box', position: { x: 0.3, y: 0.5 }, sprite: { kind: 'polygon', radius: [0.1, 0.1], color: '#ff2a9a', path: sq } }),
