@@ -150,6 +150,14 @@ describe('validateSpec appends the hint and keeps the original wording', () => {
       .toMatch(/^unknown sprite property 'color' — will be ignored — 'color' belongs to sprite kinds 'text', 'circle', 'ring', 'streak' and \d+ more$/);
   });
 
+  it('a layer field inside a sprite is sent to the layer, ahead of a sibling kind with the same name', () => {
+    // textBlock has its own `opacity`; a circle's is the layer's.
+    expect(warning(scene([dots({}, { opacity: 0.5 })]), 'layers[0].sprite.opacity'))
+      .toBe("unknown sprite property 'opacity' — will be ignored — 'opacity' belongs on the layer");
+    expect(warning(scene([dots({}, { position: { x: 0.5, y: 0.5 } })]), 'layers[0].sprite.position'))
+      .toBe("unknown sprite property 'position' — will be ignored — 'position' belongs on the layer");
+  });
+
   it('a sprite or motion field on the layer is pointed inside', () => {
     expect(warning(scene([dots({ speed: [0.01, 0.02] })]), 'layers[0].speed'))
       .toBe("unknown layer property 'speed' — will be ignored — 'speed' belongs inside `motion`");
@@ -213,6 +221,17 @@ describe('enum errors suggest the nearest option', () => {
   it('nothing for a far-off value, or one that is not a string', () => {
     expect(error(scene([dots({ blend: 'glow' })]), 'layers[0].blend')).toBe("must be 'lighter' | 'screen' | 'multiply' when set");
     expect(error(scene([dots({ blend: 3 })]), 'layers[0].blend')).toBe("must be 'lighter' | 'screen' | 'multiply' when set");
+  });
+
+  it('once, in a sequence segment\'s scene', () => {
+    const s = {
+      format: 'idle-sequence', schemaVersion: 1, id: 'seq', label: 'Seq',
+      segments: [{ key: 'a', scene: scene([dots({ blend: 'lightr' })]), duration: 5000 }, { key: 'b', scene: scene([dots()]), duration: 5000 }],
+    };
+    const msgs = validateSequence(s).errors.map((e) => e.message).filter((m) => m.includes('lighter'));
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.match(/did you mean/g)).toHaveLength(1);
+    expect(msgs[0]).toMatch(/must be 'lighter' \| 'screen' \| 'multiply' when set — did you mean 'lighter'\?$/);
   });
 
   it('on the sequence envelope too', () => {

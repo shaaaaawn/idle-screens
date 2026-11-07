@@ -1532,7 +1532,10 @@ function validateSprite(sprite: unknown, path: string, err: (p: string, m: strin
     if (LAYER_PROPS_ON_SPRITE.has(k)) {
       warn(`${path}.${k}`, 'misplaced-property', `'${k}' belongs on the layer, not inside sprite — move it up one level`);
     } else {
-      warn(`${path}.${k}`, 'unknown-property', `unknown sprite property '${k}' — will be ignored${fieldHint(k, knownSet, SPRITE_OWNERS)}`);
+      // A layer field (`opacity`, `position`, `transform`, …) outranks a sibling kind
+      // that shares the name: a circle's `opacity` is the layer's, not textBlock's.
+      const hint = KNOWN_LAYER.has(k) ? ` — '${k}' belongs on the layer` : fieldHint(k, knownSet, SPRITE_OWNERS);
+      warn(`${path}.${k}`, 'unknown-property', `unknown sprite property '${k}' — will be ignored${hint}`);
     }
   }
 }
