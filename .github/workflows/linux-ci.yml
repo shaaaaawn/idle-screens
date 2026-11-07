@@ -7,6 +7,7 @@ on:
       - 'apps/linux/**'
       - '.github/workflows/linux-ci.yml'
   pull_request:
+    branches: [main]
     paths:
       - 'apps/linux/**'
       - '.github/workflows/linux-ci.yml'

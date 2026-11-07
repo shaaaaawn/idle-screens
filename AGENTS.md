@@ -153,7 +153,7 @@ hand (see any existing `.changeset/*.md` file for the format).
 - iOS / tvOS app (`apps/ios` — ships via TestFlight / App Store, not npm)
 - Linux app (`apps/linux` — ships via PKGBUILD / manual install, not npm)
 - Docs, tests, CI, refactors with no published API change
-- Work that is not ready to publish (merge it without a changeset; it ships with the next PR that has one)
+- Work that is not ready to publish (merge it without a changeset; it ships when a later changeset versions the affected package)
 
 No CI check enforces changesets. Forgetting one does not break the build — npm
 just won't get new versions until a changeset lands on `main`.

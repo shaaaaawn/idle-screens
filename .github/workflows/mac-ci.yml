@@ -19,6 +19,7 @@ on:
       - 'pnpm-workspace.yaml'
       - '.github/workflows/mac-ci.yml'
   pull_request:
+    branches: [main]
     paths:
       - 'apps/mac/**'
       - 'packages/core/**'
