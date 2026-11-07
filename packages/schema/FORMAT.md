@@ -365,7 +365,7 @@ on the sprite tier (the `basic` tier rule).
 | `spin` | number \| `[min,max]` ±360 deg/sec | none | per-entity rotation (seeded start angle — drawn from the scene's one shared seeded stream, so it is reproducible for a given spec, seed **and viewport** but not a fixed per-entity value: density scaling changes how many entities draw before it, and declaring a `rotate` range adds a draw per entity, so either one changes the angles; use `rotate` for an angle you need to pin); a range gives each entity a seeded speed (confetti, tumbling debris). `[0, 0]` does **not** hold the seeded angle — a zero speed renders at 0; use `rotate` |
 | `rotate` | number \| `[min,max]` ±360 deg | none | **static** per-entity rotation: a scalar turns the whole layer, a range gives each entity a seeded angle (thrown blades, scattered glyphs, a tilted grid). Adds to `spin`'s start angle. Structural. **Native:** rendered |
 | `grow` | `{amp ≤ 0.8, period ≥ 500}` | none | size breathing (seeded phase) |
-| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Rotation is not in the luminance grid, so perception does not see it. **Native:** rendered |
+| `rock` | `{amp ≤ 45, period ≥ 1000}` (degrees, ms) | none | a **swing** about each entity's resting angle (`rotate` plus any `spin`): `amp` degrees either side, once per `period` there and back, on a seeded per-entity phase — a boat on a swell, a hanging sign, a lantern. A `clock` replaces the seeded phase (the layer swings in step) and then needs `period / rate ≥ 1000`. Structural, like `pulse`; its phases are drawn in a pass after the layer's entities, only when declared, so declaring it re-seats nothing else in the layer. Perception turns the sprite with the swing (and counts it as motion) wherever it models rotation at all: a `polygon` large enough to be traced by its outline, a `bar`, a `stroke`, a `streak` — not a `rect`, text or emoji (see **Perception**). **Native:** rendered |
 | `trail` | `{length ≤ 5000, fade?}` | none | analytic afterglow trail; `length` is **milliseconds** of history (max 5000), `fade` a number 0..1 (not a boolean — `links.falloff` in the next row is the boolean). Echoes of a shaped sprite (`polygon`, `stroke`, `rect`, `ring`, `streak`, `bar`) are the sprite's own shape as it was then, shrinking toward the tail; `circle`, `emoji` and text trail discs. A hard `circle`'s trail is one continuous ribbon tapering behind it, so a quick path draws a line rather than a string of dots (a layer whose ribbons would cover more than a tenth of the screen draws its echo discs instead, to bound the cost); a `soft` circle's echoes are filled in where they would part, within a small per-layer budget |
 | `links` | see below | none | inter-entity lines |
 | `layout` | `{type: "grid", columns?, jitter?}` \| `{type: "list", gap?}` \| `{type: "table", columns, gap?}` (`gap`: a number or `{x?, y?}`) | scatter | `grid`: cells fill `region`, `jitter` scalar or `{x?, y?}` 0..1 per axis. **`list` / `table`: data layouts** — entities in reading order from `position` (any count) or centred in `region`, `gap` apart (viewport units of `min(w,h)`, default 0.06; a number or `{x?, y?}` — a list is one column, so only its `y`, the row pitch, applies). **`gap` is the pitch between cell anchors, not the space between cells** — a label wider than the column pitch runs into its neighbour (the `layout-text-overlap` advisory names the gap that clears it), so size `gap.x` to the widest label. Text/emoji take `strings[i]` / `glyphs[i]` **in order**, so N labels are one layer; a shaped sprite's palette (`colors[i]` on `bar`, `rect`, `circle`…) is read in order too. **Text and emoji have no `colors`**: a `text` layer paints every label in its one `color` (a `colors` on it is an unknown property, ignored with a warning) — use one layer per label colour |
@@ -1137,7 +1137,17 @@ trade-offs for a zero-dependency, renderer-free analysis tool.
 A `timeline` is resolved at the sample time `t` before anything is measured,
 so every output below describes the scene as it is at that moment of the
 piece. Layer `opacity` scales a layer's ink and weight; a layer `transform`
-moves and scales its positions and sizes (sprite rotation is not modelled).
+moves, scales and turns its positions and sizes.
+
+Sprite rotation (`spin`, `rotate`, `rock`, and a layer's or group's
+`transform.rotate`) turns a `polygon` in the luminance maps once it is large
+enough to be traced by its outline (about 3 grid cells across, or a path
+drawing with a `span` or `origin`; a smaller one is measured as its
+circumscribed disc, which turning does not change), and turns a `bar`, a
+`stroke` and a `streak`. A spinning or rocking shape's turn counts toward its
+motion speed even when its centre stands still. A `rect`, `text`, `textBlock`
+and `emoji` are measured as their **unrotated** box in the maps; the text
+advisories (`text-off-screen` and kin) do judge text by its rotated box.
 
 - `perceiveScene(spec, {t?, viewport?, seed?})` — one-call bundle: everything below.
   **`t` is in milliseconds** (the MCP `previewScene` tool takes seconds and
@@ -1336,6 +1346,12 @@ timeline. Discriminated from SaverSpec by `format: 'idle-sequence'`.
 **Segments:** 1–24 segments, each carrying an unmodified SaverSpec. Keys must
 be unique. Duration is in milliseconds (minimum 1000 ms for flash safety). Only
 the final segment may omit duration (holds indefinitely).
+
+**Unknown fields** on the envelope, a segment or a transition are ignored with
+an `unknown-property` warning, as they are in a scene (never an error, so a
+stored sequence keeps loading). A scene field written one level too high, such
+as `motionIntensity` on the envelope or `ghosting` on a segment, does nothing
+there: it belongs inside each segment's `scene`, or in the `bed`.
 
 **Advance mode:** `auto` (default) and `either` advance on the timer. `input`
 makes a timed segment **hold** at the end of its `duration` until a

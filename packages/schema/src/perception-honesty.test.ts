@@ -79,6 +79,25 @@ describe('perception reads what is on screen', () => {
     expect(c.y).toBeGreaterThan(0.55);
   });
 
+  it('vork-review A6: a rocking polygon swings its ink in the maps, and moves while its centre stands still', () => {
+    // FORMAT.md once said rock (and all sprite rotation) was invisible to
+    // perception; the outline path turns it. The wedge is large enough to be
+    // traced by its outline, and the clock pins the phase: rotationAt is
+    // amp · sin(2πt / period), so +45° at a quarter period, −45° at three.
+    const wedge = (rock?: Record<string, unknown>): SaverSpec => scene('#000000', [L({
+      key: 'sign', position: { x: 0.5, y: 0.5 }, ...(rock ? { rock, clock: { phase: 0 } } : {}),
+      sprite: { kind: 'polygon', radius: [0.3, 0.3], color: '#ffffff', path: 'M 0 0 L 0.95 -0.15 L 0.95 0.15 Z' },
+    })]);
+    const at = (s: SaverSpec, t: number) => perceiveScene(s, { viewport: { width: 400, height: 400 }, t });
+    const rocking = wedge({ amp: 45, period: 4000 });
+    expect(at(rocking, 1000).centroid!.y).toBeGreaterThan(0.55); // tip swung down
+    expect(at(rocking, 3000).centroid!.y).toBeLessThan(0.45); // …and up
+    expect(at(rocking, 2000).motion[0]!.moving).toBe(true); // mid-swing, fastest
+    const still = wedge();
+    expect(at(still, 3000).centroid).toEqual(at(still, 1000).centroid);
+    expect(at(still, 2000).motion[0]!.moving).toBe(false);
+  });
+
   it('X603: a vertical caption is judged by its rotated box', () => {
     const s = scene('#1c0644', [{ key: 'side', count: 1, position: { x: 0.965, y: 0.5 }, rotate: 90, alpha: [0.75, 0.75], motion: { type: 'static' }, sprite: { kind: 'textBlock', text: 'CD-ROM  ·  WWW  ·  KIOSK  ·  14.4  ·  28.8  ·  ISDN', maxWidth: 1.2, fontSize: 0.015, color: '#c8a8ff', anchor: 'center', font: 'monospace' } }]);
     expect(codes(s, 1920, 1080)).not.toContain('text-off-screen');
