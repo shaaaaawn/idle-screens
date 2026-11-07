@@ -55,7 +55,8 @@ live steers), `rock`, `life.stagger`, `reveal.rise`, `textBlock.number`, the
 `wipe` transition, `scenePeriod` and the `loop-seam` advisory
 (2026-10-25 — motion vocabulary); path paint on `points` polygons,
 `textBlock.number.minDigits`, `stroke.draw.mode` and `transform.scaleY`
-(2026-10-27 — small format adds).
+(2026-10-27 — small format adds); `phase` and `loop` (`once` / `hold`) on
+`path` motion (2026-11-06 — choreographed paths).
 
 ## Safety invariants
 
@@ -734,7 +735,7 @@ fractions of `min(w, h)` like every size (px under `units: "px"`).
 | `orbit` | **`speed`**, **`radius`**, `center` | `speed` [min,max] **degrees** per second (negative turns the other way, ≤ 180); `radius` [min,max]; `center` `{x, y}` 0..1 or `{layer}` |
 | `wander` | **`speed`**, `angle`, `meander`, `coherence`, `ease` | `speed` [min,max] per second; `angle` degrees (omit for a seeded heading); `meander` amplitude ≤ 0.463; `coherence` 0..1 |
 | `warp` | **`speed`**, `center` | `speed` [min,max] **depth-units** per second (≤ 1.5); `center` `{x, y}` 0..1 |
-| `path` | **`points`**, **`duration`**, `curve`, `closed`, `scatter` | `points` 2..24 `{x, y}` 0..1; `duration` ms per lap (≥ 2000); `curve` `"smooth"` \| `"linear"`; `closed` boolean; `scatter` > 0 |
+| `path` | **`points`**, **`duration`**, `curve`, `closed`, `scatter`, `phase`, `loop` | `points` 2..24 `{x, y}` 0..1; `duration` ms per lap (≥ 2000); `curve` `"smooth"` \| `"linear"`; `closed` boolean; `scatter` > 0; `phase` 0 ≤ phase < 1; `loop` `"loop"` \| `"once"` \| `"hold"` |
 
 `ease` is `{ "type": "settle" | "buoyant", "tau": ms }` (below). `bob` and
 `sway` warn `motion-amplitude` above 0.25: `bob: 4` swings the layer four
@@ -771,6 +772,50 @@ screen-heights each way, a px value written into a viewport-unit spec.
   rather than writing `0`); each entity gets a seeded phase along it. A single
   entity cannot show a curve — use `count` ≥ 12 (plus `trail`/`ghosting`) to
   make the whole path read
+- **Choreographed paths** — `{ "type": "path", "points": [...], "duration": 6000, "phase": 0, "loop": "hold" }`:
+  - **`phase`** fixes where on its lap the entity is at t = 0 (0 ≤ phase < 1,
+    a fraction of the lap), in place of the seeded phase. A closed lap passes
+    point *k* of *n* at `k / n`; an open lap is there and back, so it reaches
+    its last point at 0.5 and passes point *k* at `k / (n − 1) / 2` on the
+    way out. With `count` > 1, entity *i* starts at `(phase + i / count) mod 1`
+    — an evenly spaced procession — and the layer's `count` is exact: a
+    fixed-phase layer is never thinned or thickened by viewport density (as
+    a grid is not), so a count-1 dancer stays one dancer on a 4K wall. The
+    seeded draw is still consumed, so declaring `phase` moves no other
+    seeded value (at the reference viewport; elsewhere it can change how many
+    entities the layer builds, as changing `count` would).
+  - **`loop`** says where the motion stops. `"loop"` (default) never does:
+    closed paths go round, open ones ping-pong. `"once"` runs to the end of
+    its lap — back at the first point — and rests there. `"hold"` runs to the
+    **last** point and rests there: arrive and stay (a closed path does not
+    run its closing segment). An entity that starts past its stopping point
+    gets there on the next lap. Until it stops, the motion is exactly the
+    loop's — the same speed and the same knot times — so switching `loop`
+    changes only where it ends. It stops at speed: put the last two points
+    close together to decelerate into the rest. A resting `streak` or
+    oriented `stroke` keeps the heading it arrived with.
+  - **Time.** The pass is counted from scene time 0 — a pure function of
+    `t`, so seeks, `renderFrame(t)`, previews and ghosting warm-ups agree, and
+    seeking back before the stop shows it moving again. In a sequence that is
+    the segment's own clock: each segment starts its pass when it starts.
+    A looping `timeline` does not replay the pass (scene time keeps running
+    past the lap; `adviseSpec` notes it as `path-runs-once`), and a layer
+    `clock` never touches path timing. With
+    **`emit`**, the pass replays from `phase` on every event (as `ease`
+    restarts its travel) — a meteor that crosses on each event; its `trail`
+    starts at the event, so it never ribbons back across the replay. Without
+    `emit` a scene with a `once` / `hold` path has no repeat period.
+  - **Steering.** `phase` is a number, so `setParam` glides it — numerically:
+    0.9 → 0.1 runs back through the lap, it does not cross the seam. Because
+    `motion` is structural the scene is re-placed every frame of the glide
+    (the cost of any structural glide); nothing re-seeds, since the draw is
+    kept, so only that layer's entities move. A `timeline` key on `phase`
+    glides the same way and does not warn `timeline-structural-key`. `loop` is
+    an enum: a steer on it steps, and it is not listed in `steerablePaths`
+    (like `curve`). Two sequence segments that differ in `phase` are not
+    structural twins, so a `morph` between them falls back to a cut, with a
+    `morph-structural-mismatch` warning.
+  - **Native:** rendered (tvOS / iOS place, stop and orient the same way).
 
 All speeds are ranges; each entity draws its own value (seeded).
 
@@ -1266,6 +1311,9 @@ stands still.
   `life-runs-once` (informational) notes a layer whose `life` envelope sits
   under a looping timeline: `life` runs on scene time from mount, so it plays
   once and never replays when the lap wraps.
+  `path-runs-once` (informational) is the same note for a `path` with
+  `loop: "once"` or `"hold"` (and no `emit`): its pass runs on scene time, so
+  its pass is not replayed when the timeline loops.
   `uniform-motion` fires when every entity of a moving layer travels at
   nearly the same on-screen speed; an orbit's is its angular speed × its
   radius, so one angular speed over a spread of radii is not uniform.

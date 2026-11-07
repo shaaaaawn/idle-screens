@@ -741,6 +741,20 @@ export type MotionSpec =
    * path; open paths ping-pong. Each entity gets a seeded phase offset along the
    * path, and `scatter` (dimensional) adds a seeded per-entity offset so shared
    * paths don't stack. Figure-eights, sweeping arcs, patrol routes.
+   *
+   * `phase` (0 ≤ phase < 1) replaces the seeded phase with a fixed one: where on
+   * its lap the entity is at t = 0, as a fraction of the lap (an open path's lap
+   * is there and back, so 0.5 is its last point). Entity i of n gets
+   * `(phase + i / n) mod 1` — an even procession — and a fixed-phase layer's
+   * count is exact (never density-scaled), as a grid's is. The seeded draw is
+   * still consumed, so at the reference viewport declaring `phase` shifts no
+   * other seeded value; elsewhere it can change how many entities the layer
+   * builds, as changing `count` would.
+   *
+   * `loop` (default 'loop') says where the motion stops: 'once' runs to the end
+   * of the lap (back at the first point) and rests there; 'hold' runs to the
+   * LAST point and rests there — arrive and stay. Until it stops the motion is
+   * exactly the loop's. With `emit`, the pass replays from `phase` each event.
    */
   | {
       type: 'path';
@@ -749,7 +763,16 @@ export type MotionSpec =
       curve?: 'linear' | 'smooth';
       closed?: boolean;
       scatter?: number;
+      phase?: number;
+      loop?: PathLoop;
     };
+
+/**
+ * Where a `path` motion stops (see the `path` motion): 'loop' never stops,
+ * 'once' rests where its lap ends (the first point), 'hold' rests on the last
+ * point.
+ */
+export type PathLoop = 'loop' | 'once' | 'hold';
 
 /** A validation problem, pointing at a JSON path within the spec. */
 export interface SpecError {
