@@ -160,6 +160,9 @@ function fieldHint(k: string, known: Iterable<string>, owners?: Owners): string 
  */
 const ENUM_MESSAGE = /^must be ((?:'[^']+'|[A-Za-z][\w-]*)(?: \([^)]*\))?(?: \| (?:'[^']+'|[A-Za-z][\w-]*)(?: \([^)]*\))?)+)(?: when set)?$/;
 
+/** The prose form of the same check: `must be 'cut', 'morph', 'fade' or 'wipe'`. */
+const ENUM_PROSE_MESSAGE = /^must be ('[^']+'(?:, '[^']+')* or '[^']+')$/;
+
 /**
  * ` — did you mean 'lighter'?` for a string the enum message at `path`
  * refused (#122), read from the message itself like `shapeHint`, so every
@@ -168,10 +171,13 @@ const ENUM_MESSAGE = /^must be ((?:'[^']+'|[A-Za-z][\w-]*)(?: \([^)]*\))?(?: \| 
  */
 function enumHint(root: unknown, path: string, message: string): string {
   const m = ENUM_MESSAGE.exec(message);
-  if (!m) return '';
+  const prose = m ? null : ENUM_PROSE_MESSAGE.exec(message);
+  if (!m && !prose) return '';
   const v = valueAtPath(root, path);
   if (!isStr(v)) return '';
-  const options = m[1]!.split(' | ').map((o) => o.replace(/ \(.*$/, '').replace(/^'(.*)'$/, '$1'));
+  const options = m
+    ? m[1]!.split(' | ').map((o) => o.replace(/ \(.*$/, '').replace(/^'(.*)'$/, '$1'))
+    : [...prose![1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
   const near = nearest(v, options);
   return near ? ` — did you mean '${near}'?` : '';
 }

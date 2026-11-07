@@ -9,7 +9,7 @@ import { LIMITS, type IdleSequence, type SaverSpec, type SpriteSpec } from './ty
 // Cycle (validate.ts imports structuralSignature from here) is safe: neither
 // module touches the other's exports at load time, only inside functions.
 import { ignoredPropertyPaths } from './validate';
-import { nearestPath } from './nearest';
+import { nearest, nearestPath } from './nearest';
 
 interface PathTarget {
   parent: Record<string, unknown> | unknown[];
@@ -499,7 +499,7 @@ export function steerablePaths(spec: unknown): string[] {
 }
 
 /**
- * The steerable path a path that does not resolve was most likely meant to be
+ * The path a non-resolving steer was most likely meant to be
  * (#122) — `layers.0.speed` → `layers.0.motion.speed`, `layers.0.sprite.radious`
  * → `layers.0.sprite.radius` — or undefined when none is clearly closest
  * (`nearestPath`'s rule: a tie suggests nothing). A path that starts with a
@@ -513,13 +513,22 @@ export function suggestSpecPath(spec: unknown, path: string, paths?: readonly st
   const candidates = paths ?? steerablePaths(spec);
   const [head, ...rest] = path.split('.');
   const layers = (spec as { layers?: unknown } | null)?.layers;
-  const idx = head !== undefined && head !== 'layers' && head !== 'background' && Array.isArray(layers)
-    ? layers.findIndex((l) => !!l && typeof l === 'object' && (l as Record<string, unknown>).key === head)
-    : -1;
-  if (idx === -1) return nearestPath(path, candidates);
+  const keys = Array.isArray(layers)
+    ? layers.map((l) => (l && typeof l === 'object' && typeof (l as Record<string, unknown>).key === 'string' ? (l as { key: string }).key : undefined))
+    : [];
+  const real = keys.filter((k): k is string => k !== undefined);
+  const skip = head === undefined || head === 'layers' || head === 'background' || rest.length === 0;
+  // An exact layer key, else (a typo'd key) the one key nearest the head — the leaf is then
+  // matched on that layer and the answer keeps the key the author wrote or meant.
+  const layerKey = skip ? undefined : real.includes(head!) ? head : nearest(head!, real);
+  const idx = layerKey === undefined ? -1 : keys.indexOf(layerKey);
+  if (idx === -1 || layerKey === undefined) return nearestPath(path, candidates);
   const prefix = `layers.${idx}.`;
-  const hit = nearestPath(prefix + rest.join('.'), candidates);
-  return hit?.startsWith(prefix) ? `${head}.${hit.slice(prefix.length)}` : hit;
+  const typed = prefix + rest.join('.');
+  // A typo'd key with an otherwise valid leaf: the path is right once the key is.
+  if (layerKey !== head && candidates.includes(typed)) return `${layerKey}.${rest.join('.')}`;
+  const hit = nearestPath(typed, candidates);
+  return hit?.startsWith(prefix) ? `${layerKey}.${hit.slice(prefix.length)}` : hit;
 }
 
 /**

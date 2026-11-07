@@ -265,3 +265,19 @@ describe('timeline keys on a path that does not resolve', () => {
     expect(error(spec, 'timeline.keys[0].path')).toBe("'layers.0.zorp' does not resolve on the spec — a key can only animate a field the spec already has");
   });
 });
+
+describe('review follow-ups (#409)', () => {
+  it('suggests a typo-d layer key in key form', () => {
+    const spec = { layers: [{ key: 'fireflies', motion: { type: 'drift', speed: 1 } }] };
+    expect(suggestSpecPath(spec, 'fireflis.motion.speed', ['layers.0.motion.speed'])).toBe('fireflies.motion.speed');
+    expect(suggestSpecPath(spec, 'fireflis.speed', ['layers.0.motion.speed'])).toBe('fireflies.motion.speed');
+  });
+  it('names an extra dot', () => {
+    expect(nearestPath('layers..0.motion.speed', ['layers.0.motion.speed'])).toBe('layers.0.motion.speed');
+  });
+  it('hints a misspelt transition type from the prose enum message', () => {
+    const r = validateSequence({ schemaVersion: 1, id: 's', segments: [{ scene: { schemaVersion: 1, id: 'a', layers: [] }, transition: { type: 'wip' } }] } as never);
+    const e = r.errors.find((x) => x.path.endsWith('transition.type'));
+    expect(e?.message).toMatch(/did you mean 'wipe'\?$/);
+  });
+});

@@ -75,8 +75,8 @@ export function nearest(name: string, candidates: Iterable<string>): string | un
   return unique(list, (c) => nameDistance(name, c));
 }
 
-/** `layers[0].motion` and `layers.0.motion` as the same segments. */
-const segments = (path: string): string[] => path.replace(/\[(\d+)\]/g, '.$1').split('.').filter((s) => s !== '');
+/** `layers[0].motion` and `layers.0.motion` as the same segments (an empty one — `layers..0` — is kept: it is a typo to name). */
+const segments = (path: string): string[] => path.replace(/\[(\d+)\]/g, '.$1').split('.');
 const isIndex = (s: string): boolean => /^\d+$/.test(s);
 
 /**

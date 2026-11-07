@@ -1,5 +1,5 @@
 ---
-"@idle-screens/schema": patch
+"@idle-screens/schema": minor
 ---
 
 Validator messages now say what was probably meant. Each hint is appended to the existing message; the original wording, codes and paths are unchanged.
