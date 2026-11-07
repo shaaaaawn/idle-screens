@@ -8,8 +8,6 @@ offline saver engine** (the same web build the Mac app ships — 32 savers as of
 today; `apps/mac/web/src/savers.ts` is the source of truth). Exits on user
 input (overlay mode only).
 
-> **Branch:** the Linux app lives on the `develop` branch today (`apps/linux/`).
-
 ## Does this run on my system?
 
 Two independent questions, and only one of them is about your distro.
@@ -530,12 +528,11 @@ cd apps/linux
 
 ### First build
 
-From a fresh clone on `develop`:
+From a fresh clone:
 
 ```bash
 git clone https://github.com/shaaaaawn/idle-screens.git
 cd idle-screens
-git checkout develop        # the Linux app lives here
 
 # node deps (once)
 pnpm install          # or: npx --yes pnpm@9 install
@@ -584,7 +581,7 @@ SKIP_WEB=1 ./scripts/dev-run.sh --windowed --channel ballet
 
 ## Release (maintainers)
 
-Tag `linux-v0.1.0` on `develop`/`main` to trigger `.github/workflows/linux-release.yml`:
+Tag `linux-v0.1.0` on `main` to trigger `.github/workflows/linux-release.yml`:
 
 ```bash
 git tag linux-v0.1.0

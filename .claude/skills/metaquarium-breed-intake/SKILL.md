@@ -17,7 +17,7 @@ this skill is the running order and the judgement calls, not a second copy.**
 
 ## Running order
 
-1. **Worktree.** Use a fresh branch from `develop` in the scratchpad.
+1. **Worktree.** Use a fresh branch from `main` in the scratchpad.
    Run `pnpm install`, then build `./packages/**` **inside** it: typecheck
    needs the sibling packages' `dist`.
 2. **Source in**: `breeds/source/<breed>.glb`. Add a `breeds.json` entry,
@@ -52,7 +52,7 @@ this skill is the running order and the judgement calls, not a second copy.**
 9. **Gate.** Run the metaquarium vitest (`breeds.test.ts` decodes every
    bundled chunk: no Draco, every declared material has a role, within budget),
    then preflight through a fake mono pointed at the worktree.
-   Open a PR to `develop` with the `REPORT.md` table and a lab screenshot.
+   Open a PR to `main` with the `REPORT.md` table and a lab screenshot.
 
 ## Judgement calls that cost time to learn
 

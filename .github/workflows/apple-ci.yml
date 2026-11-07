@@ -2,7 +2,7 @@ name: Apple CI
 
 # The iPhone and Apple TV apps share IdleScreens/API, /Render and /Theme
 # wholesale, so a file written for one target can break the other without
-# anyone building it — the TV target sat uncompilable on develop that way.
+# anyone building it — the TV target once sat uncompilable that way.
 # This compiles both and runs both unit suites whenever apps/ios changes.
 #
 # Nothing here signs or ships: TestFlight goes out from a developer machine
@@ -10,7 +10,7 @@ name: Apple CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths: ["apps/ios/**", ".github/workflows/apple-ci.yml"]
   pull_request:
     paths: ["apps/ios/**", ".github/workflows/apple-ci.yml"]

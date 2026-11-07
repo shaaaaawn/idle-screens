@@ -5,7 +5,7 @@ name: Mac CI
 # moment. This mirrors linux-ci.yml — compile and test on every change.
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - 'apps/mac/**'
       # The web bundle imports these workspace packages, so a change to any of
