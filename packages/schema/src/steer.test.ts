@@ -420,7 +420,7 @@ describe('steerablePaths ↔ resolveSpecPath (vork-review A5)', () => {
   ];
 
   it('covers the shipped examples and fixtures', () => {
-    expect(corpus.length).toBeGreaterThan(EXAMPLE_SPECS.length);
+    expect(corpus.map(([n]) => n)).toEqual(expect.arrayContaining(['timed/dx-mark.json', 'timed/timed-sunrise.json']));
   });
   for (const [name, scene] of corpus) {
     it(`${name}: every steerablePaths entry resolves`, () => {

@@ -1,5 +1,5 @@
 ---
-"@idle-screens/schema": patch
+"@idle-screens/schema": minor
 ---
 
 Three fixes from a review of the agent contract.

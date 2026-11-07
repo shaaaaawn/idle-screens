@@ -39,7 +39,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   shot: 'A framing: `orbit`, `hero` (three-quarter), `front` (level, long lens), `low`, `top` (a map), `surface`, `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
   cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera (its params ignored while following).',
-  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 facing it.',
+  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 facing it. A choreographed dancer is measured from the stage\'s facing instead.',
   followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye (a walker\'s: its head height).',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot, 1–2 a slow reveal. frame.state.camera.bearing: where it stands now.',
   followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises or pulls in, eased.',
@@ -89,7 +89,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes, lamps, 0–1: nothing floats.',
   voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1. All tiers.',
   swimWave: 'Fish bend as they swim: a wave nose to tail, the body curling into turns (0 = rigid wiggle). Skips the turtle, crab and fish with a skeleton; the seahorse gets fin, tail and nod instead.',
-  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
+  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',

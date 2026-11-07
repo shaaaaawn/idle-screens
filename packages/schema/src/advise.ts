@@ -501,8 +501,9 @@ export function adviseSpec(
   }
 
   // The same trap for a path that stops (`loop: 'once' | 'hold'`): its pass
-  // is counted on scene time, so it rests after the first lap of the
-  // timeline and stays at rest for every later one. With `emit` the pass
+  // is counted on scene time, so it keeps progressing across timeline
+  // wraps until its pass ends, and a pass that outlasts a lap is not
+  // restarted by the loop. With `emit` the pass
   // replays per event instead, which is its own clock — not noted.
   if (authored.timeline?.loop && (authored.timeline.duration ?? 0) > 0) {
     const lap = Math.round(authored.timeline.duration!);

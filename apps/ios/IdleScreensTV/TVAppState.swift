@@ -1148,7 +1148,7 @@ final class TVAppState {
     /// The track's `sequence.segment` cue, if it has one.
     nonisolated static func segmentCue(_ track: JSONValue?) -> JSONValue? {
         guard case .object(let t)? = track, let raw = t["deltas"]?.array else { return nil }
-        return raw.last { item in
+        return raw.first { item in
             if case .object(let d) = item { return d["path"]?.string == "sequence.segment" && d["value"]?.number != nil }
             return false
         }
@@ -1163,7 +1163,7 @@ final class TVAppState {
         guard let seq = activeSequence, let cue = Self.segmentCue(track), cue != lastSegmentCue,
               case .object(let d) = cue, let value = d["value"]?.number else { return }
         lastSegmentCue = cue
-        let index = max(0, min(seq.segments.count - 1, Int(value.rounded())))
+        let index = max(0, min(seq.segments.count - 1, Int(min(Double(seq.segments.count - 1), max(0, value.rounded())))))
         let start = seq.segmentStart(index)
         sequenceReleasedBelow = index
         sequenceEpoch = Date().addingTimeInterval(-start)

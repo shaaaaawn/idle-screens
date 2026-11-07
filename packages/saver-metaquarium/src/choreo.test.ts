@@ -19,7 +19,7 @@ describe('choreography: the sheet', () => {
   });
   it('anything after a cue that is not a modifier is named', () => {
     expect(parseChoreography('4:march, y:jacks', MOVES).problems[0]).toMatch(/"y:jacks" is not >to/);
-    expect(parseChoreography('4:march, x:jacks', MOVES).problems[0]).toMatch(/x:jacks/); // read as a speed, and refused
+    expect(parseChoreography('4:march, x:jacks', MOVES).problems[0]).toMatch(/speed ":jacks" is not a multiple/); // read as a speed, and refused
   });
   it('a speed plays the move faster or slower, within reason', () => {
     const { lines, problems } = parseChoreography('4:march x2, 4:sway x0.5, 4:walk x99, 4:jacks xfast', MOVES);

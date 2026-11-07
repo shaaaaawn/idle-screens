@@ -2,12 +2,12 @@
 "@idle-screens/schema": patch
 ---
 
-Dominance and scene colour now clip every shape to the frame as it is painted, turned as it is turned. Before, most kinds were clipped as a square about the sprite. Each kind is now clipped this way:
+Dominance and scene colour now clip each base sprite's ink to the frame as it is painted, turned as it is turned. Before, most kinds were clipped as a square about the sprite. `text`/`textBlock` and a dominance trail or ghost still count in full off-screen. Each kind is now clipped this way:
 
 - a circle as its disc (a `soft` one weighted by its gradient);
 - a ring as its stroked annulus;
 - a small polygon as its outline;
-- a path drawing as its turned frame box, not that box's bounding box;
+- a path drawing by its own outlines: each part's fill and each stroke segment, clipped as turned;
 - a streak as its segment from tail to head, weighted by its fade;
 - a stroke by the length of its path, taper-weighted.
 
