@@ -16,6 +16,10 @@ struct PairedScreen: Codable, Equatable, Identifiable, Sendable {
     var lastDeliveredAt: Date?
     /// When a push last found nobody home (HTTP 409, `delivered: 0`).
     var lastUnansweredAt: Date?
+    /// The screen's pairing public key (`PairKeySeal`), from the claim. nil
+    /// for a pairing made before screens gave one, or a screen that does not:
+    /// it can be sent channels, not a private channel's key.
+    var publicKey: String? = nil
 
     var id: String { deviceId }
 
@@ -205,7 +209,8 @@ extension AppState {
                 deviceId: claimed.deviceId,
                 channelId: claimed.channelId,
                 pairedAt: Date(),
-                lastSeenAt: nil)
+                lastSeenAt: nil,
+                publicKey: claimed.publicKey)
             // Re-pairing the same screen refreshes it rather than duplicating.
             if let index = pairedScreens.firstIndex(where: { $0.deviceId == claimed.deviceId }) {
                 pairedScreens[index] = screen
@@ -277,7 +282,8 @@ extension AppState {
         if !quiet { isPairing = true }
         defer { if !quiet { isPairing = false } }
         do {
-            try await pairClient.push(pairToken: token, channelId: channelId, sceneId: sceneId)
+            let sealed = try await sealedViewerKey(channelId: channelId, for: screen)
+            try await pairClient.push(pairToken: token, channelId: channelId, sceneId: sceneId, sealedKey: sealed)
             if let index = pairedScreens.firstIndex(where: { $0.deviceId == screen.deviceId }) {
                 pairedScreens[index].channelId = channelId
                 // A delivered push is the one real proof the screen is there.
@@ -300,6 +306,68 @@ extension AppState {
             }
             return false
         }
+    }
+
+    // MARK: A private channel's key, for a screen
+
+    enum ScreenKeyError: LocalizedError, Equatable {
+        case needsRepair(String)
+        case editorKey
+
+        var errorDescription: String? {
+            switch self {
+            case .needsRepair(let screen):
+                "This \(screen) was paired before it could take a private channel's key. Pair it again, then send."
+            case .editorKey:
+                "This phone holds an editor key for that channel, and a screen only ever gets a viewer key. Ask its owner for a viewer key to send."
+            }
+        }
+    }
+
+    /// Where the viewer key this phone minted for one screen is kept, so a
+    /// re-send reuses it rather than minting another (a channel holds 32).
+    static func screenViewerKeyKey(deviceId: String, channelId: String) -> String {
+        "screen.viewer.\(deviceId).\(channelId)"
+    }
+
+    /// The sealed viewer key to send with a push, or nil when none is needed
+    /// (a public channel) or held (no key: the screen shows its gate).
+    ///
+    /// A screen only ever gets a VIEWER key. A viewer key this phone holds is
+    /// sent as is. An owner mints one per screen, labelled with it, so a lost
+    /// TV is one revoke away; it is kept, checked before each use, and
+    /// re-minted if the owner revoked it. An editor key is never sent.
+    func sealedViewerKey(channelId: String, for screen: PairedScreen) async throws -> String? {
+        guard let role = role(for: channelId), let held = self.token(for: channelId) else { return nil }
+        // The wall knows a channel's access once it has loaded; before that
+        // (a push at launch), the channel's own word on the key does.
+        let access: String?
+        if let known = channels.first(where: { $0.id == channelId })?.access {
+            access = known
+        } else {
+            access = (try? await gallery.verdict(channelId: channelId, token: held))?.access
+        }
+        guard access == "private" else { return nil }
+        guard let publicKey = screen.publicKey else { throw ScreenKeyError.needsRepair(screen.kind.label) }
+        let viewerKey: String
+        switch role {
+        case .viewer:
+            viewerKey = held
+        case .editor:
+            throw ScreenKeyError.editorKey
+        case .owner:
+            let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: channelId)
+            if let kept = KeychainHelper.load(key: slot),
+               (try? await gallery.verdict(channelId: channelId, token: kept))?.valid == true {
+                viewerKey = kept
+            } else {
+                let minted = try await mcp.createToken(channelId: channelId, token: held, role: .viewer,
+                                                       label: "\(screen.kind.label) \(screen.deviceId.prefix(8))")
+                KeychainHelper.save(key: slot, value: minted.token)
+                viewerKey = minted.token
+            }
+        }
+        return try PairKeySeal.seal(token: viewerKey, to: publicKey, deviceId: screen.deviceId, channelId: channelId)
     }
 
     /// Push to every paired screen — the "put this everywhere" action.

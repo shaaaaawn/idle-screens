@@ -18,6 +18,9 @@ struct ClaimedPair: Decodable, Equatable, Sendable {
     let deviceId: String
     /// The channel the TV was watching when the code was claimed, if any.
     let channelId: String?
+    /// The screen's X25519 public key (`PairKeySeal`), when it gave one. nil
+    /// for a screen too old to: it can be sent channels, not keys.
+    var publicKey: String? = nil
 }
 
 /// Where the paired TV is right now (`GET /api/pair/status`).
@@ -60,9 +63,11 @@ actor PairClient {
     }
 
     /// `POST /api/pair/new` — TV side: mint a fresh code for this device.
-    func createCode(deviceId: String, channelId: String?) async throws -> PairCode {
+    /// `publicKey` lets the paired phone seal a private channel's key to it.
+    func createCode(deviceId: String, channelId: String?, publicKey: String? = nil) async throws -> PairCode {
         var body: [String: String] = ["deviceId": deviceId]
         if let channelId { body["channelId"] = channelId }
+        if let publicKey { body["publicKey"] = publicKey }
         return try await post(path: "api/pair/new", body: body, token: nil)
     }
 
@@ -89,14 +94,18 @@ actor PairClient {
     /// `POST /api/pair/push` — phone side: tell the TV what to show. A
     /// `sceneId` pins one stored scene of the channel; nil means live (the
     /// field is left out, which every server and screen reads as live).
+    /// `sealedKey` hands the screen a private channel's viewer key
+    /// (`PairKeySeal.seal`); the server relays it unread.
     @discardableResult
-    func push(pairToken: String, channelId: String, sceneId: Int? = nil) async throws -> PairPushResult {
-        try await post(path: "api/pair/push", body: PushBody(channelId: channelId, sceneId: sceneId), token: pairToken)
+    func push(pairToken: String, channelId: String, sceneId: Int? = nil, sealedKey: String? = nil) async throws -> PairPushResult {
+        try await post(path: "api/pair/push",
+                       body: PushBody(channelId: channelId, sceneId: sceneId, sealedKey: sealedKey), token: pairToken)
     }
 
     private struct PushBody: Encodable {
         let channelId: String
         let sceneId: Int?
+        let sealedKey: String?
     }
 
     // MARK: Internals

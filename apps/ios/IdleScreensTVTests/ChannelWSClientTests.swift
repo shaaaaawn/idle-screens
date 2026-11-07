@@ -12,8 +12,21 @@ final class MockWSSession: WebSocketSession, @unchecked Sendable {
         continuation = c
     }
 
+    private let lock = NSLock()
+    private var _written: [String] = []
+    private var _closeCode: Int?
+    /// Frames the client sent (the handshake's `auth`).
+    var written: [String] { lock.withLock { _written } }
+
     func send(_ text: String) { continuation.yield(text) }
     func fail(_ error: Error) { continuation.finish(throwing: error) }
+    /// The server closes with a code (4401, 4410, …).
+    func close(code: Int) {
+        lock.withLock { _closeCode = code }
+        continuation.finish()
+    }
+    func write(_ text: String) async throws { lock.withLock { _written.append(text) } }
+    func closeCode() async -> Int? { lock.withLock { _closeCode } }
     func cancel() async { continuation.finish() }
 }
 
@@ -30,9 +43,10 @@ final class MockWSConnector: WebSocketConnecting, @unchecked Sendable {
 final class ChannelWSClientTests: XCTestCase {
     private let baseURL = URL(string: "https://example.com")!
 
-    private func makeStream(connector: MockWSConnector) async -> (AsyncThrowingStream<ChannelWSEvent, Error>, MockWSSession) {
+    private func makeStream(connector: MockWSConnector,
+                            token: @escaping @Sendable () -> String? = { nil }) async -> (AsyncThrowingStream<ChannelWSEvent, Error>, MockWSSession) {
         let client = ChannelWSClient(connector: connector)
-        let stream = await client.events(baseURL: baseURL, channelId: "test-chan")
+        let stream = await client.events(baseURL: baseURL, channelId: "test-chan", token: token)
         // Give the receive task a beat to open the session.
         try? await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(connector.sessions.count, 1)
@@ -49,6 +63,96 @@ final class ChannelWSClientTests: XCTestCase {
             baseURL: baseURL, channelId: "abc", deviceId: "tv-device-1"
         )
         XCTAssertEqual(url.absoluteString, "wss://example.com/c/abc/ws?device=tv-device-1")
+    }
+
+    // MARK: Private channel handshake
+
+    static let viewerKey = "isk_view_0123456789abcdef0123456789abcdef"
+
+    func testAuthRequiredIsAnsweredWithTheStoredKey() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector, token: { Self.viewerKey })
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"auth-required","access":"private"}"#)
+        let asked = try await iterator.next()
+        XCTAssertEqual(asked, .authRequired(answered: true))
+        XCTAssertEqual(session.written.count, 1)
+        let frame = try JSONDecoder().decode([String: String].self, from: Data(session.written[0].utf8))
+        XCTAssertEqual(frame, ["type": "auth", "token": Self.viewerKey])
+
+        session.send(#"{"type":"auth-ok","role":"viewer"}"#)
+        let ok = try await iterator.next()
+        XCTAssertEqual(ok, .authOK(role: .viewer))
+    }
+
+    func testAuthRequiredWithoutAKeySendsNothing() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector)
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"auth-required","access":"private"}"#)
+        let asked = try await iterator.next()
+        XCTAssertEqual(asked, .authRequired(answered: false))
+        XCTAssertTrue(session.written.isEmpty, "no key: the socket stays pending and silent, so pushes still land")
+    }
+
+    func testAMalformedStoredKeyIsNotSent() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector, token: { "isk_view_abc\n\"}" })
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"auth-required","access":"private"}"#)
+        let asked = try await iterator.next()
+        XCTAssertEqual(asked, .authRequired(answered: false))
+        XCTAssertTrue(session.written.isEmpty)
+    }
+
+    func testARefusedKeyEndsTheStreamWithoutReconnecting() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector, token: { Self.viewerKey })
+        var iterator = stream.makeAsyncIterator()
+
+        session.send(#"{"type":"auth-required","access":"private"}"#)
+        _ = try await iterator.next()
+        session.close(code: 4401)
+        let refused = try await iterator.next()
+        XCTAssertEqual(refused, .refused)
+        let end = try await iterator.next()
+        XCTAssertNil(end, "a refusal ends the stream")
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(connector.sessions.count, 1, "a refused key is not retried")
+    }
+
+    func testADeletedChannelEndsTheStream() async throws {
+        let connector = MockWSConnector()
+        let (stream, session) = await makeStream(connector: connector)
+        var iterator = stream.makeAsyncIterator()
+
+        session.close(code: 4410)
+        let deleted = try await iterator.next()
+        XCTAssertEqual(deleted, .deleted)
+        let end = try await iterator.next()
+        XCTAssertNil(end)
+    }
+
+    func testCloseCodesAreReadByWhatTheHandshakeSaid() {
+        typealias C = ChannelWSClient
+        // Sent a key, never accepted: refused.
+        XCTAssertEqual(C.afterClose(code: 4401, handshake: .init(answered: true, proved: false)), .refused)
+        // Proved, then closed: the owner revoked SOME key. Re-prove.
+        XCTAssertEqual(C.afterClose(code: 4401, handshake: .init(answered: true, proved: true)), .retry)
+        // Never asked: the channel went private under us. Reconnect and be asked.
+        XCTAssertEqual(C.afterClose(code: 4401, handshake: .init()), .retry)
+        XCTAssertEqual(C.afterClose(code: 4410, handshake: .init()), .deleted)
+        XCTAssertEqual(C.afterClose(code: nil, handshake: .init(answered: true)), .retry)
+        XCTAssertEqual(C.afterClose(code: 1006, handshake: .init()), .retry)
+    }
+
+    func testAuthFrameIsEncodedNotSpliced() throws {
+        let frame = ChannelWSClient.authFrame(token: #"isk_"x"#)
+        let decoded = try JSONDecoder().decode([String: String].self, from: Data(frame.utf8))
+        XCTAssertEqual(decoded["token"], #"isk_"x"#)
     }
 
     func testSwitchDecode() async throws {

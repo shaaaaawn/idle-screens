@@ -54,6 +54,17 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     var id: String { channelId ?? label ?? "unknown" }
     var displayLabel: String { label ?? channelId ?? "unknown" }
 
+    /// The same row under a given id and label — for a row decoded from a
+    /// channel's `/state`, which carries neither.
+    func withIdentity(channelId: String, label: String) -> PublicChannel {
+        PublicChannel(channelId: channelId, label: label, tags: tags, viewers: viewers,
+                      sleeping: sleeping, spec: spec, rawSpec: rawSpec,
+                      categoryId: categoryId, categorySort: categorySort,
+                      classicSaverId: classicSaverId, classicParams: classicParams,
+                      createdAt: createdAt, lastEventAt: lastEventAt, saverLabel: saverLabel,
+                      lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: access)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, channelId, label, tags, viewers, sleeping, scene, resolvedSpec
         case categoryId, categorySort, createdAt, lastEvent, saver

@@ -5,6 +5,13 @@ import Foundation
 /// A live WebSocket session yielding inbound text frames.
 protocol WebSocketSession: Sendable {
     var incoming: AsyncThrowingStream<String, Error> { get }
+    /// Send one text frame. The only frame a screen sends is the private
+    /// channel handshake's `auth`.
+    func write(_ text: String) async throws
+    /// The code the server closed with, once `incoming` has ended: 4401 is a
+    /// refused or missing key, 4410 a deleted channel. nil when the socket
+    /// dropped without a close frame (a network failure).
+    func closeCode() async -> Int?
     func cancel() async
 }
 
@@ -42,6 +49,17 @@ final class URLSessionWebSocketSession: WebSocketSession, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    func write(_ text: String) async throws {
+        try await task.send(.string(text))
+    }
+
+    func closeCode() async -> Int? {
+        // `.invalid` (0) until a close frame arrives. A server's own codes
+        // (4401, 4410) come through as raw values outside Apple's enum.
+        let raw = task.closeCode.rawValue
+        return raw == 0 ? nil : raw
     }
 
     func cancel() async {
@@ -90,10 +108,24 @@ enum ChannelWSEvent: Equatable, Sendable {
     case sleep
     case wake
     case overlay(text: String?, ttl: Int?)
-    /// A paired phone pushed a channel change to this device.
     /// A paired phone retargeted this screen: a channel, and optionally one
     /// stored scene of it to pin (`sceneId`; nil = live).
-    case switchChannel(channelId: String?, sceneId: Int? = nil)
+    /// `sealedKey`: a private channel's viewer key, sealed to this screen's
+    /// pairing key by the phone (`PairKeySeal`). Opaque until opened.
+    case switchChannel(channelId: String?, sceneId: Int? = nil, sealedKey: String? = nil)
+    /// The channel is private (idle-server capability-auth.md, "WebSocket").
+    /// `answered`: this device held a key and sent it; the scene follows an
+    /// `authOK`. Not answered: there is nothing to show without a key, and the
+    /// socket stays open and silent, so a paired phone's push still lands.
+    case authRequired(answered: Bool)
+    /// The key was accepted, in this role. The snapshot comes next.
+    case authOK(role: ChannelRole?)
+    /// The server closed the socket with 4401 after this device answered with
+    /// its key: the key does not open the channel (revoked, rotated, or for
+    /// another channel). The stream ends; retrying would be refused again.
+    case refused
+    /// The channel was deleted (4410). The stream ends.
+    case deleted
 }
 
 // MARK: - Scene transitions
@@ -202,8 +234,16 @@ actor ChannelWSClient {
     }
 
     /// Stream of events for a channel. Reconnects automatically until the
-    /// consuming task is cancelled or `disconnect()` is called.
-    func events(baseURL: URL, channelId: String, deviceId: String? = nil) -> AsyncThrowingStream<ChannelWSEvent, Error> {
+    /// consuming task is cancelled or `disconnect()` is called — or until the
+    /// server refuses this device's key or deletes the channel, which no
+    /// retry would change (`refused`, `deleted`).
+    ///
+    /// `token` is asked on every connect, never captured once: a key can be
+    /// added, or replaced, while the stream runs. It is sent in the first
+    /// frame when the server says `auth-required`, never in the URL (the
+    /// threat model's rule: URLs land in logs).
+    func events(baseURL: URL, channelId: String, deviceId: String? = nil,
+                token: @escaping @Sendable () -> String? = { nil }) -> AsyncThrowingStream<ChannelWSEvent, Error> {
         let url = Self.webSocketURL(baseURL: baseURL, channelId: channelId, deviceId: deviceId)
         // The element type is pinned explicitly. Left to inference, the compiler
         // resolves to AsyncThrowingStream(unfolding:) — whose closure takes no
@@ -213,24 +253,50 @@ actor ChannelWSClient {
             let task = Task { [self] in
                 var backoff: UInt64 = 1
                 while !Task.isCancelled {
+                    var handshake = Handshake()
+                    var opened: (any WebSocketSession)?
                     do {
                         let session = try await connector.open(url)
+                        opened = session
                         // Actor state is only ever touched through an isolated
                         // method; this closure itself is @Sendable and cannot
                         // assign to `self.session` directly.
                         adopt(session: session)
                         backoff = 1
                         for try await text in session.incoming {
-                            if let event = Self.parse(text) {
-                                continuation.yield(event)
+                            guard var event = Self.parse(text) else { continue }
+                            if case .authRequired = event {
+                                // Answer from the key this device holds, if any.
+                                // A malformed stored value is not sent: the
+                                // server would only close on it.
+                                if let key = token(), ChannelTokenFormat.isWellFormedToken(key) {
+                                    try await session.write(Self.authFrame(token: key))
+                                    handshake.answered = true
+                                }
+                                event = .authRequired(answered: handshake.answered)
+                            } else if case .authOK = event {
+                                handshake.proved = true
                             }
+                            continuation.yield(event)
                         }
                     } catch is CancellationError {
                         break
                     } catch {
-                        // Connection dropped — fall through to backoff and retry.
+                        // Connection dropped — fall through to the close code.
                     }
                     if Task.isCancelled { break }
+                    switch Self.afterClose(code: await opened?.closeCode(), handshake: handshake) {
+                    case .refused:
+                        continuation.yield(.refused)
+                        continuation.finish()
+                        return
+                    case .deleted:
+                        continuation.yield(.deleted)
+                        continuation.finish()
+                        return
+                    case .retry:
+                        break
+                    }
                     try? await Task.sleep(for: .seconds(backoff))
                     backoff = min(backoff * 2, 30)
                 }
@@ -266,6 +332,50 @@ actor ChannelWSClient {
         let current = session
         session = nil
         Task { await current?.cancel() }
+    }
+
+    // MARK: - Private channel handshake
+
+    /// What one connection said about the handshake, so its close can be read.
+    struct Handshake: Equatable, Sendable {
+        /// This device sent its key (`auth`).
+        var answered = false
+        /// The server accepted it (`auth-ok`).
+        var proved = false
+    }
+
+    enum AfterClose: Equatable { case retry, refused, deleted }
+
+    /// Close code 4401 (idle-server `WS_CLOSE_UNAUTHORIZED`) and 4410
+    /// (`CLOSE_DELETED`), the two the server uses to say "don't come back".
+    static let closeUnauthorized = 4401
+    static let closeDeleted = 4410
+
+    /// Whether a closed connection is worth reopening.
+    ///
+    /// A 4401 means three different things, and only one is final:
+    /// - sent a key, never accepted: the key is refused. Stop.
+    /// - sent a key, accepted, later 4401: the owner revoked or rotated SOME
+    ///   key, and the server closes every proved socket rather than track
+    ///   which hash each one used. A good key re-proves in a second. Retry.
+    /// - never asked: the channel just went private under an anonymous
+    ///   socket. The next connection is asked and answers (or shows the
+    ///   gate). Retry.
+    static func afterClose(code: Int?, handshake: Handshake) -> AfterClose {
+        switch code {
+        case closeDeleted?:
+            return .deleted
+        case closeUnauthorized?:
+            return handshake.answered && !handshake.proved ? .refused : .retry
+        default:
+            return .retry
+        }
+    }
+
+    /// The handshake's one client frame. Encoded, never spliced into a string.
+    static func authFrame(token: String) -> String {
+        let data = (try? JSONEncoder().encode(["type": "auth", "token": token])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: - Parsing
@@ -312,10 +422,17 @@ actor ChannelWSClient {
                 text: message["text"]?.stringValue,
                 ttl: message["ttl"]?.intValue
             )
+        case "auth-required":
+            // `answered` is the socket's to say; a page tap's frame is the
+            // page's business (it answers from its own storage).
+            return .authRequired(answered: false)
+        case "auth-ok":
+            return .authOK(role: message["role"]?.stringValue.flatMap(ChannelRole.init(rawValue:)))
         case "switch":
             let scene = message["sceneId"]?.intValue
             return .switchChannel(channelId: message["channelId"]?.stringValue,
-                                  sceneId: scene.flatMap { $0 > 0 ? $0 : nil })
+                                  sceneId: scene.flatMap { $0 > 0 ? $0 : nil },
+                                  sealedKey: message["sealedKey"]?.stringValue)
         default:
             return nil
         }

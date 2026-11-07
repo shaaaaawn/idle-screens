@@ -162,6 +162,14 @@ extension AppState {
                                                  createdAt: Date(), role: role))
             store.save(credentials)
         }
+        // A private channel is on no listing: the key is what puts it on the
+        // wall, so put it there now rather than on the next refresh.
+        if verdict.access == "private", !channels.contains(where: { $0.id == channelId }) {
+            let label = credentials.first { $0.channelId == channelId }?.label ?? channelId
+            if let row = await gallery.fetchPrivateChannel(channelId: channelId, label: label) {
+                channels.append(row)
+            }
+        }
     }
 
     func removeChannel(_ credential: ChannelCredential) {

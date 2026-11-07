@@ -40,6 +40,14 @@ final class TVAppState {
     // MARK: Channel / scene
 
     var selectedChannelId: String?
+    /// Why the channel on screen shows nothing: it is private and this TV
+    /// holds no key for it, or its key was refused. nil otherwise.
+    var privateGate: PrivateGate?
+    enum PrivateGate: Equatable { case needsKey, refused }
+    /// The keys this TV holds, one per channel (`channel.token.<id>`). tvOS
+    /// does not sync the Keychain, so nothing arrives here from the phone's
+    /// iCloud Keychain: a key has to be handed to this TV.
+    let keys: CredentialStore
     /// Which surface opened the current channel. Two tabs can each push the
     /// fullscreen player, so the binding has to name one — without this both
     /// stacks present the same destination and backing out lands you on a
@@ -151,8 +159,10 @@ final class TVAppState {
     private var wsTask: Task<Void, Never>?
 
     init(gallery: GalleryClient, mcp: MCPClient, ws: ChannelWSClient, pair: PairClient, baseURL: URL,
-         hidden: HiddenChannels = HiddenChannels(storage: .inMemory)) {
+         hidden: HiddenChannels = HiddenChannels(storage: .inMemory),
+         keys: CredentialStore = CredentialStore()) {
         self.hidden = hidden
+        self.keys = keys
         self.gallery = gallery
         self.mcp = mcp
         self.ws = ws
@@ -176,13 +186,17 @@ final class TVAppState {
     convenience init() {
         let baseURL = URL(string: TVConfig.baseURL)!
         let transport = URLSessionTransport()
+        let keys = CredentialStore()
         self.init(
-            gallery: GalleryClient(baseURL: baseURL, transport: transport),
+            // A private channel's reads (history, scenes) need its key.
+            gallery: GalleryClient(baseURL: baseURL, transport: transport,
+                                   key: { keys.token(for: $0) }),
             mcp: MCPClient(baseURL: baseURL, transport: transport, confirmer: MCPConfirmPrompt.confirmer),
             ws: ChannelWSClient(),
             pair: PairClient(baseURL: baseURL, transport: transport),
             baseURL: baseURL,
-            hidden: HiddenChannels()
+            hidden: HiddenChannels(),
+            keys: keys
         )
     }
 
@@ -251,6 +265,7 @@ final class TVAppState {
         bedMountedAt = rendererMountedAt
         presentingSurface = surface
         selectedChannelId = channelId
+        privateGate = nil
         sleeping = false
         viewers = nil
         overlayText = nil
@@ -561,27 +576,53 @@ final class TVAppState {
 
     /// Open (or replace) the single channel socket. `watching: false` is
     /// control-only — scene traffic is ignored, but "switch" pushes still land.
+    ///
+    /// On a private channel the socket answers the handshake with the key
+    /// this TV holds for it. With no key it stays open and silent (the server
+    /// keeps a pending socket and still delivers pushes to it). A refused key
+    /// or a deleted channel ends the stream, and this TV would then be deaf
+    /// to its phone — so it parks a control socket on an open channel.
     private func openSocket(channelId: String, watching: Bool) {
         wsTask?.cancel()
+        let keys = self.keys
         wsTask = Task { [weak self] in
             guard let self else { return }
+            var ended = false
             do {
                 for try await event in await ws.events(
                     baseURL: baseURL,
                     channelId: channelId,
-                    deviceId: deviceId
+                    deviceId: deviceId,
+                    token: { keys.token(for: channelId) }
                 ) {
                     guard !Task.isCancelled else { break }
+                    switch event {
+                    case .refused, .deleted:
+                        ended = true
+                    default:
+                        break
+                    }
                     if watching {
                         self.handle(event)
-                    } else if case .switchChannel(let target, let scene) = event {
-                        self.handle(.switchChannel(channelId: target, sceneId: scene))
+                    } else if case .switchChannel = event {
+                        self.handle(event)
                     }
                 }
             } catch {
                 // Stream ended with an error — the next openSocket reconnects.
             }
+            guard ended, !Task.isCancelled else { return }
+            if let fallback = Self.controlFallback(after: channelId) {
+                self.openSocket(channelId: fallback, watching: false)
+            }
         }
+    }
+
+    /// Where to park the control socket once a channel has shut this TV out:
+    /// an open demo channel, which no key gates and no one can delete. nil
+    /// when that is where it already was.
+    nonisolated static func controlFallback(after channelId: String) -> String? {
+        channelId == "default" ? nil : "default"
     }
 
     /// Call once at launch: makes an idle TV reachable for pushes.
@@ -667,17 +708,37 @@ final class TVAppState {
                 guard !Task.isCancelled else { return }
                 self?.overlayText = nil
             }
+        case .authRequired(let answered):
+            // Answered: the scene follows `auth-ok`. Not: nothing will come
+            // until a key does, so say so instead of spinning.
+            if !answered { privateGate = .needsKey }
+        case .authOK:
+            privateGate = nil
+        case .refused:
+            privateGate = .refused
+        case .deleted:
+            // Gone for good. Back to the grid, where it no longer appears.
+            exitChannel()
         case .delta:
             break
         case .track(let track, _):
             applyLiveTrack(track)
-        case .switchChannel(let channelId, let sceneId):
+        case .switchChannel(let channelId, let sceneId, let sealedKey):
             // Any switch push proves a paired phone is steering this TV —
             // the pairing screen uses it as its "✓ Paired" cue (the phone
             // sends a same-channel ack right after claiming).
             phonePushAt = Date()
             guard let channelId, !channelId.isEmpty else { break }
-            if channelId != selectedChannelId {
+            // A private channel's key, sealed to this TV. Stored BEFORE the
+            // channel opens, so its first `auth-required` already has an
+            // answer. One that does not open (another device's, another
+            // channel's, not a viewer key) is dropped without a word.
+            let keyArrived = sealedKey.map { acceptSealedKey($0, for: channelId) } ?? false
+            if channelId == selectedChannelId, keyArrived, privateGate != nil {
+                // The gate was up for want of this key: open the channel again.
+                selectChannel(channelId, from: presentingSurface)
+                if let sceneId { pinScene(sceneId) }
+            } else if channelId != selectedChannelId {
                 selectChannel(channelId, from: .grid)
                 // After the switch: selecting resets the timeline.
                 if let sceneId { pinScene(sceneId) }
@@ -698,12 +759,26 @@ final class TVAppState {
 
     // MARK: Pairing
 
-    /// Mint (or re-mint) a pair code for the QR screen.
+    /// Open a sealed key a phone pushed and keep it for `channelId`. True
+    /// when a viewer key for this TV and that channel was stored.
+    @discardableResult
+    func acceptSealedKey(_ sealed: String, for channelId: String) -> Bool {
+        guard let privateKey = ScreenKey.privateKey(),
+              let token = PairKeySeal.open(sealed, with: privateKey, deviceId: deviceId, channelId: channelId) else {
+            return false
+        }
+        return keys.setToken(token, for: channelId)
+    }
+
+    /// Mint (or re-mint) a pair code for the QR screen. It carries this TV's
+    /// public key, so the phone that claims it can seal private channels'
+    /// keys to it (`PairKeySeal`).
     func requestPairCode() async {
         isRequestingPairCode = true
         defer { isRequestingPairCode = false }
         do {
-            pairCode = try await pair.createCode(deviceId: deviceId, channelId: selectedChannelId ?? lastChannelId)
+            pairCode = try await pair.createCode(deviceId: deviceId, channelId: selectedChannelId ?? lastChannelId,
+                                                 publicKey: ScreenKey.publicKey())
             pairError = nil
         } catch {
             pairError = error.localizedDescription

@@ -105,8 +105,9 @@ struct ChannelHistoryPage: Decodable, Equatable, Sendable {
 extension GalleryClient {
     /// `GET /c/:id/history` — the channel's event log.
     ///
-    /// Deliberately unauthenticated: this endpoint is public, which is what
-    /// makes provenance a viewer-facing feature rather than an owner-only one.
+    /// Unauthenticated on a public channel: this endpoint is public, which is
+    /// what makes provenance a viewer-facing feature rather than an owner-only
+    /// one. A private channel's needs the device's key (`channelRead`).
     /// It also means `intent` text is world-readable — see
     /// `docs/ios-client-roadmap.md` §3.
     func fetchHistory(channelId: String, limit: Int = 40) async throws -> [ChannelEvent] {
@@ -127,7 +128,7 @@ extension GalleryClient {
             + (before.map { [URLQueryItem(name: "before", value: String($0))] } ?? [])
         guard let url = components?.url else { throw GalleryError.invalidResponse }
 
-        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        let (data, http) = try await channelRead(url, channelId: channelId)
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(
                 status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")

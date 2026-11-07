@@ -77,6 +77,8 @@ struct FeedPage: View {
     @State private var recalling = false
     @State private var reloadCount = 0
     @State private var pulse = false
+    /// The private gate's "Add a key" sheet.
+    @State private var showAddKey = false
 
     static let liveKey = "live"
     private static func key(_ stop: ChannelFeed.Stop) -> String { "s\(stop.sceneId)" }
@@ -234,6 +236,13 @@ struct FeedPage: View {
                                try await app.mcp.reportChannel(channelId: channelId, reason: reason)
                            },
                            hide: { app.hideChannel(channelId) })
+        .sheet(isPresented: $showAddKey, onDismiss: {
+            // A key just landed: the page is rebuilt with it (`.id` on the
+            // web view) and the session listens again.
+            if app.token(for: channelId) != nil { session.retry() }
+        }) {
+            AddExistingChannelSheet(channelId: channelId)
+        }
         .sheet(isPresented: $showCast) {
             CastSheet(channelId: channelId, channelLabel: channel.displayLabel,
                       sceneId: currentStop?.sceneId,
@@ -290,7 +299,9 @@ struct FeedPage: View {
 
     private func activate() {
         replayCaptionEntrance()
-        session.start(channelId: channelId, seedSpec: channel.spec, source: .host)
+        let store = app.store, id = channelId
+        session.start(channelId: channelId, seedSpec: channel.spec, source: .host,
+                      key: { store.token(for: id) })
         guard stops.isEmpty else { return }
         Task { await loadHistory() }
     }
@@ -429,6 +440,7 @@ struct FeedPage: View {
                             liveWebPainted = true
                         }
                     },
+                    onClose: { session.hostClosed(code: $0) },
                     onAssets: { liveTank.report($0) },
                     onFish: { liveTank.reportFish($0, want: $1) },
                     // Never off screen: a reveal that lands after a swipe away
@@ -438,6 +450,9 @@ struct FeedPage: View {
                     poolable: !isTank,
                     onFailure: { session.hostFailed() }
                 )
+                // A key added from the private gate has to reach the page's
+                // storage, which is seeded once, when the page is built.
+                .id(app.token(for: channelId) != nil)
                 .ignoresSafeArea()
                 // Hidden until the first frame proves the page is live, so a
                 // slow load shows the channel's colour, not a blank sheet.
@@ -567,6 +582,8 @@ struct FeedPage: View {
             }
             .padding(28)
             .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
+        } else if case .locked(let refused) = session.phase {
+            privateGate(refused: refused)
         } else if session.phase == .unreachable {
             VStack(spacing: 14) {
                 Image(systemName: "wifi.exclamationmark")
@@ -595,6 +612,37 @@ struct FeedPage: View {
                 .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
                 .onAppear { pulse = true }
         }
+    }
+
+    /// A private channel this phone cannot open. The web gate is hidden in
+    /// the app (its advice is a link, which is the wrong thing to tell
+    /// someone already holding the app), so this is the only word on it.
+    private func privateGate(refused: Bool) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: refused ? "lock.trianglebadge.exclamationmark" : "lock.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(Color.secondary)
+            Text("private channel")
+                .font(.headline)
+                .foregroundStyle(Color.primary)
+            Text(refused
+                 ? "The key on this phone no longer opens it. Ask its owner for a new one."
+                 : "It needs a key to watch. Its owner makes one with createToken.")
+                .font(.footnote)
+                .foregroundStyle(Color.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 260)
+            Button(refused ? "Add a new key" : "Add a key") { showAddKey = true }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color(uiColor: .systemBackground))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Color.primary, in: Capsule())
+        }
+        .padding(28)
+        .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("private-gate")
     }
 
     // MARK: Chrome
