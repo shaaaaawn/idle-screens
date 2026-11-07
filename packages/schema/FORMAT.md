@@ -1188,8 +1188,11 @@ stands still.
   trail ribbons, ghosting smear — count) — *where the eye goes*, normalized to
   shares. Thin-but-bright structures (rings, streaks, link lines) get a
   line-salience boost so they aren't crushed by filled discs; a `soft` circle
-  or polygon counts the ink of its gradient (about 38 % of a disc), and a
-  label every glyph it paints. A shape's base area counts only where it lands
+  or polygon counts the ink of its gradient (about 38 % of a disc), a fill
+  what its fill rule paints (an even-odd hole is empty, an overlap counts
+  once), and a label every glyph it paints, measured by its font's glyph
+  metrics (the table line breaking uses, monospace by its advance) — the
+  same box the text advisories judge. A shape's base area counts only where it lands
   in the frame, clipped as it is painted and turned: a circle as its disc (a
   soft one by its gradient), a ring as its stroke, a `rect`, `bar` or `emoji`
   as its box, a polygon as its outline (a path drawing as its parts' fills and
