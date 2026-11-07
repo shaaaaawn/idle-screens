@@ -239,7 +239,8 @@ struct NativeSceneView: View {
                                       posAt: { SceneMotion.position(of: entity, at: $0, in: space, dim: dim,
                                                                      wrap: layer.wrap, parent: parent) },
                                       in: space, wrap: layer.wrap, fillBudget: fill,
-                                      additive: layer.blend == "lighter")
+                                      additive: layer.blend == "lighter",
+                                      since: SceneMotion.trailSince(of: entity, at: t))
         guard !echoes.isEmpty else { return }
         // A shaped sprite trails echoes of its own shape, at the echo's own
         // time — a spinning or heading-turned mark echoes the way it was then.
@@ -335,12 +336,14 @@ struct NativeSceneView: View {
     /// The echoes behind an entity at `t` (seconds), head first — a port of
     /// trail.ts `trailEchoes`: `length/50` samples (≤ 24), each fainter
     /// (`fade`) and smaller (to 30 % at the tail), stopping at a wrap seam,
-    /// the clock's start or invisibility; spans wider than an echo's radius
+    /// the clock's start (or `since`, where the motion restarts — see
+    /// `SceneMotion.trailSince`) or invisibility; spans wider than an echo's radius
     /// gap-filled within `fillBudget`, each fill echo carrying its share of
     /// the ink of the echo it replaces.
     static func trailEchoes(_ trail: SpecSubset.Trail, at t: TimeInterval, headAlpha: Double,
                             headRadius: Double, posAt: (TimeInterval) -> CGPoint, in space: CGSize,
-                            wrap: Bool, fillBudget: Int, additive: Bool) -> [TrailEcho] {
+                            wrap: Bool, fillBudget: Int, additive: Bool,
+                            since: TimeInterval = 0) -> [TrailEcho] {
         let fade = trail.fade ?? 1
         let n = min(Int((trail.length / 50).rounded(.up)), 24)
         guard n > 0 else { return [] }
@@ -355,7 +358,7 @@ struct NativeSceneView: View {
         for s in 1...n {
             let k = Double(s) / Double(n)
             let past = t - k * trail.length / 1000
-            if past < 0 { break }
+            if past < since { break }
             let p = posAt(past)
             if jumps(prev, p) { break }
             prev = p

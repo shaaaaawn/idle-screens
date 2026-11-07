@@ -455,7 +455,10 @@ export function steerablePaths(spec: unknown): string[] {
   // `group` (membership) and `origin` are enums that step, not knobs; the
   // `timeline` is authored structure, and `density` a declared hint that
   // changes no pixel. resolveSpecPath refuses all of them, so none is advertised.
-  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'layer', 'group', 'origin']);
+  // A path's `loop` is an enum like `curve`: it resolves (a steer steps it)
+  // but is not advertised. No other scene field is named `loop` (the
+  // timeline's is under the skipped root `timeline`).
+  const SKIP = new Set(['kind', 'type', 'key', 'schemaVersion', 'id', 'label', 'seed', 'units', 'motionIntensity', 'mode', 'curve', 'loop', 'layer', 'group', 'origin']);
   const SKIP_ROOT = new Set(['timeline', 'density']);
   // `bands` (a field background's palette) is indexed like `stops`, so
   // `background.bands.2` is a hex paint path that glides.

@@ -37,6 +37,7 @@ import {
   textBlockAnchorOffset,
   textMetricsClassFor,
   entityScales,
+  trailSince,
   type Entity,
 } from './simulate';
 import { bedRenderSeed, normalizeSeed, resolveSegment, segmentRenderSeed } from './sequence';
@@ -684,7 +685,7 @@ export function luminanceGrid(
     const echoes = trailEchoes(trail, tPass, headAlpha, headSize, (pt) => posOf(scene, e, pt), w, h, layer.wrap !== false,
       // As the renderer: a shape echoes at its time samples only; circles fill
       // (a hard circle's ribbon reads, on the coarse grid, as filled discs).
-      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter');
+      isShapedSprite(layer.sprite) && layer.sprite.kind !== 'circle' ? 0 : trailFillBudget(layerCount), 0.004, layer.blend === 'lighter', trailSince(e, tPass));
     for (const ec of echoes) {
       const a = ec.alpha;
       const rad = ec.r;
