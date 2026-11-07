@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod config_write;
 mod idle;
+mod keys;
 mod pair;
 mod platform;
 mod state;
