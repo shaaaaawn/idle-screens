@@ -338,7 +338,11 @@ extension AppState {
     /// TV is one revoke away; it is kept, checked before each use, and
     /// re-minted if the owner revoked it. An editor key is never sent.
     func sealedViewerKey(channelId: String, for screen: PairedScreen) async throws -> String? {
-        guard let role = role(for: channelId), let held = self.token(for: channelId) else { return nil }
+        // Only a TV is handed a key: a Mac or Linux screen never gives a
+        // public key, and uses the key stored on it (its own keyring or key
+        // file). Ruled out before any network call.
+        guard screen.kind == .appleTV,
+              let role = role(for: channelId), let held = self.token(for: channelId) else { return nil }
         // The wall knows a channel's access once it has loaded; before that
         // (a push at launch), the channel's own word on the key does.
         let access: String?
@@ -347,15 +351,19 @@ extension AppState {
         } else {
             access = (try? await gallery.verdict(channelId: channelId, token: held))?.access
         }
-        guard access == "private" else { return nil }
-        guard let publicKey = screen.publicKey else { throw ScreenKeyError.needsRepair(screen.kind.label) }
+        let plan = Self.screenKeyPlan(kind: screen.kind, isPrivate: access == "private",
+                                      held: role, hasPublicKey: screen.publicKey != nil)
         let viewerKey: String
-        switch role {
-        case .viewer:
-            viewerKey = held
-        case .editor:
+        switch plan {
+        case .skip:
+            return nil
+        case .editorKey:
             throw ScreenKeyError.editorKey
-        case .owner:
+        case .needsRepair:
+            throw ScreenKeyError.needsRepair(screen.kind.label)
+        case .send(.viewer):
+            viewerKey = held
+        case .send:
             let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: channelId)
             if let kept = KeychainHelper.load(key: slot),
                (try? await gallery.verdict(channelId: channelId, token: kept))?.valid == true {
@@ -367,7 +375,29 @@ extension AppState {
                 viewerKey = minted.token
             }
         }
+        guard let publicKey = screen.publicKey else { throw ScreenKeyError.needsRepair(screen.kind.label) }
         return try PairKeySeal.seal(token: viewerKey, to: publicKey, deviceId: screen.deviceId, channelId: channelId)
+    }
+
+    /// What a push of a channel owes a screen, keywise. Pure, so the rules are
+    /// tested without a Keychain or a server.
+    enum ScreenKeyPlan: Equatable {
+        /// Send nothing: a public channel, no key held, or not a TV.
+        case skip
+        /// Seal a viewer key: the one held (`.viewer`), or one minted for
+        /// this screen (`.owner`).
+        case send(ChannelRole)
+        /// The TV was paired before it gave a public key.
+        case needsRepair
+        /// Only an editor key is held, and a screen never gets one.
+        case editorKey
+    }
+
+    nonisolated static func screenKeyPlan(kind: PairedScreen.Kind, isPrivate: Bool,
+                                          held: ChannelRole?, hasPublicKey: Bool) -> ScreenKeyPlan {
+        guard isPrivate, let held, kind == .appleTV else { return .skip }
+        if held == .editor { return .editorKey }
+        return hasPublicKey ? .send(held) : .needsRepair
     }
 
     /// Push to every paired screen — the "put this everywhere" action.
