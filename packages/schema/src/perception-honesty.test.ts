@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { adviseSpec } from './advise';
-import { motionStats, perceiveScene } from './perceive';
+import { luminanceGrid, motionStats, perceiveScene, type LuminanceGrid } from './perceive';
 import type { SaverSpec } from './types';
 
 // Each case is a third-party report (X-number) of perception reading
@@ -10,6 +10,8 @@ const L = (o: Record<string, unknown>): Record<string, unknown> => ({ count: 1, 
 const scene = (bg: unknown, layers: unknown[], extra: Record<string, unknown> = {}): SaverSpec =>
   ({ schemaVersion: 1, id: 'p', label: 'p', background: typeof bg === 'string' ? { type: 'solid', color: bg } : bg, layers, ...extra }) as unknown as SaverSpec;
 const codes = (s: SaverSpec, w: number, h: number, t?: number): string[] => adviseSpec(s, { width: w, height: h }, t === undefined ? {} : { t }).map((x) => x.code);
+/** Total ink of a grid on a black ground (each cell is the share of it a white shape covers). */
+const mass = (g: LuminanceGrid): number => g.cells.reduce((m, v) => m + v, 0);
 const share = (s: SaverSpec, key: string, w: number, h: number): number =>
   perceiveScene(s, { viewport: { width: w, height: h } }).dominance.find((d) => d.key === key)?.share ?? 0;
 
@@ -97,13 +99,61 @@ describe('perception reads what is on screen', () => {
     expect(at(still, 3000).centroid).toEqual(at(still, 1000).centroid);
     expect(at(still, 2000).motion[0]!.moving).toBe(false);
     // Motion counts the turn for every shape but a circle or ring, so a
-    // rocking rect moves even though the maps keep its box unturned.
+    // rocking rect moves — and its box swings in the maps with it.
     const plank = (rock?: Record<string, unknown>): SaverSpec => scene('#000000', [L({
       key: 'plank', position: { x: 0.5, y: 0.5 }, ...(rock ? { rock, clock: { phase: 0 } } : {}),
       sprite: { kind: 'rect', width: [0.4, 0.4], aspect: [0.1, 0.1], color: '#ffffff' },
     })]);
     expect(at(plank({ amp: 45, period: 4000 }), 2000).motion[0]!.moving).toBe(true);
     expect(at(plank(), 2000).motion[0]!.moving).toBe(false);
+    expect(at(plank({ amp: 45, period: 4000 }), 1000).braille).not.toBe(at(plank({ amp: 45, period: 4000 }), 3000).braille);
+    expect(at(plank(), 1000).braille).toBe(at(plank(), 3000).braille);
+  });
+
+  it('a turned rect lands in the maps where it is painted: its turned box, not its unturned one or its bounding box', () => {
+    // A plank lying along the bottom edge is all on screen; stood on end —
+    // by `rotate` or by its layer's `transform.rotate` — half of it hangs
+    // below the frame, and the half that shows runs up to y = 0.6.
+    const plank = (o: Record<string, unknown> = {}, y = 0.9): SaverSpec => scene('#000000', [L({ key: 'plank', position: { x: 0.5, y }, sprite: { kind: 'rect', width: [0.6, 0.6], aspect: [0.05, 0.05], color: '#ffffff' }, ...o })]);
+    const centroid = (s: SaverSpec) => perceiveScene(s, { viewport: { width: 400, height: 400 } }).centroid!;
+    expect(centroid(plank()).y).toBeCloseTo(0.9, 2);
+    expect(centroid(plank({ rotate: 90 })).y).toBeCloseTo(0.8, 1);
+    expect(centroid(plank({ transform: { rotate: 90, origin: 'anchor' } })).y).toBeCloseTo(0.8, 1);
+    expect(centroid(plank({ rotate: 90 })).x).toBeCloseTo(0.5, 2);
+    // At 45° it is a diagonal from top-left to bottom-right, so its bounding
+    // box's other two corners stay dark, and it lays the same ink as flat.
+    const grid = (s: SaverSpec) => luminanceGrid(s, { viewport: { width: 400, height: 400 }, cols: 40, rows: 40 });
+    const at = (g: LuminanceGrid, x: number, y: number) => g.cells[Math.floor(y * g.rows) * g.cols + Math.floor(x * g.cols)]!;
+    const flat = grid(plank({}, 0.5));
+    const diag = grid(plank({ rotate: 45 }, 0.5));
+    expect(at(diag, 0.65, 0.65)).toBeGreaterThan(0.5);
+    expect(at(diag, 0.35, 0.35)).toBeGreaterThan(0.5);
+    expect(at(diag, 0.65, 0.35)).toBe(0);
+    expect(at(diag, 0.35, 0.65)).toBe(0);
+    expect(mass(diag) / mass(flat)).toBeCloseTo(1, 3);
+  });
+
+  it('a thin turned plank keeps its ink at every angle: exact turned-box coverage, no scanline gaps', () => {
+    // 0.96 px tall on 8.3 px grid rows — thinner than one of the four
+    // sub-scanlines a polygon outline is sampled on — and barely tilted.
+    const line = (rotate: number, sprite: Record<string, unknown>) => luminanceGrid(scene('#000000', [L({ key: 'scan', position: { x: 0.5, y: 0.5 }, rotate, sprite })]), { viewport: { width: 400, height: 400 } });
+    const rect = { kind: 'rect', width: [0.6, 0.6], aspect: [0.004, 0.004], color: '#ffffff' };
+    const bar = { kind: 'bar', values: [1], max: 1, length: 0.4, thickness: 0.002, color: '#ffffff' };
+    for (const sprite of [rect, bar]) {
+      const level = mass(line(0, sprite));
+      for (const angle of [0.5, 2, 5, 37, 45, 90, 180]) expect(mass(line(angle, sprite)) / level).toBeCloseTo(1, 2);
+    }
+    // Measured by its turned box's bounding box, as before, its coverage ballooned at 37°.
+    expect(line(37, bar).coverage).toBeLessThan(line(0, bar).coverage * 2);
+  });
+
+  it('text turns about its anchor in the maps, as the renderer turns it', () => {
+    // A left-aligned label runs right of its anchor; turned a quarter it runs down.
+    const label = (rotate: number) => perceiveScene(scene('#000000', [L({ key: 'cap', position: { x: 0.5, y: 0.3 }, rotate, size: [0.08, 0.08], sprite: { kind: 'text', strings: ['VERTICAL'], align: 'left', color: '#ffffff' } })]), { viewport: { width: 400, height: 400 } }).centroid!;
+    expect(label(0).x).toBeGreaterThan(0.6);
+    expect(label(0).y).toBeCloseTo(0.3, 1);
+    expect(label(90).x).toBeCloseTo(0.5, 1);
+    expect(label(90).y).toBeGreaterThan(0.4);
   });
 
   it('X603: a vertical caption is judged by its rotated box', () => {
