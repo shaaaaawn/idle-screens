@@ -1,5 +1,32 @@
 # @idle-screens/saver-metaquarium
 
+## 0.22.0
+
+### Minor Changes
+
+- 96e2a98: Choreography lands on the beat. What a cue is (its clip, posture, facing, lean and crouch) now arrives on the cue's first beat: the dancer moves into it over the end of the cue before. Before, it blended in after the beat and every pose read late. What a cue does (travel, turns, a leap's arc) still runs through the cue and lands as it ends.
+  
+  Four additions:
+  - **Lean** (`/deg`) tips the dancer about its feet.
+  - **Crouch** (`%s`) scales its height and keeps its volume.
+  - **Groove** (`*a`) adds a dip into every beat, lowest exactly on the beat, for moves without their own hits (reach, twist, sway).
+  - **Leaps** crouch into the take-off, stretch in the air and squash on landing.
+  
+  `circles` and `mambo` are now advanced half a beat. Measured at a still camera, they held their poses on the off-beat while march, jacks and kick hold theirs on the beat.
+- f35ee61: Choreography: an authored starfish dance on the beat. `choreography` takes a cue sheet per dancer (`a: 8:lie, 4:rise, 4:reach >right @cam | *: 4:march ~360, 4:jacks ^0.5`). Each cue is a move for some beats (fractional beats allowed), with travel (`>mark` or `>side,depth`), facing (`@deg`, `@cam`), turns (`~360`) and leaps (`^h`). Moves are the eight dance moves, partner moves danced solo, and the floor: `lie`, `curl`, `wave`, `pop`, `rise`, `sit`, `walk`, `crawl` and `hold`. Cues cross-fade into each other, a lying dancer stands only as far as its posture says, and a choreographed class faces `cameraAzimuth`, so a circling camera doesn't swing the dance round with it. The sheet is a pure function of the beat (choreo.ts), so a sheet lines up with music and a renderer can seek.
+- 06b9cb6: `fishAO` (0–1, default 0): a fish's own corners darken — the root of a fin against the flank, the studs on a blowfish, the steps of a shark's side, the joins in a snail's shell — so a fish reads as a solid thing rather than as panels of flat colour. The cubes are read back off each breed's voxel faces in its bind pose (the parts split by material count as one body; Draco's jitter is snapped to the voxel step), baked once per breed the first frame it is on, and applied to the lit coats' surface colour, so it holds on every tier.
+- f8bc5b4: Two new vignette reactions:
+  - **`puff`**, the blowfish's own gesture. It gulps itself round on cue, holds, and lets go, whatever its own schedule is doing at the time.
+  - **The crab now acts with its own claws.** In a vignette, `talk` snaps them (`pinch`), `wiggle` waves, `hop` throws them up and cheers, and `peek` forages. Before, an acting crab only idled.
+  
+  Both stack with the existing reactions (`ink` on an octopus; a dolphin's chatter and flips), so a panel of creatures can react on exact cues.
+
+### Patch Changes
+
+- f67c7d8: A blowfish acting in a vignette now plays the script, not its own act schedule. Its shy turn, pirouette and back flip used to keep running under a vignette and turned it away from where the script faced it, for example a judge in close-up showing the camera its back. While acting it hovers, and puffs only on cue (`puff`).
+- c4b0c97: A betta under `nearFade` no longer fails to draw. Its eye rig chained the material's shader hook by hand, untagged, so `nearFade` (and any other tagged patch) saw itself missing and wrapped a second time: `vMqNearDepth` declared twice, and the betta's metal, glow, eye and halo parts failed to compile once its model arrived. The rig now stacks through `stackPatch` like every other patch, and a test keeps hand-made hook chains out of the package.
+- 239b07c: The cinematic recipes (`reef-cinematic`, `night-cinematic`, `village-cinematic`) now include `voxelAO` and `fishAO`, so a piece started from one has the plants' and the fish's corner shading from the first frame.
+
 ## 0.21.0
 
 ### Minor Changes
