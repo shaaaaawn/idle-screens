@@ -34,6 +34,9 @@ describe('param mini-languages refuse inherited names (constructor, toString, â€
   it('pyramidMix: an inherited stone and a non-finite weight are refused', () => {
     expect(parsePyramidMix('constructor').problems).toHaveLength(1);
     expect(parsePyramidMix(`giza:${'9'.repeat(400)}`).problems).toHaveLength(1);
+    // Each finite, but their sum overflows the picker's total.
+    expect(parsePyramidMix(`giza:${'9'.repeat(308)}, mayan:${'9'.repeat(308)}`).problems).toHaveLength(2);
+    expect(parsePyramidMix('giza:1000000').problems).toEqual([]);
     expect(parsePyramidMix('giza:3, obsidian').problems).toEqual([]);
   });
 });

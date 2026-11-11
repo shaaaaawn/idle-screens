@@ -38,6 +38,9 @@ export const PYRAMID_STONES_BY_ENVIRONMENT: Record<string, Partial<Record<Pyrami
   void: { sandstone: 2, limestone: 2, obsidian: 1, jade: 1, gold: 0.6, lapis: 0.6, crystal: 0.6, nacre: 0.4, coral: 0.4, basalt: 0.4 },
 };
 
+/** The largest `:weight` accepted. Weights are relative, so this costs no expressiveness. */
+const MAX_WEIGHT = 1e6;
+
 /** `pyramidMix`: shapes and stones, each with an optional weight — `giza:3,mayan,gold:2,obsidian` — and `trim[:share]`, the
  *  share (0..1, alone 0.5) of the stone ones that carry lamps on their edges, base and capstone. */
 export function parsePyramidMix(src: string): { shapes: Partial<Record<PyramidShape, number>>; materials: Partial<Record<PyramidMaterial, number>>; trim: number; problems: string[] } {
@@ -49,7 +52,8 @@ export function parsePyramidMix(src: string): { shapes: Partial<Record<PyramidSh
     const m = /^([a-z]+)\s*(?::\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/i.exec(part);
     const name = m?.[1]?.toLowerCase() ?? '';
     const w = m?.[2] !== undefined ? Number(m[2]) : 1;
-    if (m && !Number.isFinite(w)) { problems.push(`"${part}": the weight must be a finite number`); continue; }
+    // Bounded, not just finite: the picker sums every weight, and two finite ones near 1e308 overflow that total.
+    if (m && !(w <= MAX_WEIGHT)) { problems.push(`"${part}": a weight is at most ${MAX_WEIGHT}`); continue; }
     if (m && name === 'trim') trim = Math.min(1, m[2] !== undefined ? w : 0.5);
     else if (m && (PYRAMID_SHAPES as readonly string[]).includes(name)) shapes[name as PyramidShape] = (shapes[name as PyramidShape] ?? 0) + w;
     else if (m && Object.hasOwn(PYRAMID_MATERIALS, name)) materials[name as PyramidMaterial] = (materials[name as PyramidMaterial] ?? 0) + w;
