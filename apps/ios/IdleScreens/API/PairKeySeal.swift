@@ -111,11 +111,16 @@ enum ScreenKey {
         read[kSecReturnData as String] = true
         read[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
-        if SecItemCopyMatching(read as CFDictionary, &result) == errSecSuccess,
-           let data = result as? Data,
+        let status = SecItemCopyMatching(read as CFDictionary, &result)
+        if status == errSecSuccess, let data = result as? Data,
            let key = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) {
             return key
         }
+        // Mint only when there is no key, or the stored one is unreadable. Any
+        // other failure (the Keychain unavailable for a moment) must not
+        // replace it: every phone paired with this screen holds the old public
+        // half, and a key sealed to it would then never open here.
+        guard status == errSecItemNotFound || status == errSecSuccess else { return nil }
         let key = Curve25519.KeyAgreement.PrivateKey()
         SecItemDelete(query as CFDictionary)
         var add = query

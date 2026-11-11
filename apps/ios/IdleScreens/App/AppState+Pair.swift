@@ -365,8 +365,11 @@ extension AppState {
             viewerKey = held
         case .send:
             let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: channelId)
+            // A check that could not be made fails the push; it is not a
+            // revoke. Minting on it would add a grant per flaky push (a
+            // channel holds 32) and leave the last one valid but unrevoked.
             if let kept = KeychainHelper.load(key: slot),
-               (try? await gallery.verdict(channelId: channelId, token: kept))?.valid == true {
+               try await gallery.verdict(channelId: channelId, token: kept).valid {
                 viewerKey = kept
             } else {
                 let minted = try await mcp.createToken(channelId: channelId, token: held, role: .viewer,

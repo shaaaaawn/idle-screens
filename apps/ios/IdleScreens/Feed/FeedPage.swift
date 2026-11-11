@@ -79,6 +79,10 @@ struct FeedPage: View {
     @State private var pulse = false
     /// The private gate's "Add a key" sheet.
     @State private var showAddKey = false
+    /// Bumped when the gate's sheet closes with a key held, so the live page
+    /// is rebuilt even when a NEW key replaced a refused one (the key's mere
+    /// presence does not change then, and the page seeds its storage once).
+    @State private var keyEpoch = 0
 
     static let liveKey = "live"
     private static func key(_ stop: ChannelFeed.Stop) -> String { "s\(stop.sceneId)" }
@@ -238,8 +242,13 @@ struct FeedPage: View {
                            hide: { app.hideChannel(channelId) })
         .sheet(isPresented: $showAddKey, onDismiss: {
             // A key just landed: the page is rebuilt with it (`.id` on the
-            // web view) and the session listens again.
-            if app.token(for: channelId) != nil { session.retry() }
+            // web view) and the session listens again. Bumped for a key that
+            // replaced a refused one too: the page holding that one was told
+            // 4401 and will not reconnect on its own.
+            if app.token(for: channelId) != nil {
+                keyEpoch += 1
+                session.retry()
+            }
         }) {
             AddExistingChannelSheet(channelId: channelId)
         }
@@ -452,7 +461,7 @@ struct FeedPage: View {
                 )
                 // A key added from the private gate has to reach the page's
                 // storage, which is seeded once, when the page is built.
-                .id(app.token(for: channelId) != nil)
+                .id("\(app.token(for: channelId) != nil)#\(keyEpoch)")
                 .ignoresSafeArea()
                 // Hidden until the first frame proves the page is live, so a
                 // slow load shows the channel's colour, not a blank sheet.

@@ -234,11 +234,19 @@ struct WebSceneView: UIViewRepresentable {
         let host = coordinator.host ?? coordinator
         host.sink = nil
         SwipeTiming.mark("web view dismantled (\(host.channelId))")
-        if let key = coordinator.poolKey {
+        if let key = coordinator.poolKey, !Self.isFinalClose(host.lastClose) {
             WebScenePool.shared.park(key, webView: webView, host: host)
         } else {
             WebScenePool.teardown(webView)
         }
+    }
+
+    /// A page whose channel socket the server closed for good (4401: no key
+    /// or a refused one; 4410: deleted) never reconnects. Parked, it would
+    /// hand the next visit a dead page that replays the refusal, even after a
+    /// new key has landed: torn down instead.
+    static func isFinalClose(_ code: Int?) -> Bool {
+        code == ChannelWSClient.closeUnauthorized || code == ChannelWSClient.closeDeleted
     }
 
     // MARK: Page bootstrap

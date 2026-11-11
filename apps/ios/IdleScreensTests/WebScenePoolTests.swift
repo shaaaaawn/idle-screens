@@ -181,6 +181,16 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertNil(pool.snapshot(channelId: "studio", sceneId: pool.maxSnapshots))
         XCTAssertNotNil(pool.snapshot(channelId: "lobby", sceneId: nil))
     }
+
+    /// A page the server shut out (4401) or whose channel is gone (4410)
+    /// never reconnects, so it is never parked for a later visit to reuse.
+    func testAPageClosedForGoodIsNotKept() {
+        XCTAssertTrue(WebSceneView.isFinalClose(4401))
+        XCTAssertTrue(WebSceneView.isFinalClose(4410))
+        XCTAssertFalse(WebSceneView.isFinalClose(nil))
+        XCTAssertFalse(WebSceneView.isFinalClose(1000))
+        XCTAssertFalse(WebSceneView.isFinalClose(1006))
+    }
 }
 
 private final class FakeMessage: WKScriptMessage {
