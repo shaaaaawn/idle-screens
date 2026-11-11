@@ -94,7 +94,8 @@ Motion:
    assertion (`expect(SCHEMA_EXAMPLES).toHaveLength(N)`) in
    `packages/schema/src/examples.test.ts`.
 4. Wire it into the playground:
-   - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to the saver list
+   - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to the `schema` group's
+     `savers` in `SAVER_GROUPS` (it feeds `GROUPED_SAVERS` / `ALL_SAVERS`)
    - `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
 5. Run: `pnpm build && pnpm test && pnpm test:e2e`
 6. Start the dev server (`pnpm dev`) and verify it looks good in the browser.
