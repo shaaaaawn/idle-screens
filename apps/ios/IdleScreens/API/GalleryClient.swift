@@ -161,7 +161,9 @@ actor GalleryClient {
         // The key was sent and refused (revoked or rotated): keep the row, so
         // opening it reaches the gate's "Add a new key" instead of the
         // channel quietly leaving the wall.
-        if http.statusCode == 403, Self.isPrivateRefusal(data), key(channelId) != nil {
+        // Only a key that was actually sent: a malformed one never is.
+        if http.statusCode == 403, Self.isPrivateRefusal(data),
+           let held = key(channelId), ChannelTokenFormat.isWellFormedToken(held) {
             return PublicChannel(channelId: channelId, label: label, tags: nil, viewers: nil, access: "private")
         }
         guard (200...299).contains(http.statusCode),

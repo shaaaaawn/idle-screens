@@ -149,4 +149,26 @@ final class ChannelReadTests: XCTestCase {
         _ = try? await client(malformed, key: "isk_bad\n").fetchHistory(channelId: "secret")
         XCTAssertEqual(malformed.requests.count, 1, "a malformed stored key is not sent")
     }
+
+    /// A private channel on the keyring whose key is refused stays on the
+    /// wall as a placeholder, so its gate ("Add a new key") is reachable.
+    /// No key, or one never sent (malformed), is no row.
+    func testARefusedKeyKeepsAPlaceholderRow() async {
+        let refused = MockTransport()
+        refused.handler = { _ in (Self.refusal, 403) }
+        let row = await client(refused, key: key).fetchPrivateChannel(channelId: "secret", label: "Secret")
+        XCTAssertEqual(row?.id, "secret")
+        XCTAssertEqual(row?.displayLabel, "Secret")
+        XCTAssertEqual(row?.access, "private")
+
+        let none = MockTransport()
+        none.handler = { _ in (Self.refusal, 403) }
+        let noKey = await client(none, key: nil).fetchPrivateChannel(channelId: "secret", label: "Secret")
+        XCTAssertNil(noKey)
+
+        let bad = MockTransport()
+        bad.handler = { _ in (Self.refusal, 403) }
+        let malformed = await client(bad, key: "isk_bad\n").fetchPrivateChannel(channelId: "secret", label: "Secret")
+        XCTAssertNil(malformed)
+    }
 }

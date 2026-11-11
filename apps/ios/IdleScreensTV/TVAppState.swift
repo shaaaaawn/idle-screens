@@ -722,6 +722,9 @@ final class TVAppState {
             // the last channel, which would be this one.
             if let gone = selectedChannelId {
                 channels.removeAll { $0.id == gone }
+                // Its key opens nothing now (a channel claimed fresh under
+                // the same id has new keys).
+                keys.removeToken(for: gone)
                 if UserDefaults.standard.string(forKey: Self.lastChannelKey) == gone {
                     UserDefaults.standard.removeObject(forKey: Self.lastChannelKey)
                 }

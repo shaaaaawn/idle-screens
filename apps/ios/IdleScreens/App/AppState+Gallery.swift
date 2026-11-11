@@ -59,8 +59,10 @@ extension AppState {
             for await row in group { if let row { rows.append(row) } }
             return rows
         }
-        // Hidden while the reads were in flight: still hidden.
-        return rows.filter { !hidden.isHidden($0.id) }.sorted { $0.id < $1.id }
+        // Hidden, or taken off the keyring, while the reads were in flight:
+        // still out.
+        let keyring = Set(credentials.map(\.channelId))
+        return rows.filter { keyring.contains($0.id) && !hidden.isHidden($0.id) }.sorted { $0.id < $1.id }
     }
 
     /// Add the keyring's private channels to a wall painted from the cache.

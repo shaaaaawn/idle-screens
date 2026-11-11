@@ -128,3 +128,85 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(underWay.isCancelled)
     }
 }
+
+/// Adding a key when one is already held: the `/verify` answers that decide
+/// whether it replaces the held one.
+@MainActor
+final class AddKeyReplacementTests: XCTestCase {
+    private let baseURL = URL(string: "https://example.com")!
+    private let suiteName = "IdleScreensTests.AddKeyReplacement"
+    private var defaults: UserDefaults!
+    private let channelId = "replace-chan"
+    private let held = "isk_edit_0123456789abcdef0123456789abcdef"
+    private let offered = "isk_view_0123456789abcdef0123456789abcdef"
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    /// An app holding an editor key for the channel; `/verify` answers per token.
+    private func makeApp(verify: @escaping @Sendable (String) -> (String, Int)) -> AppState {
+        let transport = MockTransport()
+        transport.handler = { request in
+            guard request.url?.path.hasSuffix("/verify") == true,
+                  let body = request.httpBody,
+                  let object = try? JSONSerialization.jsonObject(with: body) as? [String: String],
+                  let token = object["token"] else { return (Data(), 404) }
+            let (json, status) = verify(token)
+            return (Data(json.utf8), status)
+        }
+        let store = CredentialStore(userDefaults: defaults)
+        store.setToken(held, for: channelId)
+        store.save([ChannelCredential(channelId: channelId, label: channelId, createdAt: Date(), role: .editor)])
+        return AppState(mcp: MCPClient(baseURL: baseURL, transport: transport),
+                        gallery: GalleryClient(baseURL: baseURL, transport: transport),
+                        store: store)
+    }
+
+    func testALesserKeyNeverDemotesAWorkingOne() async {
+        let held = self.held
+        let app = makeApp { token in
+            token == held ? (#"{"valid":true,"role":"editor","access":"public"}"#, 200)
+                          : (#"{"valid":true,"role":"viewer","access":"public"}"#, 200)
+        }
+        defer { app.store.removeToken(for: channelId) }
+        do {
+            try await app.addExistingChannel(channelId: channelId, token: offered)
+            XCTFail("expected lesserKey")
+        } catch {
+            guard case VJError.lesserKey = error else { return XCTFail("wrong error: \(error)") }
+        }
+        XCTAssertEqual(app.token(for: channelId), held)
+    }
+
+    func testAWorkingLesserKeyReplacesARefusedOne() async throws {
+        let held = self.held
+        let app = makeApp { token in
+            token == held ? (#"{"valid":false,"role":null,"access":"public"}"#, 200)
+                          : (#"{"valid":true,"role":"viewer","access":"public"}"#, 200)
+        }
+        defer { app.store.removeToken(for: channelId) }
+        try await app.addExistingChannel(channelId: channelId, token: offered)
+        XCTAssertEqual(app.token(for: channelId), offered)
+        XCTAssertEqual(app.credentials.first?.role, .viewer)
+    }
+
+    /// A server that could not answer has not declined the key: an error,
+    /// and nothing is stored.
+    func testARateLimitedVerifyIsAnErrorNotADecline() async {
+        let app = makeApp { _ in (#"{"error":"slow down"}"#, 429) }
+        app.store.removeToken(for: channelId)
+        app.credentials = []
+        do {
+            try await app.addExistingChannel(channelId: channelId, token: offered)
+            XCTFail("expected httpError")
+        } catch {
+            guard case GalleryError.httpError(let status, _) = error else { return XCTFail("wrong error: \(error)") }
+            XCTAssertEqual(status, 429)
+        }
+        XCTAssertNil(app.token(for: channelId))
+        XCTAssertTrue(app.credentials.isEmpty)
+    }
+}

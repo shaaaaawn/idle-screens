@@ -562,6 +562,8 @@ struct FeedPage: View {
     private var liveStateContent: some View {
         if !isActive {
             EmptyView()
+        } else if session.phase == .deleted {
+            deletedCard
         } else if session.sleeping {
             VStack(spacing: 14) {
                 Image(systemName: "moon.zzz")
@@ -597,17 +599,6 @@ struct FeedPage: View {
             .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
         } else if case .locked(let refused) = session.phase {
             privateGate(refused: refused)
-        } else if session.phase == .deleted {
-            VStack(spacing: 14) {
-                Image(systemName: "xmark.circle")
-                    .font(.system(size: 32))
-                    .foregroundStyle(Color.secondary)
-                Text("this channel was deleted")
-                    .font(.headline)
-                    .foregroundStyle(Color.primary)
-            }
-            .padding(28)
-            .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
         } else if session.phase == .unreachable {
             VStack(spacing: 14) {
                 Image(systemName: "wifi.exclamationmark")
@@ -636,6 +627,21 @@ struct FeedPage: View {
                 .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
                 .onAppear { pulse = true }
         }
+    }
+
+    /// A deleted channel (4410). Final, so no retry. Ahead of every other
+    /// state: a channel deleted while asleep is gone, not sleeping.
+    private var deletedCard: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "xmark.circle")
+                .font(.system(size: 32))
+                .foregroundStyle(Color.secondary)
+            Text("this channel was deleted")
+                .font(.headline)
+                .foregroundStyle(Color.primary)
+        }
+        .padding(28)
+        .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
     }
 
     /// A private channel this phone cannot open. The web gate is hidden in
