@@ -383,6 +383,21 @@ CLI flags override the file (`idle-screens-wayland --help`).
 Update the offline bundle: `idle-screens-wayland check-updates` (SHA-256
 verified, anti-downgrade guarded; also checked in the background at launch).
 
+### Private channels
+
+A private channel needs a key to watch. Ask its owner for a viewer key
+(`isk_view_…`) and keep it in a file named after the channel, readable only by
+you:
+
+```bash
+mkdir -p ~/.config/idle-screens/keys
+install -m 600 /dev/stdin ~/.config/idle-screens/keys/<channel-id>   # paste the key, then Ctrl-D
+```
+
+The app hands the key to the channel page before it loads, so the key never
+appears in a URL. A key file other users can read is ignored, with a warning
+in the log. Without a key the channel shows its "needs a token" screen.
+
 ## Behavior notes
 
 - **Exit on input (overlay mode):** uses `ext-idle-notify-v1`. The watcher
