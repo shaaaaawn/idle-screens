@@ -102,7 +102,7 @@ cd apps/mac
 ./scripts/build-app.sh              # web bundle + swift build + assemble .app
 open dist/IdleScreens.app           # menu-bar icon appears
 
-swift test                          # 40 unit tests; also run in CI on every change
+swift test                          # unit tests; also run in CI on every change
 ```
 
 Dev builds are **host-architecture only** — the second slice doubles compile

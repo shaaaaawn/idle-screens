@@ -26,7 +26,7 @@ import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
-import { CHOREO_MARKS, parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
+import { parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
 import { BREED_GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
 type Value = string | number | boolean;
