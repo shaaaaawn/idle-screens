@@ -42,17 +42,47 @@ pub fn is_well_formed(token: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// A key file is one short token; anything bigger is not one.
+const MAX_KEY_FILE: u64 = 4096;
+
 /// The key stored for `channel_id`, if there is a readable, private,
 /// well-formed one.
+///
+/// Runs on the UI thread for every channel navigation, so it never blocks:
+/// only a regular file is opened (a FIFO would hang `open`), every check is
+/// made on the opened handle rather than the path (what is checked is what
+/// is read), and a file over `MAX_KEY_FILE` bytes is refused unread past
+/// that cap.
 pub fn load(dir: &Path, channel_id: &str) -> Option<String> {
+    use std::io::Read;
+
     if !is_channel_id(channel_id) {
         return None;
     }
     let path = dir.join(channel_id);
-    let meta = std::fs::metadata(&path).ok()?;
+    let before = std::fs::metadata(&path).ok()?;
+    if !before.is_file() {
+        log_warn(&format!(
+            "key file {} is not a regular file; ignoring it",
+            path.display()
+        ));
+        return None;
+    }
+    let file = std::fs::File::open(&path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() {
+        return None;
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if (meta.dev(), meta.ino()) != (before.dev(), before.ino()) {
+            log_warn(&format!(
+                "key file {} changed while being read; ignoring it",
+                path.display()
+            ));
+            return None;
+        }
         if meta.permissions().mode() & 0o077 != 0 {
             log_warn(&format!(
                 "key file {} is readable by other users; ignoring it (chmod 600 it)",
@@ -61,9 +91,15 @@ pub fn load(dir: &Path, channel_id: &str) -> Option<String> {
             return None;
         }
     }
-    #[cfg(not(unix))]
-    let _ = meta;
-    let text = std::fs::read_to_string(&path).ok()?;
+    let mut text = String::new();
+    file.take(MAX_KEY_FILE + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > MAX_KEY_FILE {
+        log_warn(&format!(
+            "key file {} is too large to hold a key; ignoring it",
+            path.display()
+        ));
+        return None;
+    }
     let token = text.trim();
     if is_well_formed(token) {
         Some(token.to_string())
@@ -254,6 +290,28 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(load(&dir, "junk"), None);
+        std::fs::create_dir_all(dir.join("adir")).unwrap();
+        assert_eq!(load(&dir, "adir"), None, "a directory is not a key file");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // A FIFO must be refused before it is opened: opening one blocks.
+            let fifo = dir.join("pipe");
+            let made = std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .is_ok_and(|s| s.success());
+            if made {
+                std::fs::set_permissions(&fifo, std::fs::Permissions::from_mode(0o600)).unwrap();
+                assert_eq!(load(&dir, "pipe"), None, "a FIFO is never opened");
+            }
+            // An oversized file is refused, not truncated into a "token".
+            let big = format!("{VIEWER}{}", "a".repeat(MAX_KEY_FILE as usize));
+            std::fs::write(dir.join("big"), big).unwrap();
+            std::fs::set_permissions(dir.join("big"), std::fs::Permissions::from_mode(0o600))
+                .unwrap();
+            assert_eq!(load(&dir, "big"), None);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
