@@ -12,7 +12,7 @@ Two roles:
 
 ## Setup
 
-Requires Xcode 16+ and XcodeGen.
+Requires Xcode 26+ and XcodeGen (ship builds come from Xcode 27).
 
 ```bash
 brew install xcodegen
