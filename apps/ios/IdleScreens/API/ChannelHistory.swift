@@ -107,7 +107,7 @@ extension GalleryClient {
     ///
     /// Unauthenticated on a public channel: this endpoint is public, which is
     /// what makes provenance a viewer-facing feature rather than an owner-only
-    /// one. A private channel's needs the device's key (`channelRead`).
+    /// one. A private channel's reads need the device's key (`channelRead`).
     /// It also means `intent` text is world-readable — see
     /// `docs/ios-client-roadmap.md` §3.
     func fetchHistory(channelId: String, limit: Int = 40) async throws -> [ChannelEvent] {

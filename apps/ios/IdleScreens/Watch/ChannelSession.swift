@@ -49,6 +49,8 @@ final class ChannelSession {
         /// (`refused`) the key it holds was turned away. Not a network
         /// failure, so not "Try again" — the fix is a key from its owner.
         case locked(refused: Bool)
+        /// The channel was deleted (4410). Final: no retry can bring it back.
+        case deleted
     }
 
     var isLocked: Bool { if case .locked = phase { return true } else { return false } }
@@ -67,6 +69,10 @@ final class ChannelSession {
     /// answers the handshake itself (its storage was seeded with the key), so
     /// this only decides what an unanswered `auth-required` means.
     private var holdsKey: @MainActor () -> Bool = { false }
+    /// The hosted page's socket was let in (`auth-ok`) on this connection.
+    /// A 4401 after that is a key revoked or rotated under a page that was
+    /// watching, not proof the key held here is refused.
+    private var proved = false
     /// The key itself, for socket mode, read on every connect.
     private var key: @Sendable () -> String? = { nil }
     private let ws: ChannelWSClient
@@ -86,7 +92,10 @@ final class ChannelSession {
         self.source = source
         self.channelId = channelId
         self.key = key
-        self.holdsKey = { key() != nil }
+        // Held means usable: a malformed stored value is never sent, so it
+        // is no key at all to the gate.
+        self.holdsKey = { key().map(ChannelTokenFormat.isWellFormedToken) ?? false }
+        proved = false
         backdrop = seedSpec?.background?.primaryColor
         phase = hasScene ? .live : .connecting
         armConnectTimeout()
@@ -151,10 +160,12 @@ final class ChannelSession {
         switch code {
         case ChannelWSClient.closeUnauthorized:
             timeoutTask?.cancel()
-            phase = .locked(refused: holdsKey())
+            // Let in, then shut out: "Try again" reloads the page, which
+            // re-proves with a good key or lands on the gate with a bad one.
+            phase = proved ? .unreachable : .locked(refused: holdsKey())
         case ChannelWSClient.closeDeleted:
             timeoutTask?.cancel()
-            phase = .unreachable
+            phase = .deleted
         default:
             break
         }
@@ -173,7 +184,8 @@ final class ChannelSession {
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
-            guard let self, !Task.isCancelled, !self.hasScene, !self.isLocked else { return }
+            guard let self, !Task.isCancelled, !self.hasScene, !self.isLocked,
+                  self.phase != .deleted else { return }
             self.phase = .unreachable
         }
     }
@@ -216,8 +228,10 @@ final class ChannelSession {
             phase = .locked(refused: true)
         case .deleted:
             timeoutTask?.cancel()
-            phase = .unreachable
-        case .authOK, .delta, .track, .reseed, .switchChannel:
+            phase = .deleted
+        case .authOK:
+            proved = true
+        case .delta, .track, .reseed, .switchChannel:
             break
         }
     }

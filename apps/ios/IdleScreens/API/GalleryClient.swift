@@ -157,8 +157,14 @@ actor GalleryClient {
     func fetchPrivateChannel(channelId: String, label: String) async -> PublicChannel? {
         let url = baseURL.appendingPathComponent("c").appendingPathComponent(channelId)
             .appendingPathComponent("state")
-        guard let (data, http) = try? await channelRead(url, channelId: channelId),
-              (200...299).contains(http.statusCode),
+        guard let (data, http) = try? await channelRead(url, channelId: channelId) else { return nil }
+        // The key was sent and refused (revoked or rotated): keep the row, so
+        // opening it reaches the gate's "Add a new key" instead of the
+        // channel quietly leaving the wall.
+        if http.statusCode == 403, Self.isPrivateRefusal(data), key(channelId) != nil {
+            return PublicChannel(channelId: channelId, label: label, tags: nil, viewers: nil, access: "private")
+        }
+        guard (200...299).contains(http.statusCode),
               let row = try? JSONDecoder().decode(PublicChannel.self, from: data),
               row.access == "private" else { return nil }
         // `/state` names the channel under `meta.label`; the keyring's own

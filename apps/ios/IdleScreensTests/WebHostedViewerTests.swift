@@ -164,3 +164,98 @@ final class WebSceneDelegateConformanceTests: XCTestCase {
         XCTAssertTrue(coordinator.responds(to: NSSelectorFromString("webViewWebContentProcessDidTerminate:")))
     }
 }
+
+/// What a hosted page's private-channel handshake and closes mean natively.
+@MainActor
+final class HostedPrivateGateTests: XCTestCase {
+    private let key = "isk_view_0123456789abcdef0123456789abcdef"
+
+    func testNoKeyShowsTheGateAndARefusedKeyTheRefusedOne() {
+        let session = ChannelSession()
+        session.start(channelId: "secret", seedSpec: nil, source: .host)
+        session.ingest(#"{"type":"auth-required","access":"private"}"#)
+        XCTAssertEqual(session.phase, .locked(refused: false))
+
+        let keyed = ChannelSession()
+        let key = self.key
+        keyed.start(channelId: "secret", seedSpec: nil, source: .host, key: { key })
+        keyed.ingest(#"{"type":"auth-required","access":"private"}"#)
+        XCTAssertEqual(keyed.phase, .connecting, "held: the page answers, so no gate yet")
+        keyed.hostClosed(code: 4401)
+        XCTAssertEqual(keyed.phase, .locked(refused: true))
+    }
+
+    /// Let in, then 4401: some key was revoked or rotated under a watching
+    /// page. Not proof this key is refused, so "Try again", not the gate.
+    func testA4401AfterAuthOKIsNotARefusal() {
+        let session = ChannelSession()
+        let key = self.key
+        session.start(channelId: "secret", seedSpec: nil, source: .host, key: { key })
+        session.ingest(#"{"type":"auth-required","access":"private"}"#)
+        session.ingest(#"{"type":"auth-ok","role":"viewer"}"#)
+        session.hostClosed(code: 4401)
+        XCTAssertEqual(session.phase, .unreachable)
+    }
+
+    func testAMalformedStoredKeyIsNoKey() {
+        let session = ChannelSession()
+        session.start(channelId: "secret", seedSpec: nil, source: .host, key: { "isk_bad\n" })
+        session.ingest(#"{"type":"auth-required","access":"private"}"#)
+        XCTAssertEqual(session.phase, .locked(refused: false))
+    }
+
+    func testADeletedChannelIsFinalNotUnreachable() {
+        let session = ChannelSession()
+        session.start(channelId: "gone", seedSpec: nil, source: .host)
+        session.hostClosed(code: 4410)
+        XCTAssertEqual(session.phase, .deleted)
+    }
+}
+
+/// The pairing wire fields a private channel's hand-off rides on. A
+/// misspelt key would fail silently: the server ignores it, and the TV
+/// never gets its viewer key.
+final class PairClientWireTests: XCTestCase {
+    private let base = URL(string: "https://example.com")!
+
+    private func body(_ request: URLRequest) -> [String: Any] {
+        (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]) ?? [:]
+    }
+
+    func testPushSendsSealedKeyOnlyWhenSet() async throws {
+        let transport = MockTransport()
+        transport.handler = { _ in (Data(#"{"ok":true,"delivered":1}"#.utf8), 200) }
+        let client = PairClient(baseURL: base, transport: transport)
+        try await client.push(pairToken: "isp_x", channelId: "secret", sealedKey: "c2VhbGVk")
+        try await client.push(pairToken: "isp_x", channelId: "lobby")
+        XCTAssertEqual(body(transport.requests[0])["sealedKey"] as? String, "c2VhbGVk")
+        XCTAssertNil(body(transport.requests[1])["sealedKey"], "left out, not null")
+    }
+
+    func testCreateCodeSendsPublicKeyAndClaimReadsIt() async throws {
+        let transport = MockTransport()
+        transport.handler = { request in
+            if request.url?.path == "/api/pair/claim" {
+                return (Data(#"{"ok":true,"pairToken":"isp_x","deviceId":"tv-1234567","channelId":null,"publicKey":"pk"}"#.utf8), 200)
+            }
+            return (Data(#"{"code":"ABCDEF","url":"https://example.com/pair/ABCDEF","expiresAt":1}"#.utf8), 200)
+        }
+        let client = PairClient(baseURL: base, transport: transport)
+        _ = try? await client.createCode(deviceId: "tv-1234567", channelId: nil, publicKey: "pk")
+        XCTAssertEqual(body(transport.requests[0])["publicKey"] as? String, "pk")
+        let claimed = try await client.claim(code: "ABCDEF")
+        XCTAssertEqual(claimed.publicKey, "pk")
+    }
+
+    func testAPairingWithNoScreenKeyIsTold() async {
+        let transport = MockTransport()
+        transport.handler = { _ in (Data(#"{"ok":false,"delivered":0,"code":"no-screen-key","error":"x"}"#.utf8), 409) }
+        let client = PairClient(baseURL: base, transport: transport)
+        do {
+            try await client.push(pairToken: "isp_x", channelId: "secret", sealedKey: "c2VhbGVk")
+            XCTFail("expected noScreenKey")
+        } catch {
+            XCTAssertEqual(error as? PairError, .noScreenKey)
+        }
+    }
+}

@@ -59,7 +59,7 @@ struct WatchFeedView: View {
             } else {
                 // The wall came from the disk cache, which holds the public
                 // listing only: put this phone's private channels on it too.
-                await app.addKeyringPrivateChannels()
+                await app.addKeyringPrivateChannels(staleAfter: 300)
             }
         }
     }

@@ -140,8 +140,14 @@ extension AppState {
             // old token's prefix hint, not the (nil) stored role field.
             // (`self.` is required here: the local `role` below would
             // otherwise shadow the `role(for:)` method of the same name.)
+            // A refused key is no key at all: a lesser one that works may
+            // replace it (the private gate's "Add a new key").
             if let held = self.role(for: channelId), let role, role < held {
-                throw VJError.lesserKey(held: held, offered: role)
+                var heldWorks = false
+                if let current = store.token(for: channelId) {
+                    heldWorks = try await gallery.verdict(channelId: channelId, token: current).valid
+                }
+                if heldWorks { throw VJError.lesserKey(held: held, offered: role) }
             }
             // Store the replacement token before the role metadata that
             // describes it — a failed Keychain write must not leave the
@@ -164,7 +170,7 @@ extension AppState {
         }
         // A private channel is on no listing: the key is what puts it on the
         // wall, so put it there now rather than on the next refresh.
-        if verdict.access == "private", !channels.contains(where: { $0.id == channelId }) {
+        if verdict.access == "private", !hidden.isHidden(channelId), !channels.contains(where: { $0.id == channelId }) {
             let label = credentials.first { $0.channelId == channelId }?.label ?? channelId
             if let row = await gallery.fetchPrivateChannel(channelId: channelId, label: label) {
                 channels.append(row)

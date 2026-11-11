@@ -105,8 +105,9 @@ struct RecordedControlTrack: Decodable, Equatable, Sendable {
     let deltas: [Delta]
 }
 
-/// A scene as it was published — `GET /c/:id/scene/:sceneId`. Public, and
-/// complete: spec, seed and track, which is what makes a past moment
+/// A scene as it was published — `GET /c/:id/scene/:sceneId`. Read
+/// anonymously on a public channel and with this device's key on a private
+/// one (`channelRead`), and complete: spec, seed and track, which is what makes a past moment
 /// re-renderable rather than a screenshot.
 struct RecordedScene: Decodable, Equatable, Sendable {
     let id: Int?

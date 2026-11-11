@@ -125,6 +125,12 @@ extension GalleryClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["token": token])
         let (data, http) = try await transport.data(for: request)
+        // A server that could not answer (rate limited, or down) has said
+        // nothing about the key: that is an error, not a declined key.
+        // Callers re-mint or reject on `valid: false`, never on this.
+        if http.statusCode == 429 || (500...599).contains(http.statusCode) {
+            throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
         guard (200...299).contains(http.statusCode),
               let verdict = try? JSONDecoder().decode(KeyVerdict.self, from: data) else {
             return KeyVerdict(valid: false, role: nil)

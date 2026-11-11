@@ -40,11 +40,16 @@ struct PairPushResult: Decodable, Equatable, Sendable {
 enum PairError: LocalizedError, Equatable {
     case invalidResponse
     case httpError(status: Int, message: String)
+    /// `409 {code: "no-screen-key"}` from `/api/pair/push`: a sealed key was
+    /// sent on a pairing the server holds no screen key for. Only pairing
+    /// again fixes it, so it is not "the screen isn't answering".
+    case noScreenKey
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse: "Invalid response from server"
         case .httpError(_, let message): message
+        case .noScreenKey: "This screen was paired before it could take a private channel's key. Pair it again, then send."
         }
     }
 }
@@ -121,6 +126,7 @@ actor PairClient {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, http) = try await transport.data(for: request)
         guard (200...299).contains(http.statusCode) else {
+            if http.statusCode == 409, Self.errorCode(data) == "no-screen-key" { throw PairError.noScreenKey }
             throw PairError.httpError(status: http.statusCode, message: Self.serverMessage(data, status: http.statusCode))
         }
         guard let decoded = try? JSONDecoder().decode(T.self, from: data) else {
@@ -130,6 +136,10 @@ actor PairClient {
     }
 
     /// Prefer the server's own `error` string; fall back to the raw status.
+    private static func errorCode(_ data: Data) -> String? {
+        (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["code"] as? String
+    }
+
     private static func serverMessage(_ data: Data, status: Int) -> String {
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let message = object["error"] as? String {

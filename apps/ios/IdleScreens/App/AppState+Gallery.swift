@@ -18,11 +18,23 @@ extension AppState {
             // the wall itself, so it is fetched alongside and allowed to fail.
             async let shelves = try? gallery.fetchCategories()
             let listed = hidden.visible(try await gallery.fetchChannels())
-            channels = listed + (await keyringPrivateChannels(missingFrom: listed))
+            let fresh = listed + (await keyringPrivateChannels(missingFrom: listed))
+            // A private row added while this load was in flight (a key just
+            // saved, `addExistingChannel`) is kept, not overwritten.
+            let ids = Set(fresh.map(\.id))
+            let keyring = Set(credentials.map(\.channelId))
+            let added = channels.filter { row in
+                row.access == "private" && !ids.contains(row.id) && !hidden.isHidden(row.id)
+                    && keyring.contains(row.id)
+            }
+            channels = fresh + added
             if let fresh = await shelves { categories = fresh }
             galleryError = nil
             galleryLoadedAt = Date()
         } catch {
+            // The listing failing costs the listing, not the keyring: each
+            // private channel is its own read.
+            await addKeyringPrivateChannels()
             if channels.isEmpty { galleryError = error.localizedDescription }
         }
     }
@@ -37,7 +49,7 @@ extension AppState {
         let wanted = credentials.filter { !known.contains($0.channelId) && !hidden.isHidden($0.channelId) }
         guard !wanted.isEmpty else { return [] }
         let gallery = self.gallery
-        return await withTaskGroup(of: PublicChannel?.self) { group in
+        let rows = await withTaskGroup(of: PublicChannel?.self) { group in
             for credential in wanted {
                 group.addTask {
                     await gallery.fetchPrivateChannel(channelId: credential.channelId, label: credential.label)
@@ -45,12 +57,18 @@ extension AppState {
             }
             var rows: [PublicChannel] = []
             for await row in group { if let row { rows.append(row) } }
-            return rows.sorted { $0.id < $1.id }
+            return rows
         }
+        // Hidden while the reads were in flight: still hidden.
+        return rows.filter { !hidden.isHidden($0.id) }.sorted { $0.id < $1.id }
     }
 
     /// Add the keyring's private channels to a wall painted from the cache.
-    func addKeyringPrivateChannels() async {
+    /// `staleAfter`: skip when they were added this recently, so each Watch
+    /// appearance is not a `/state` read per keyring channel.
+    func addKeyringPrivateChannels(staleAfter: TimeInterval = 0) async {
+        if staleAfter > 0, let at = keyringRowsAddedAt, Date().timeIntervalSince(at) < staleAfter { return }
+        keyringRowsAddedAt = Date()
         let extra = await keyringPrivateChannels(missingFrom: channels)
         let known = Set(channels.map(\.id))
         channels += extra.filter { !known.contains($0.id) }

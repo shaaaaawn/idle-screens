@@ -182,9 +182,11 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertNotNil(pool.snapshot(channelId: "lobby", sceneId: nil))
     }
 
-    /// A page the server shut out (4401) or whose channel is gone (4410)
-    /// never reconnects, so it is never parked for a later visit to reuse.
-    func testAPageClosedForGoodIsNotKept() {
+    /// The predicate `dismantleUIView` checks before parking a page: only the
+    /// server's two "don't come back" codes (4401 shut out, 4410 deleted),
+    /// never a network drop or a normal close. (Driving `dismantleUIView`
+    /// itself needs a live SwiftUI host.)
+    func testFinalCloseIsOnlyTheServersTwoForGoodCodes() {
         XCTAssertTrue(WebSceneView.isFinalClose(4401))
         XCTAssertTrue(WebSceneView.isFinalClose(4410))
         XCTAssertFalse(WebSceneView.isFinalClose(nil))

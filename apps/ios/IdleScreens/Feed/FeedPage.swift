@@ -83,6 +83,10 @@ struct FeedPage: View {
     /// is rebuilt even when a NEW key replaced a refused one (the key's mere
     /// presence does not change then, and the page seeds its storage once).
     @State private var keyEpoch = 0
+    /// Which key was held when the gate's sheet opened (its hash, never the
+    /// key), so closing the sheet without a new one does not rebuild a page
+    /// that would only be refused again.
+    @State private var keyAtGate: Int?
 
     static let liveKey = "live"
     private static func key(_ stop: ChannelFeed.Stop) -> String { "s\(stop.sceneId)" }
@@ -245,7 +249,7 @@ struct FeedPage: View {
             // web view) and the session listens again. Bumped for a key that
             // replaced a refused one too: the page holding that one was told
             // 4401 and will not reconnect on its own.
-            if app.token(for: channelId) != nil {
+            if let now = app.token(for: channelId), now.hashValue != keyAtGate {
                 keyEpoch += 1
                 session.retry()
             }
@@ -593,6 +597,17 @@ struct FeedPage: View {
             .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
         } else if case .locked(let refused) = session.phase {
             privateGate(refused: refused)
+        } else if session.phase == .deleted {
+            VStack(spacing: 14) {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(Color.secondary)
+                Text("this channel was deleted")
+                    .font(.headline)
+                    .foregroundStyle(Color.primary)
+            }
+            .padding(28)
+            .glassPanel(shape: RoundedRectangle(cornerRadius: 22))
         } else if session.phase == .unreachable {
             VStack(spacing: 14) {
                 Image(systemName: "wifi.exclamationmark")
@@ -636,12 +651,15 @@ struct FeedPage: View {
                 .foregroundStyle(Color.primary)
             Text(refused
                  ? "The key on this phone no longer opens it. Ask its owner for a new one."
-                 : "It needs a key to watch. Its owner makes one with createToken.")
+                 : "It needs a key to watch. Ask its owner for one.")
                 .font(.footnote)
                 .foregroundStyle(Color.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
-            Button(refused ? "Add a new key" : "Add a key") { showAddKey = true }
+            Button(refused ? "Add a new key" : "Add a key") {
+                keyAtGate = app.token(for: channelId)?.hashValue
+                showAddKey = true
+            }
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Color(uiColor: .systemBackground))
                 .padding(.horizontal, 18)

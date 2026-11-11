@@ -45,8 +45,8 @@ enum ChannelTokenFormat {
     /// The server's own shape for a channel token (`^isk_[A-Za-z0-9_-]+$`),
     /// checked per character. Not a regex on purpose: `$` also matches before a
     /// trailing newline, so "isk_abc\n" would pass one. Gates every place a
-    /// stored key leaves the Keychain: the page bootstrap and the socket's
-    /// `auth` frame.
+    /// stored key leaves the Keychain (page bootstrap, socket `auth` frame,
+    /// per-channel read header, web-remote link).
     static func isWellFormedToken(_ token: String) -> Bool {
         guard token.hasPrefix("isk_"), token.count > 4 else { return false }
         return token.unicodeScalars.allSatisfy { scalar in

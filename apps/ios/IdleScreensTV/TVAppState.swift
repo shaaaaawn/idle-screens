@@ -717,7 +717,15 @@ final class TVAppState {
         case .refused:
             privateGate = .refused
         case .deleted:
-            // Gone for good. Back to the grid, where it no longer appears.
+            // Gone for good. Off the grid now (not on the next reload), and
+            // not where the control socket parks: `exitChannel` reopens it on
+            // the last channel, which would be this one.
+            if let gone = selectedChannelId {
+                channels.removeAll { $0.id == gone }
+                if UserDefaults.standard.string(forKey: Self.lastChannelKey) == gone {
+                    UserDefaults.standard.removeObject(forKey: Self.lastChannelKey)
+                }
+            }
             exitChannel()
         case .delta:
             break
