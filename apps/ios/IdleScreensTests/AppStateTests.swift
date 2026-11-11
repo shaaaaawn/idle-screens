@@ -210,3 +210,70 @@ final class AddKeyReplacementTests: XCTestCase {
         XCTAssertTrue(app.credentials.isEmpty)
     }
 }
+
+/// Holds every request until released, so a test can act mid-read.
+private final class GatedTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+    private var arrived = 0
+
+    var arrivedCount: Int { lock.withLock { arrived } }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let go = lock.withLock { () -> Bool in
+                arrived += 1
+                if released { return true }
+                waiting.append(continuation)
+                return false
+            }
+            if go { continuation.resume() }
+        }
+        let body = #"{"access":"private","sleeping":false,"meta":{"label":"Secret"}}"#
+        return (Data(body.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+
+    func release() {
+        let parked = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            released = true
+            defer { waiting = [] }
+            return waiting
+        }
+        parked.forEach { $0.resume() }
+    }
+}
+
+@MainActor
+final class KeyringRowsTests: XCTestCase {
+    private let baseURL = URL(string: "https://example.com")!
+    private let suiteName = "IdleScreensTests.KeyringRows"
+
+    /// A channel taken off the keyring while its `/state` read is in flight
+    /// does not come back onto the wall when the read lands.
+    func testAChannelRemovedMidReadStaysOff() async throws {
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let transport = GatedTransport()
+        let store = CredentialStore(userDefaults: defaults)
+        let credential = ChannelCredential(channelId: "secret-mid", label: "Secret", createdAt: Date(), role: .viewer)
+        store.save([credential])
+        let app = AppState(mcp: MCPClient(baseURL: baseURL, transport: transport),
+                           gallery: GalleryClient(baseURL: baseURL, transport: transport),
+                           store: store)
+        defer { app.store.removeToken(for: "secret-mid") }
+
+        let read = Task { await app.keyringPrivateChannels(missingFrom: []) }
+        var waited = 0
+        while transport.arrivedCount == 0, waited < 200 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        XCTAssertEqual(transport.arrivedCount, 1, "the read is in flight")
+        app.removeChannel(credential)
+        transport.release()
+        let rows = await read.value
+        XCTAssertTrue(rows.isEmpty)
+    }
+}
