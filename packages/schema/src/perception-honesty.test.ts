@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { adviseSpec } from './advise';
 import { luminanceGrid, motionStats, perceiveScene, type LuminanceGrid } from './perceive';
 import type { SaverSpec } from './types';
+import { polygonUnitRing, type PolygonSprite } from './shapes';
 
 // Each case is a third-party report (X-number) of perception reading
 // something the screen does not show; the repro is the report's own spec.
@@ -418,5 +419,27 @@ describe('perception reads what is on screen', () => {
       L({ key: 'turned', position: { x: -0.1, y: 0.5 }, rotate: 180, sprite: { kind: 'polygon', radius: [0.2, 0.2], origin: [1, 0], color: '#ff3a4a', path: sq } }),
     ]);
     expect(share(s, 'turned', 1000, 1000)).toBeGreaterThan(0);
+  });
+});
+
+// A timeline resolves a fresh sprite object for every sample, so a memo keyed
+// on the sprite object missed on every entity of every grid: the publish flash
+// gate on a 28-tile drawing went from 0.14 s to 1.8 s. The ring must be shared
+// by outline, so `ringFill`'s memo (keyed on the ring) hits.
+describe('polygonUnitRing is shared by outline, not by sprite object', () => {
+  const path = 'M -1 0 A 1 1 0 0 1 0 -1 M 0 1 A 1 1 0 0 1 1 0';
+  it('two path sprites with one outline share a ring', () => {
+    const a = { kind: 'polygon', parts: [{ path, fill: false, stroke: { color: '#fff', width: 0.1 } }] } as unknown as PolygonSprite;
+    const b = { ...a, parts: [{ path, fill: false, stroke: { color: '#f00', width: 0.1 } }] } as unknown as PolygonSprite;
+    expect(polygonUnitRing(b)).toBe(polygonUnitRing(a));
+    const c = { kind: 'polygon', path: 'M 0 -1 L 1 1 L -1 1 Z' } as unknown as PolygonSprite;
+    expect(polygonUnitRing({ ...c })).toBe(polygonUnitRing(c));
+  });
+  it('points and sides outlines share a ring by content', () => {
+    const pts = { kind: 'polygon', points: [[0, -1], [1, 1], [-1, 1]] } as unknown as PolygonSprite;
+    expect(polygonUnitRing({ ...pts, points: [[0, -1], [1, 1], [-1, 1]] } as unknown as PolygonSprite)).toBe(polygonUnitRing(pts));
+    const hex = { kind: 'polygon', sides: 6 } as unknown as PolygonSprite;
+    expect(polygonUnitRing({ ...hex })).toBe(polygonUnitRing(hex));
+    expect(polygonUnitRing({ kind: 'polygon', sides: 5 } as unknown as PolygonSprite)).not.toBe(polygonUnitRing(hex));
   });
 });

@@ -150,15 +150,33 @@ export function ruleArea(ring: ReadonlyArray<readonly [number, number]>, evenodd
   return f.simple ? polygonArea(ring.map(([x, y]) => ({ x: x * sx, y: y * sy }))) : f.area * Math.abs(sx * sy);
 }
 
-const polygonUnitRings = new WeakMap<object, { key: unknown; ring: Array<[number, number]> }>();
+/** Unit rings of `points` / `sides` outlines, by content; cleared past this many. */
+const UNIT_RING_CACHE_MAX = 256;
+const polygonUnitRings = new Map<string, Array<[number, number]>>();
 
-/** A polygon sprite's unit-radius outline as a ring, memoised on the sprite (re-read when its outline source is replaced). */
-export function polygonUnitRing(s: PolygonSprite): Array<[number, number]> {
-  const key = s.path ?? s.points ?? s.sides;
-  const hit = polygonUnitRings.get(s);
-  if (hit && hit.key === key) return hit.ring;
+/**
+ * A polygon sprite's unit-radius outline as a ring, memoised on the OUTLINE,
+ * not the sprite object. A timeline resolves a fresh sprite for every sample
+ * (any keyed sprite field does it), so a per-object memo missed on every
+ * entity of every grid, and `ringFill`'s 512 scanlines ran each time: the
+ * flash gate's report on a 28-tile drawing went from 0.14 s to 1.8 s. A path
+ * outline is `flattenPath`'s own result, cached by its `d`; points and sides
+ * outlines are cached by their content here. `ringFill` memoises on the ring
+ * array, so a stable ring is what makes its memo hit.
+ */
+export function polygonUnitRing(s: PolygonSprite): ReadonlyArray<readonly [number, number]> {
+  if (isPathPolygon(s)) {
+    const unit = flattenSprite(s);
+    if (unit.points.length >= 3) return unit.points;
+  }
+  const key = s.points && s.points.length >= 3
+    ? `p:${JSON.stringify(s.points)}`
+    : `n:${Math.max(3, Math.round(s.sides ?? DEFAULT_POLYGON_SIDES))}`;
+  const hit = polygonUnitRings.get(key);
+  if (hit) return hit;
   const ring = polygonPoints(s, 1).map((q) => [q.x, q.y] as [number, number]);
-  polygonUnitRings.set(s, { key, ring });
+  if (polygonUnitRings.size >= UNIT_RING_CACHE_MAX) polygonUnitRings.clear();
+  polygonUnitRings.set(key, ring);
   return ring;
 }
 
