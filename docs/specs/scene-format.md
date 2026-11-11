@@ -10,11 +10,11 @@
 > The reason this stayed a thought experiment is that nothing forced a decision
 > about scope — an open-ended "Flash, but safe" runtime has no natural edge.
 > A use case supplies one. See
-> `timeline-and-presentations.md` (a private planning note, not in this repo)
+> `idle-mono/docs/timeline-and-presentations.md` (in the parent mono repo, not this one)
 > for the argument and the cheap experiment that would test it.
 >
 > Related: mosaic/GRID composition wants the same machinery in space rather than
-> time — `grid-mosaic-channels.md` (also a private planning note).
+> time — `idle-mono/docs/grid-mosaic-channels.md`.
 
 ## Overview
 

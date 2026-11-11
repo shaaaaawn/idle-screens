@@ -153,6 +153,10 @@ struct ChannelFeedView: View {
                 checkSettled()
             }
             .onChange(of: settledPage) { _, _ in checkSettled() }
+            // A pending check holds the page list from the view it was started
+            // in. A refresh, reorder or hide that drops a page must restart it,
+            // or it could select a page that is no longer in the feed.
+            .onChange(of: pages.map(\.id)) { _, _ in checkSettled() }
             // Hid the channel on screen: move on to the next one (else the
             // one before), or leave a shelf that has nothing left to show.
             .onChange(of: app.hidden.ids) { _, hidden in
