@@ -152,13 +152,13 @@ export function parseVignette(script: string, marks: Marks, audience: readonly n
         const word = words[w]!;
         const target = (name: string): { actor: number | null; point: Mark | null } | null => {
           if (/^[abcd]$/.test(name) && ACTOR.indexOf(name) < actors) return { actor: ACTOR.indexOf(name), point: null };
-          const mk = marks[name];
+          const mk = Object.hasOwn(marks, name) ? marks[name] : undefined;
           if (mk) return { actor: null, point: mk };
           problems.push(`beat ${bi + 1}: no mark or actor "${name}" (marks: ${Object.keys(marks).join(', ')})`);
           return null;
         };
         if (word[0] === '>' || word[0] === '=') {
-          const mk = marks[word.slice(1)];
+          const mk = Object.hasOwn(marks, word.slice(1)) ? marks[word.slice(1)] : undefined;
           if (!mk) { problems.push(`beat ${bi + 1}: no mark "${word.slice(1)}" (marks: ${Object.keys(marks).join(', ')})`); continue; }
           for (const i of who) {
             const dest = spot(mk, i, actors);

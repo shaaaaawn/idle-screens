@@ -49,9 +49,10 @@ export function parsePyramidMix(src: string): { shapes: Partial<Record<PyramidSh
     const m = /^([a-z]+)\s*(?::\s*([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/i.exec(part);
     const name = m?.[1]?.toLowerCase() ?? '';
     const w = m?.[2] !== undefined ? Number(m[2]) : 1;
+    if (m && !Number.isFinite(w)) { problems.push(`"${part}": the weight must be a finite number`); continue; }
     if (m && name === 'trim') trim = Math.min(1, m[2] !== undefined ? w : 0.5);
     else if (m && (PYRAMID_SHAPES as readonly string[]).includes(name)) shapes[name as PyramidShape] = (shapes[name as PyramidShape] ?? 0) + w;
-    else if (m && name in PYRAMID_MATERIALS) materials[name as PyramidMaterial] = (materials[name as PyramidMaterial] ?? 0) + w;
+    else if (m && Object.hasOwn(PYRAMID_MATERIALS, name)) materials[name as PyramidMaterial] = (materials[name as PyramidMaterial] ?? 0) + w;
     else problems.push(`"${part}": expected a shape (${PYRAMID_SHAPES.join(', ')}) or a stone (${PYRAMID_MATERIAL_NAMES.join(', ')}), with an optional :weight, or trim[:share]`);
   }
   return { shapes, materials, trim, problems };

@@ -306,3 +306,15 @@ describe('polygon.path', () => {
     expect(check(bad)).toBe(false);
   });
 });
+
+// A number after Z re-ran Z forever (Z takes no arguments and consumes no
+// tokens), so flattenPath, validateSpec and compileSaver never returned.
+describe('a number after Z', () => {
+  it('is a parse error, not a hang', () => {
+    const t0 = Date.now();
+    expect(flattenPath('M0 0 L1 0 L1 1 Z 5 5').error).toMatch(/after Z/);
+    expect(flattenPath('m0 0 l1 0 l0 1 z 0.1 0.1').error).toMatch(/after Z/);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(flattenPath('M0 0 L1 0 L1 1 Z M2 2 L3 2 L3 3 Z').error).toBeUndefined();
+  });
+});

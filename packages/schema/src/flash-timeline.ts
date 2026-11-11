@@ -58,7 +58,7 @@ export interface TimelineFlashReport {
 }
 
 /** Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are. */
-const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background|draw)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$/;
+const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background|draw)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$|^groups\.[^.]+$/;
 /** More than 3 flashes is at least 8 reversals; allow one that starts just before the window. */
 const MIN_BOUNDARIES = 7;
 /** Frames analysed together (one run of the WCAG analyzer). */

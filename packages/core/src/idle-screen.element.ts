@@ -676,6 +676,7 @@ export class IdleScreenElement extends HostBase {
 
   private close(): void {
     if (!this.dialog?.open) return;
+    ++this.mountToken; // an async mount still in flight must not install into a closed dialog
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('error', this.onRuntimeError);
     window.removeEventListener('unhandledrejection', this.onRuntimeRejection);
@@ -859,6 +860,7 @@ export class IdleScreenElement extends HostBase {
   }
 
   private teardown(): void {
+    ++this.mountToken; // nor into a disconnected element
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('error', this.onRuntimeError);
     window.removeEventListener('unhandledrejection', this.onRuntimeRejection);
