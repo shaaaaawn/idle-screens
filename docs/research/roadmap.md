@@ -9,7 +9,7 @@
 > (concrete Cloudflare DO implementation spec for topology B),
 > [cold-agent-authoring-prompt.md](./cold-agent-authoring-prompt.md)
 > (gating experiment #2 prompt template),
-> [../specs/control-track.md](../specs/control-track.md) (steering format).
+> [../../packages/schema/FORMAT.md](../../packages/schema/FORMAT.md) (steering format: its Steering and Timeline sections).
 >
 > **Update (July 2026, session 2):** the M1 schema items shipped — `alpha`,
 > `blend: 'lighter'`, spawn `region`, `pulse` (bounded), and `soft` glow circles —

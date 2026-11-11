@@ -22,7 +22,8 @@ export default tseslint.config(
     rules: {
       'no-undef': 'off', // TypeScript handles undefined names
       '@typescript-eslint/no-explicit-any': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      // `const { timeline: _tl, ...rest } = spec` is how this codebase omits a key; the `_` names are the point.
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
   {

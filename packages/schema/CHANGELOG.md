@@ -1,5 +1,71 @@
 # @idle-screens/schema
 
+## 3.18.0
+
+### Minor Changes
+
+- 85c07df: `path` motion can now be choreographed exactly: a fixed `phase` and a `loop` mode that stops it. Both fields are opt-in, and a spec that declares neither builds and renders exactly as before.
+  
+  - **`motion.phase`** (0 ≤ phase < 1) replaces the seeded starting phase. It is the fraction of the lap at t = 0, the same quantity the seed used to pick: a closed lap passes point *k* of *n* at `k / n`, and an open lap, which goes there and back, reaches its last point at 0.5. With `count` > 1, entity *i* starts at `(phase + i / count) mod 1`, which gives an evenly spaced procession. A fixed-phase layer's count is exact and is never density-scaled, the same exemption a grid gets. Without it, a count-1 dancer would gain a twin on a 4K wall. The seeded draw is still consumed, so at the reference viewport declaring `phase` moves no other seeded value. At other viewports it can change how many entities the layer builds, as changing `count` would.
+  - **`motion.loop`**: `"loop"` (the default) keeps today's behaviour; `"once"` runs to the end of its lap (back at the first point) and rests there; `"hold"` runs to the last point and rests there (arrive and stay; a closed path does not run its closing segment). An entity that starts past its stopping point reaches it on the next lap.
+    - Until it stops, the motion is exactly the loop's: the same speed and the same knot times. A resting `streak` or oriented `stroke` keeps the heading it arrived with.
+    - The pass is a pure function of scene time, so seeks and `renderFrame(t)` agree. Under `emit` it replays from `phase` on every event, and its `trail` starts at the event rather than ribboning back across the replay. `trailEchoes` takes a new optional `since`, and the new export `trailSince` gives it.
+    - A layer `clock` does not affect it, and a looping `timeline` does not replay it. The new informational advisory `path-runs-once` says so.
+    - `scenePeriod` reports no repeat for a stopping path without `emit`.
+  - **Steering.** `phase` is advertised by `steerablePaths` and glides. Because `motion` is structural, the scene is re-placed every frame of the glide, but nothing re-seeds. A `timeline` key on it no longer warns `timeline-structural-key`. `loop` is an enum: it resolves and steps, but it is not advertised, the same as `curve`.
+  - The validator, JSON Schema, FORMAT.md and the tvOS/iOS native renderer all handle both fields.
+  - New export `pathStop(loop, closed, n, phase)`: the lap progress at which a `once` / `hold` entity rests. A production tool can use it to time a scene's knots, where it used to read the seeded phase back.
+- 2ee8f88: Validator messages now say what was probably meant. Each hint is appended to the existing message; the original wording, codes and paths are unchanged.
+  
+  - An unknown field that another type owns names that type: `sway` on a drift motion "belongs to motion type 'rise'", `sides` on a circle "belongs to sprite kind 'polygon'", `stops` on a solid background "belongs to background type 'gradient'". A sprite or motion field written on the layer (`color`, `speed`) is told which of the two it "belongs inside", and a layer field written inside a sprite (`opacity` or `position` on a circle) that it "belongs on the layer".
+  - Any other unknown field gets the nearest known name at that level (`raduis` → "did you mean 'radius'?"), in scenes and sequences alike. So do the reveal/caret field errors and every `must be 'a' | 'b'` enum error (`blend: 'lightr'`, `sync: 'epoc'`).
+  - A timeline key on a path that does not resolve suggests the steerable path it was likely meant to be (`layers.0.speed` → `layers.0.motion.speed`).
+  - The curated hints (`delay` → `life.enter`, `id` → `key`, the F142 shape hints) still come first, and only one hint is ever added.
+  - A suggestion is made only when one candidate is clearly closest: one edit for names of 3–5 characters and two for longer ones, with a transposed pair counting as one and case ignored. A tie suggests nothing.
+  - New exports `nearest(name, candidates)`, `nearestPath(path, candidates)` and `suggestSpecPath(spec, path, paths?)` (index or layer-key paths, checked against `steerablePaths` or the `paths` passed), so idle-server's setParam/setTrack errors can use the same rule.
+- 0e81e8f: Three fixes from a review of the agent contract.
+  
+  - `steerablePaths` no longer advertises `density`. It is a declared hint that changes no pixel, and `resolveSpecPath` refused it, so a setParam on an advertised path came back 400. A test over the shipped examples and fixtures now checks that every advertised path resolves.
+  - `validateSequence` warns `unknown-property` on keys it does not know in the envelope, a segment, a transition (by type) and a wipe's `origin`, the same as a scene does. A typo there used to pass silently. A scene field written one level too high (`motionIntensity` on the envelope, `ghosting` on a segment) is told to move into the segment's `scene`. These are warnings, so stored sequences keep loading. The allowlists are exported as `SEQUENCE_FIELDS` and pinned to `saver-spec.schema.json`.
+  - FORMAT.md no longer says perception ignores sprite rotation. `spin`, `rotate`, `rock` and `transform.rotate` turn outline-traced polygons, bars, strokes and streaks in the luminance maps.
+
+### Patch Changes
+
+- 25a2623: Dominance and scene colour now clip each base sprite's ink to the frame as it is painted, turned as it is turned. Before, most kinds were clipped as a square about the sprite. `text`/`textBlock` and a dominance trail or ghost still count in full off-screen. Each kind is now clipped this way:
+  
+  - a circle as its disc (a `soft` one weighted by its gradient);
+  - a ring as its stroked annulus;
+  - a small polygon as its outline;
+  - a path drawing by its own outlines: each part's fill and each stroke segment, clipped as turned;
+  - a streak as its segment from tail to head, weighted by its fade;
+  - a stroke by the length of its path, taper-weighted.
+  
+  So a disc half its radius in from the edge keeps 80 % of its area, where the old square kept 75 %. A streak whose tail hangs off the edge loses that dim tail, and a long stroke counts the part of its line that shows. In the shipped examples, `signal-board`'s 1.4-long sweep stroke rises from 0.20 to 0.32 of the scene. No example changes its top layer.
+- 9e2dbeb: Dominance and scene colour count the part of a `rect` that is on screen by its own box, turned as it is painted. Before, the box was a square as wide as the rect and never turned. A thin full-width rule near the top edge counted at about 60 % (the dev-dashboard example's header and footer rules), and a plank stood on end along the bottom edge counted as if it were lying flat. A `bar` also turns with its layer's or group's `transform.rotate` here now, and a turned rect or bar is clipped by its exact turned box, not its bounding box.
+- 25a2623: Dominance and scene colour now weigh a `soft` circle by the ink of its gradient. The canvas fades it to nothing at its radius, so that is about 38 % of its disc. Before, it counted as a solid disc, so a dim additive haze could outrank the scene's subject. In the shipped examples, `lobby-talk`'s data bars now lead its haze, and `orrery`'s corona falls from 0.77 to 0.56 of the scene. An `emoji` is also clipped to the frame by its glyph box turned with the sprite, as the luminance maps already turn it, so a turned emoji near an edge counts only the part that shows.
+- 25a2623: Three more perception weights now match what the renderer paints:
+  
+  - **Soft polygons weigh their gradient's ink.** The canvas fills a `soft` polygon through the same radial gradient as a soft circle, over its circumradius; a soft path drawing uses its unit circle. Both used to count as solid. A soft square now lays about 52 % of its area, and a soft unit-square drawing about 30 %. They are also clipped to the frame by that gradient, so an edge-crossing one keeps its brighter middle.
+  - **A label counts every glyph.** The perception text box measured at most 48 glyphs, so a longer string's box stopped short of what the canvas paints. It now spans the whole string, in the luminance maps as well as dominance and colour.
+  - **A path drawing is clipped by its own outlines.** Each part's fill is clipped to the frame by its fill rule, and each stroke segment by its length. Before, the clip used the drawing's frame box, so a small drawing whose frame box crossed an edge lost ink it never had.
+  
+  In the shipped examples, `dev-dashboard`'s 61- and 82-glyph footer and legend labels gain weight, and `facets`' soft hexes weigh about half. Every other example is unchanged.
+- 65ab7ff: Perception now honours a paint `transform.scale` on `text` and `textBlock` layers. The luminance grid, coverage and `text[].sizePx` used to measure scaled words at their unscaled size, while the renderer, the SVG preview and dominance all scaled them (X834). Kinetic type that pulses on scale now reads the way it draws.
+- febcf0f: Perception now turns a `rect`, `text`, `textBlock` and `emoji` in the luminance maps, as the renderer does (`rotate`, `spin`, `rock`, and a layer's or group's `transform.rotate`). Before, they were measured as unrotated boxes, so a plank stood on end, or a label turned to run down the screen, read as lying flat. Each one now counts by the exact area of its turned box in each grid cell. A `bar` turns the same way. It used to be measured by the bounding box of its turned box, which lit about ten times a thin bar's ink at 37°. Sprites that don't turn are measured as before. FORMAT.md's perception section and its `rock` row say so.
+- 25a2623: Scene colour (`perceiveScene().colour`, `diffScenes().colour`) now weighs every sprite by the ink it lays down. That is the area dominance counts, without dominance's extra weight on thin lines. A layer's `transform.scale` now scales a sprite's weight by its square, as it does in dominance. Before, these kinds were weighted as a square of their size:
+  
+  - a thin rule, ring, streak or stroke counted as a box as long as itself;
+  - a bar counted at its full length;
+  - a small triangle counted as its circumradius square;
+  - a label counted as one glyph, however long;
+  - a scaled layer counted at its unscaled size.
+  
+  So one thin line could set a scene's colour. In the shipped examples:
+  
+  - `signal-board` read green from its one 0.0016-wide sweep stroke. It now reads amber, like its bars, labels and caption.
+  - `lobby-talk`'s five small bars were weighted about 24× their ink.
+  - `typed-cue` read as its faint scan band. It now reads as its text.
+
 ## 3.17.1
 
 ### Patch Changes
