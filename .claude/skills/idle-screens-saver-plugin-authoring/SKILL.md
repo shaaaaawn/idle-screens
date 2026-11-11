@@ -309,13 +309,15 @@ No edit needed to `apps/playground/src/main.ts` — classic savers auto-include 
 `...CLASSIC_SAVERS` in the `ALL_SAVERS` array.
 
 ## Integration checklist (schema savers)
-1. **Add** a spec file under `packages/schema/src/examples/` and register it in `SCHEMA_EXAMPLES` (`examples/index.ts`)
+1. **Add** a spec file under `packages/schema/src/examples/`; in `examples/index.ts` add a named re-export
+   (`export { MY_SPEC } from './my-file'` — what `main.ts` imports) and an entry in `SCHEMA_EXAMPLES`
 2. **Edit** `apps/playground/src/main.ts` — add `compileSaver(MY_SPEC)` to the saver list
    (`window.__schema.examples` is built from `SCHEMA_EXAMPLES` by `dev-harness.ts`; nothing to wire there)
 3. **Edit** `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
 
 Schema example tests in `packages/schema/src/examples.test.ts` iterate
-`EXAMPLE_SPECS` automatically — no manual test update needed.
+`EXAMPLE_SPECS` automatically, but the file also pins the catalog size
+(`expect(SCHEMA_EXAMPLES).toHaveLength(N)`) — bump that count.
 
 ## De-Angularization mapping (porting a screensaver component)
 `@Input() paused/reducedMotion` -> `ctx.reducedMotion` + `setPaused`;

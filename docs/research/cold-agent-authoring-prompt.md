@@ -87,8 +87,12 @@ Motion:
 1. Read the specs under `packages/schema/src/examples/` (one file per spec —
    aquarium, rain, snowfall, lanterns, …) for reference.
 2. Invent your own original theme — don't duplicate an existing one.
-3. Add your spec as a new file in `packages/schema/src/examples/` and register it
-   in `SCHEMA_EXAMPLES` (`examples/index.ts`); `EXAMPLE_SPECS` derives from it.
+3. Add your spec as a new file in `packages/schema/src/examples/`, then in
+   `examples/index.ts` add a named re-export (`export { YOUR_SPEC } from './your-file'`,
+   which is what makes it importable from `@idle-screens/schema`) and an entry in
+   `SCHEMA_EXAMPLES` (`EXAMPLE_SPECS` derives from it). Bump the catalog-length
+   assertion (`expect(SCHEMA_EXAMPLES).toHaveLength(N)`) in
+   `packages/schema/src/examples.test.ts`.
 4. Wire it into the playground:
    - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to the saver list
    - `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
