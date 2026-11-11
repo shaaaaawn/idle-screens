@@ -169,6 +169,11 @@ struct ChannelFeedView: View {
                     selection = pages.first?.id
                 }
                 resync(reader)
+                // A settle check already waiting captured the view as it was:
+                // `channels` is a plain property, so its `pages` still list a
+                // channel this refresh removed, and it could select it. Start
+                // the check again on the refreshed list.
+                checkSettled()
             }
             .onAppear {
                 // Reopening is a fresh look: take the current order.
