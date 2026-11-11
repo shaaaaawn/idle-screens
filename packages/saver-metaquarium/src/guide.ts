@@ -26,7 +26,7 @@ import { parseFloorCover } from './floor-cover-mix';
 import { parsePyramidShow } from './pyramid-show';
 import { parseSignMix } from './sign-mix';
 import { parseSpotCues, parseSpotRig } from './spots';
-import { CHOREO_MARKS, parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
+import { parseChoreography, STARFISH_MOVE_NAMES } from './choreo';
 import { BREED_GESTURES, INTERIOR_MARK_POLAR, INTERIOR_MARKS, OPEN_MARKS, parseVignette, resolveVignette, VIGNETTE_CUES } from './vignette';
 
 type Value = string | number | boolean;
@@ -39,7 +39,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   shot: 'A framing: `orbit`, `hero` (three-quarter), `front` (level, long lens), `low`, `top` (a map), `surface`, `macro` (nearest landmark), `cast` (the mix\'s first three). Azimuth and autoRotate turn it, distance scales it.',
   shotBlend: 'Seconds a change of `shot` takes (0 = a cut): the camera moves to the new framing, eased.',
   cameraFollow: 'Ride with one fish (cast slot); -1 is the orbit camera (its params ignored while following).',
-  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 facing it.',
+  followAngle: 'Where round the followed fish the chase camera stands, degrees: 0 behind (default), 90 beside, 180 facing it. A choreographed dancer is measured from the stage\'s facing instead.',
   followDistance: 'How far behind the followed fish the camera rides (40–70 is a chase). Under ~18 it is the fish\'s eye (a walker\'s: its head height).',
   autoRotate: 'Turntable speed, degrees/second. 0 holds the shot, 1–2 a slow reveal. frame.state.camera.bearing: where it stands now.',
   followAvoid: 'Keep the followed fish in view, 0–1: the chase camera rises or pulls in, eased.',
@@ -89,7 +89,7 @@ export const PARAM_DOCS: Readonly<Record<string, string>> = {
   sceneryShadows: 'Soft shadows under rocks, homes, castle, pyramids, geodes, lamps, 0–1: nothing floats.',
   voxelAO: 'Plant cubes darken where they touch each other and the sand, 0–1. All tiers.',
   swimWave: 'Fish bend as they swim: a wave nose to tail, the body curling into turns (0 = rigid wiggle). Skips the turtle, crab and fish with a skeleton; the seahorse gets fin, tail and nod instead.',
-  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
+  fishAvoid: 'Fish make way for each other: a pair about to meet parts a second ahead, the smaller giving more, over or under before round. 1 (default) on, 0 pass-through. `inspect().crowding` counts pairs still touching.',
   eyeLife: 'Eyes blink, look, and emote (0 = painted on). Redraws each token\'s own pixel-grid eye; black and white only.',
   // water and room
   fogColor: 'The water colour; also the background. Dark blues and purples make light sources read.',
@@ -370,7 +370,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   }
   const world = worldMarks(params);
   for (const s of rig.spots) {
-    if (s.mark && !(s.mark in OPEN_MARKS) && !(s.mark in world)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
+    if (s.mark && !Object.hasOwn(OPEN_MARKS, s.mark) && !Object.hasOwn(world, s.mark)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
   }
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
@@ -381,7 +381,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     push('signs', signs.problems);
     if (params.interior === 'geode') out.push({ path: 'signs', also: ['interior'], message: 'signs stand outdoors — none are built inside a geode home' });
     else {
-      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !(m in OPEN_MARKS) && !(m in world)))];
+      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !Object.hasOwn(OPEN_MARKS, m) && !Object.hasOwn(world, m)))];
       for (const m of missing) {
         out.push({ path: 'signs', also: ['landmark', 'geodeHomes', 'paths', 'fountain'], message: `no "${m}" in this scene (${MARK_NEEDS[m] ?? 'its world part is off'}) — that sign stands in the open` });
       }
@@ -475,7 +475,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
     const { actors } = v;
     if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abcd'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
     // A breed's own gesture (an octopus's ink) on an actor of another breed does nothing.
-    const slotBreeds = expandFishMixSlots(mix, 3).map((sl) => sl.breed);
+    const slotBreeds = expandFishMixSlots(mix, 4).map((sl) => sl.breed); // four actors, a–d
     for (const [g, breeds] of Object.entries(BREED_GESTURES) as [string, readonly string[]][]) {
       for (let a = 0; a < actors; a++) {
         if (!v.beats.some((b) => b.actors[a]?.gesture === g)) continue;

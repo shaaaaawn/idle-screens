@@ -6,7 +6,7 @@ import Foundation
 /// works; a cached update is used only when complete and newer.
 ///
 /// The site is expected to host `<baseURL>/manifest.json`:
-///   { "version": 3, "files": ["index.html", "assets/main.js", "savers.json"] }
+///   { "version": 3, "files": [{ "path": "index.html", "sha256": "…" }, …] }
 /// Files are fetched relative to baseURL and cached verbatim. If the fetch
 /// fails, the shipped bundle stays in use.
 final class BundleManager {
@@ -16,7 +16,7 @@ final class BundleManager {
   private static let versionKey = "cachedBundleVersion"
   private static let baseURLKey = "bundleUpdateBaseURL"
 
-  /// Default update source. Requires the site to serve /mac/ (not yet deployed).
+  /// Default update source: the site's /mac/ bundle (idlescreens.com/mac/manifest.json).
   var baseURL: URL {
     URL(string: defaults.string(forKey: Self.baseURLKey) ?? "https://idlescreens.com/mac/")!
   }

@@ -70,4 +70,22 @@ final class StreamParityTests: XCTestCase {
             }
         }
     }
+
+    /// A fixed-phase path is choreography: its count is exact at every
+    /// viewport, as a grid's is (simulate.ts `buildEntities`). Without a phase
+    /// the same layer still thickens with the wall. The stream goldens above
+    /// are all at 1080p, where the two agree.
+    func testFixedPhasePathKeepsItsCountOnA4KWall() throws {
+        func layerCount(phase: String) throws -> Int {
+            let json = """
+            {"schemaVersion":1,"id":"p","label":"p","seed":69,"background":{"type":"solid","color":"#000000"},
+             "layers":[{"count":3,"sprite":{"kind":"circle","radius":[0.01,0.01],"color":"#ffffff"},
+               "motion":{"type":"path","points":[{"x":0.1,"y":0.1},{"x":0.9,"y":0.5},{"x":0.2,"y":0.9}],"duration":6000\(phase)}}]}
+            """
+            let spec = try JSONDecoder().decode(SpecSubset.self, from: Data(json.utf8))
+            return spec.compile(seed: 69, viewport: CGSize(width: 3840, height: 2160)).first?.entities.count ?? 0
+        }
+        XCTAssertEqual(try layerCount(phase: #","phase":0.25,"loop":"hold""#), 3)
+        XCTAssertEqual(try layerCount(phase: ""), 6)
+    }
 }

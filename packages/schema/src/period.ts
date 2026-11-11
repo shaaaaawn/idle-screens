@@ -137,7 +137,12 @@ export function scenePeriod(spec: SaverSpec, skip?: ReadonlySet<PeriodKind>): Sc
       }
     }
     const m = layer.motion;
-    if (m.type === 'path') add(`${at} path`, m.duration, 'path');
+    if (m.type === 'path') {
+      // once / hold rest after one pass; under emit the pass replays every
+      // event, so the emit period (added above) already covers it.
+      if (m.loop === 'once' || m.loop === 'hold') { if (!layer.emit) reasons.push(`${at} path stops after one pass (loop: '${m.loop}')`); }
+      else add(`${at} path`, m.duration, 'path');
+    }
     else if (m.type === 'orbit') {
       const s = range(m.speed);
       if (s === null || Number.isNaN(s)) reasons.push(`${at} orbit speed range gives each entity its own lap`);

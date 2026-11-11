@@ -566,6 +566,12 @@ struct SpecSubset: Decodable, Equatable {
         var closed: Bool?
         var curve: String?
         var scatter: Double?
+        /// path: a fixed starting lap fraction instead of the seeded one
+        /// (entity i of n at phase + i/n), and where the motion stops —
+        /// `loop`, `once` (the lap's end, the first point) or `hold` (the
+        /// last point). simulate.ts `pathStop`.
+        var phase: Double?
+        var loop: String?
         /// drift / rise / wander: `settle` decelerates to rest, `buoyant`
         /// accelerates from rest, over `tau` ms.
         var ease: Ease?
@@ -952,12 +958,28 @@ struct PathParams: Equatable, Sendable {
     var smooth: Bool
     var phase: Double                      // 0…1 offset along the loop
     var offX: Double, offY: Double         // per-entity scatter, spec units
+    /// Lap progress where a `once` / `hold` path rests (≥ phase); nil loops.
+    var stop: Double? = nil
+
+    /// simulate.ts `pathStop`: `once` rests where the lap ends (1, the first
+    /// point); `hold` the first time it reaches the last point — (n − 1)/n
+    /// on a closed lap, 1/2 on an open (there-and-back) one — a lap later
+    /// for an entity that starts past it.
+    static func stop(loop: String?, closed: Bool, count n: Int, phase: Double) -> Double? {
+        switch loop {
+        case "once": return 1
+        case "hold":
+            let end = closed ? Double(n - 1) / Double(n) : 0.5
+            return phase <= end ? end : end + 1
+        default: return nil
+        }
+    }
 
     static func == (a: Self, b: Self) -> Bool {
         a.points.count == b.points.count
             && zip(a.points, b.points).allSatisfy { $0.x == $1.x && $0.y == $1.y }
             && a.duration == b.duration && a.closed == b.closed && a.smooth == b.smooth
-            && a.phase == b.phase && a.offX == b.offX && a.offY == b.offY
+            && a.phase == b.phase && a.offX == b.offX && a.offY == b.offY && a.stop == b.stop
     }
 }
 
@@ -1208,8 +1230,9 @@ extension SpecSubset.Layer {
         var index = 0
         let vw = Double(viewport.width), vh = Double(viewport.height)
         let unit = units == .px ? 1 : Swift.min(vw, vh)
-        // Grid layers are exempt from count scaling (they would truncate).
-        let scaled = countScale == 1 || layout != nil
+        // Grid layers are exempt from count scaling (they would truncate),
+        // and so is a fixed-phase path: it is choreography (simulate.ts).
+        let scaled = countScale == 1 || layout != nil || (motion.type == "path" && motion.phase != nil)
             ? count
             : Swift.max(1, Swift.min(Int(FieldSampler.jsRound(Double(count) * countScale)), links != nil ? 200 : 400))
         let n = max(0, min(scaled, 400))
@@ -1344,7 +1367,11 @@ extension SpecSubset.Layer {
                                   cx: motion.center?.x ?? 0.5, cy: motion.center?.y ?? 0.5)
             case "path" where pathPoints != nil:
                 motionType = "path"
+                // Drawn even when `phase` fixes it, so the stream never shifts.
                 pathPhase = rng.next()
+                if let ph = motion.phase {
+                    pathPhase = (ph + Double(i) / Double(Swift.max(1, n))).truncatingRemainder(dividingBy: 1)
+                }
                 if let scatter = motion.scatter, scatter != 0 {
                     pathOffX = rng.range(-1, 1) * scatter
                     pathOffY = rng.range(-1, 1) * scatter
@@ -1468,7 +1495,9 @@ extension SpecSubset.Layer {
                 path: pathPoints.map { pts in
                     PathParams(points: pts, duration: Swift.max(1, motion.duration ?? 8000),
                                closed: motion.closed != false, smooth: motion.curve != "linear",
-                               phase: pathPhase, offX: pathOffX, offY: pathOffY)
+                               phase: pathPhase, offX: pathOffX, offY: pathOffY,
+                               stop: PathParams.stop(loop: motion.loop, closed: motion.closed != false,
+                                                     count: pts.count, phase: pathPhase))
                 },
                 rotate: rotateDeg,
                 orbitParented: orbitParentKey != nil,

@@ -58,6 +58,15 @@ struct ChannelFeedView: View {
     @State private var parkTask: Task<Void, Never>?
     /// How long a backgrounded page keeps its scene alive.
     static let backgroundGrace: Duration = .seconds(120)
+    /// The page that fills the screen, measured from layout rather than taken
+    /// from `scrollPosition`. nil while anything is moving: a swipe, a pull, a
+    /// programmatic scroll. What `selection` is checked against once both
+    /// have held still for `settleGrace`.
+    @State private var settledPage: String?
+    @State private var settleCheck: Task<Void, Never>?
+    /// Longer than a programmatic page scroll takes to start moving, so a
+    /// `select` on its way to its page is never mistaken for a mismatch.
+    static let settleGrace: Duration = .milliseconds(500)
 
     /// The caller's channels, in the held order, minus any this person hid —
     /// a shelf opened from the Channels tab holds its own copy of the list,
@@ -91,13 +100,24 @@ struct ChannelFeedView: View {
                                  chromeHidden: $chromeHidden)
                             .environment(\.viewerChromeInsets, insets)
                             .containerRelativeFrame([.horizontal, .vertical])
+                            .onGeometryChange(for: Bool.self) { proxy in
+                                FeedSelection.fills(proxy.frame(in: .scrollView))
+                            } action: { fills in
+                                if fills { settledPage = channel.id }
+                                else if settledPage == channel.id { settledPage = nil }
+                            }
                             .id(channel.id)
                     }
                 }
                 .scrollTargetLayout()
             }
             .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $selection)
+            // The scroll view reports nil while a pull to refresh drags the
+            // first page off its slot. That is not a new page: taken as one,
+            // every pull deactivated the page you were on (closing its socket)
+            // and started it again as the content sprang back.
+            .scrollPosition(id: Binding(get: { selection },
+                                        set: { selection = FeedSelection.reported($0, keeping: selection) }))
             .scrollIndicators(.hidden)
             // ↑ ↓ on an iPad keyboard flip channel (the page on screen has
             // focus and passes these up; it keeps ← → for its history).
@@ -109,8 +129,17 @@ struct ChannelFeedView: View {
             .refreshable {
                 guard let onRefresh else { return }
                 await onRefresh()
+                // The re-sort waits for `onChange(of: refreshToken)`. This
+                // closure still holds the `channels` it was built with — the
+                // list from BEFORE the refresh — so sorting here landed one
+                // refresh behind: the newest channel the pull had just fetched
+                // was filed at the bottom, and only the next pull found it.
                 refreshToken += 1
-                // The one moment a re-sort is wanted: it is what you pulled for.
+            }
+            // Runs in the update that follows the refresh, when `channels` is
+            // the list it fetched. The one moment a re-sort is wanted: it is
+            // what you pulled for.
+            .onChange(of: refreshToken) { _, _ in
                 order = channels.map(\.id)
                 select(pages.first?.id, reader: reader, animated: true)
             }
@@ -119,7 +148,15 @@ struct ChannelFeedView: View {
             // selected page the same page again. `scrollPosition(id:)` alone
             // does not: an id set before its row is laid out is dropped.
             .onChange(of: order) { _, _ in resync(reader) }
-            .onChange(of: selection) { _, id in SwipeTiming.start("channel \(id ?? "-")") }
+            .onChange(of: selection) { _, id in
+                SwipeTiming.start("channel \(id ?? "-")")
+                checkSettled()
+            }
+            .onChange(of: settledPage) { _, _ in checkSettled() }
+            // A pending check holds the page list from the view it was started
+            // in. A refresh, reorder or hide that drops a page must restart it,
+            // or it could select a page that is no longer in the feed.
+            .onChange(of: pages.map(\.id)) { _, _ in checkSettled() }
             // Hid the channel on screen: move on to the next one (else the
             // one before), or leave a shelf that has nothing left to show.
             .onChange(of: app.hidden.ids) { _, hidden in
@@ -216,6 +253,7 @@ struct ChannelFeedView: View {
             PreviewBudget.shared.exitFullscreen()
             OrientationPolicy.feedDisappeared()
             autoHide?.cancel()
+            settleCheck?.cancel()
         }
     }
 
@@ -245,8 +283,57 @@ struct ChannelFeedView: View {
 
     /// Scroll the selected page into place after layout has caught up.
     private func resync(_ reader: ScrollViewProxy) {
-        guard let id = selection else { return }
-        DispatchQueue.main.async { reader.scrollTo(id, anchor: .top) }
+        // Read the selection when the scroll runs, not when it was asked for:
+        // a refresh moves it in between, and a scroll queued with the old id
+        // ran after the new selection, aiming the screen at a page that was
+        // no longer selected.
+        DispatchQueue.main.async {
+            guard let id = selection else { return }
+            reader.scrollTo(id, anchor: .top)
+        }
+    }
+
+    /// The safety net under every path above. Once the scroll has held still
+    /// on a page for `settleGrace`, that page is the one you are watching: if
+    /// the selection names another, the selection is wrong, and the page on
+    /// screen sat black — chrome but no scene, its web view never started —
+    /// until you swiped away and back. A reorder under a paging scroll view
+    /// can leave them apart in ways no single call site sees.
+    private func checkSettled() {
+        settleCheck?.cancel()
+        settleCheck = Task { @MainActor in
+            try? await Task.sleep(for: Self.settleGrace)
+            guard !Task.isCancelled, isOnScreen,
+                  let onScreen = FeedSelection.correction(selected: selection, settled: settledPage,
+                                                          among: pages.map(\.id))
+            else { return }
+            SwipeTiming.mark("on screen \(onScreen) but selected \(selection ?? "-"): selecting it")
+            selection = onScreen
+        }
+    }
+}
+
+/// Which page the feed treats as the one you are watching.
+enum FeedSelection {
+    /// What a position the scroll view reports means. nil is the content
+    /// sitting between pages (a pull to refresh drags the first page down off
+    /// its slot), not a new page: keep the one you are on.
+    static func reported(_ id: String?, keeping current: String?) -> String? {
+        id ?? current
+    }
+
+    /// The page with this frame (in the scroll view's space) fills the
+    /// viewport: the scroll is at rest on it.
+    static func fills(_ frame: CGRect) -> Bool {
+        frame.height > 1 && abs(frame.minY) < 1
+    }
+
+    /// The page to select instead, when the page filling the screen is not the
+    /// selected one; nil when there is nothing to fix. Nothing is settled
+    /// mid-scroll, and a page that has left the feed is never chosen.
+    static func correction(selected: String?, settled: String?, among pages: [String]) -> String? {
+        guard let settled, settled != selected, pages.contains(settled) else { return nil }
+        return settled
     }
 }
 

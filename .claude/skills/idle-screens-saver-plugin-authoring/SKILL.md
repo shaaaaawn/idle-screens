@@ -257,20 +257,15 @@ export const fluid: SaverPlugin = {
 
 ## Declarative schema path (`@idle-screens/schema`)
 Instead of writing imperative code, you can author a saver as a JSON `SaverSpec`
-and compile it into a `SaverPlugin` via `compileSaver()`. The schema supports:
-- **Sprite types:** `emoji`, `text`, `circle` (`soft: true` renders a radial glow orb)
-- **Motion types:** `drift` (speed, angle, bob), `rise` (speed, sway), `bounce` (speed)
-- **Backgrounds:** solid color or gradient with stops
-- **Layers:** up to 8 layers, each with count + sprite + motion, plus optional
-  `alpha: [min,max]` (per-entity opacity), `blend: 'lighter'` (additive glow),
-  `region: {x?, y?}` (fractional spawn window — composition control), and
-  `pulse: {amp, period}` (opacity breathing; amp ≤ 0.5, period ≥ 500ms, per-entity
-  seeded phases — bounded so a layer can never strobe in unison)
+and compile it into a `SaverPlugin` via `compileSaver()`. `packages/schema/FORMAT.md`
+is the source of truth for what the schema supports — sprite kinds, motion types,
+backgrounds, per-layer options and the bounds (≤ 36 layers, ≤ 400 entities per
+layer, ≤ 800 in total). Read it rather than a summary here, which goes stale.
 
 Schema savers are flash-safe by construction (no full-field strobe primitive),
 seeded, deterministic, and `renderFrame`-addressable. They go in
-`packages/schema/src/examples/` (one file per spec, registered in `index.ts`) and get wired into the playground's schema panel
-(`apps/playground/src/schema-panel.ts`) and `ALL_SAVERS` in `main.ts`.
+`packages/schema/src/examples/` (one file per spec, registered in `index.ts`) and get added to the
+playground's saver list in `apps/playground/src/main.ts` (`window.__schema.examples` builds itself from `SCHEMA_EXAMPLES`).
 
 **Limitations (as of the 2026-07-21 "v1 ceiling"):** the schema now covers spin,
 grow, trails, links (nearest/chain/random), ghosting, wander/warp/path motion,
@@ -303,11 +298,10 @@ When adding a saver to `packages/savers-classic/`, update ALL of these files:
    update "expected N saver ids" count
 4. **Edit** `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update
    "all N savers" count in test description
-5. **Edit** `docs/specs/behavior-contract.md` — update "all N must honor" count
-6. **If `workerReady: true`:** edit `packages/savers-classic/src/idle-worker.ts` to
+5. **If `workerReady: true`:** edit `packages/savers-classic/src/idle-worker.ts` to
    add to worker registry, and `apps/playground/e2e/worker.spec.ts` to add to
    `WORKER_SAVERS`
-7. **Edit** `CREDITS.md` — add the saver to the "Original savers" table (or
+6. **Edit** `CREDITS.md` — add the saver to the "Original savers" table (or
    "After Dark" table if it's a port). Note the rendering approach and whether
    the implementation is clean-room or derived from an external source.
 
@@ -315,15 +309,15 @@ No edit needed to `apps/playground/src/main.ts` — classic savers auto-include 
 `...CLASSIC_SAVERS` in the `ALL_SAVERS` array.
 
 ## Integration checklist (schema savers)
-1. **Add** a spec file under `packages/schema/src/examples/` and register it in `SCHEMA_EXAMPLES` (`examples/index.ts`)
-2. **Edit** `apps/playground/src/schema-panel.ts` — add import, button, click handler,
-   and entry in `window.__schema.examples` (or rely on `SCHEMA_EXAMPLES` via harness)
-3. **Edit** `apps/playground/src/main.ts` — add `compileSaver(MY_SPEC)` to `ALL_SAVERS`
-4. **Edit** `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
-5. **Edit** `docs/specs/behavior-contract.md` — update saver count
+1. **Add** a spec file under `packages/schema/src/examples/`; in `examples/index.ts` add a named re-export
+   (`export { MY_SPEC } from './my-file'` — what `main.ts` imports) and an entry in `SCHEMA_EXAMPLES`
+2. **Edit** `apps/playground/src/main.ts` — add `compileSaver(MY_SPEC)` to the saver list
+   (`window.__schema.examples` is built from `SCHEMA_EXAMPLES` by `dev-harness.ts`; nothing to wire there)
+3. **Edit** `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
 
 Schema example tests in `packages/schema/src/examples.test.ts` iterate
-`EXAMPLE_SPECS` automatically — no manual test update needed.
+`EXAMPLE_SPECS` automatically, but the file also pins the catalog size
+(`expect(SCHEMA_EXAMPLES).toHaveLength(N)`) — bump that count.
 
 ## De-Angularization mapping (porting a screensaver component)
 `@Input() paused/reducedMotion` -> `ctx.reducedMotion` + `setPaused`;

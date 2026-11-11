@@ -47,11 +47,11 @@ export const METAQUARIUM_PARAMS = {
    *  lengths. -1 (default) rides a little above it, looking at its middle;
    *  set, the camera stands at that height aimed at its feet — 0.1–0.3 on a
    *  long lens is a shot of a walker's feet, the floor behind them. */
-  followHeight: { type: 'number', default: -1, min: -1, max: 3, ease: 'smooth' },
+  followHeight: { type: 'number', default: -1, min: -1, max: 3, ease: 'step' },
   /** The chase camera's lens: degrees of view, top to bottom. 0 (default) is
    *  the orbit camera's 55; 20–30 is a long lens — flatter and tighter, from
    *  further back. */
-  followLens: { type: 'number', default: 0, min: 0, max: 90, ease: 'smooth' },
+  followLens: { type: 'number', default: 0, min: 0, max: 90, ease: 'step' },
   /** Continuous orbit speed, degrees/second. Zero by default: the tank is
    *  still, letting the fish movement carry the scene. Steer up for an orbit. */
   autoRotate: { type: 'number', default: 0, min: 0, max: 12, ease: 'smooth' },

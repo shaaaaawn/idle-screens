@@ -152,16 +152,6 @@ export default defineConfig(({ mode, command }) => {
     // without colliding on 5177 — playwright.config.ts reads the same variable.
     port: Number(process.env.PLAYGROUND_PORT) || 5177,
     strictPort: true,
-    // Metaquarium farm API allowlists Origins server-side (localhost is
-    // rejected); the proxy wears the allowlisted Origin. Dev-only.
-    proxy: {
-      '/farm': {
-        target: 'https://f0ag1g19u8.execute-api.us-west-1.amazonaws.com/production/backend',
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/farm/, ''),
-        headers: { Origin: 'https://metaquarium.xyz' },
-      },
-    },
   },
   preview: { port: 5177, strictPort: true },
   // The aliased-to-source packages import `@preact/signals-core`; pre-bundle it (it's a

@@ -5,7 +5,7 @@ import { buildScenery, type SceneryOptions } from './scenery';
 import { parseSignMix } from './sign-mix';
 import { buildSigns, type SignContext } from './signs';
 
-const terrain = (x: number, z: number): number => Math.sin(x * 0.02) * 3;
+const terrain = (x: number, _z: number): number => Math.sin(x * 0.02) * 3;
 const ctx = (over: Partial<SignContext> = {}): SignContext => ({
   rng: createRng(7) as unknown as SignContext['rng'], terrain, scale: 1, marks: { gate: { x: 0, y: 20, z: -40 } },
   free: () => true, clocks: [], ...over,

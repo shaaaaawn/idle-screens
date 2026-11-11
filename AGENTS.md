@@ -33,7 +33,7 @@ apps/
   mac/               Native macOS menu-bar app (Swift, not published to npm)
   ios/               Native iOS client + VJ remote (Swift, XcodeGen, not published to npm)
   linux/             Native Wayland layer-shell overlay (Rust + WebKitGTK 6; wlroots/KDE
-                     compositors, x86_64 + aarch64; on develop, not npm)
+                     compositors, x86_64 + aarch64; not npm)
 docs/                Design docs (specs, research)
 ```
 
@@ -76,7 +76,7 @@ cd apps/linux && cargo fmt --check && cargo clippy --all-targets --locked -- -D 
 
 (or let preflight’s linux fmt step do it when `cargo` is on PATH).
 
-**Linux app** (`apps/linux`, `develop` branch): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. `check-deps.sh` probes pkg-config modules, so it works on any distro and prints the right apt/pacman line. Runs on **wlroots-family compositors and KDE Plasma Wayland — not GNOME/Mutter or X11**, which have no wlr-layer-shell; the app says so and exits rather than aborting. Targets x86_64 and aarch64 (Raspberry Pi OS Trixie/labwc). See `apps/linux/README.md` for the dependency table, idle-daemon wiring (hypridle / swayidle / Quickshell), and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
+**Linux app** (`apps/linux`): standalone Rust crate (not in the pnpm workspace). From repo root, `cd apps/linux && ./scripts/check-deps.sh && ./scripts/dev-run.sh --windowed --saver warp`. `check-deps.sh` probes pkg-config modules, so it works on any distro and prints the right apt/pacman line. Runs on **wlroots-family compositors and KDE Plasma Wayland — not GNOME/Mutter or X11**, which have no wlr-layer-shell; the app says so and exits rather than aborting. Targets x86_64 and aarch64 (Raspberry Pi OS Trixie/labwc). See `apps/linux/README.md` for the dependency table, idle-daemon wiring (hypridle / swayidle / Quickshell), and troubleshooting. CI: `.github/workflows/linux-ci.yml`.
 
 You cannot build this on macOS, but you do not need a Linux box either — a `debian:trixie` container reproduces the CI leg exactly, and on Apple silicon that container is arm64, so it *is* the Raspberry Pi target. `make app linux build` off-Linux prints the one-liner. `./scripts/test-swayidle-install.sh` covers the session-config rewriting with no swayidle, display or Wayland needed, so run it anywhere before touching `packaging/swayidle/`.
 
@@ -99,12 +99,12 @@ savers (`grep -rn 'passthrough: true' packages/*/src` is the truth).
 
 ## Build, CI, and deploy
 
-- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main` and `develop`, plus PRs and `workflow_call`. `workflow_call` accepts `skip_e2e` (Release uses this — PR already ran full e2e).
+- **CI** (`.github/workflows/ci.yml`): build -> typecheck -> lint -> test -> Playwright e2e. Runs on ubuntu, Node 22, pnpm (frozen lockfile). Triggers on push to `main`, PRs into it, and `workflow_call`. `workflow_call` accepts `skip_e2e` (Release uses this — PR already ran full e2e).
 - **Release** (`.github/workflows/release.yml`): on push to `main` (and `workflow_dispatch` retry). Slim CI (no e2e) → `changesets/action` opens "chore: version packages" → **auto-merges** that PR → **publishes in the same run**. Prefer **npm Trusted Publishing (OIDC)** (`id-token: write`, npm ≥ 11.5.1). Optional secrets: `NPM_TOKEN` (legacy fallback until every package has a Trusted Publisher), `RELEASE_GITHUB_TOKEN` (PAT/app so the version merge can also re-trigger Pages/CI; without it, same-run publish still works), `IDLE_SERVER_DISPATCH_TOKEN` (PAT with `repo` on private idle-server — fires Consume after publish).
 - **GitHub Pages** (`.github/workflows/pages.yml`): builds the playground and deploys to `https://shaaaaawn.github.io/idle-screens/` on push to `main`. Requires Pages source set to "GitHub Actions" in repo settings.
 - **Mac app** (`.github/workflows/mac-release.yml`): tag `mac-v*` to build/sign/notarize the DMG. Independent of changesets.
 - **Apple apps** (`.github/workflows/apple-ci.yml`): regenerates the XcodeGen project, then builds and unit-tests both the iPhone and Apple TV targets on `apps/ios/**` changes. The two targets share `IdleScreens/API`, `/Render` and `/Theme` wholesale, so a file written for one can break the other — an iPhone-only file in a shared dir goes in the TV target's `excludes:` in `project.yml`. Nothing here signs or ships; TestFlight goes out via `make app tvos ship` / `make app ios ship`, which run the same suite as a gate first.
-- **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test across three legs — Arch x86_64, Debian trixie x86_64, Debian trixie aarch64 (native arm runner). Triggers on `apps/linux/**` changes on `main` and `develop`.
+- **Linux app** (`.github/workflows/linux-ci.yml`): `cargo fmt`, clippy, build, test across three legs — Arch x86_64, Debian trixie x86_64, Debian trixie aarch64 (native arm runner). Triggers on `apps/linux/**` changes on `main` and on PRs into it.
 - **Linux release** (`.github/workflows/linux-release.yml`): tag `linux-v*` → x86_64 **and** aarch64 tarballs + GitHub Release. Built on Debian trixie, not Arch: a binary's glibc floor is its build base, and trixie's runs on Arch while the reverse does not.
 - All packages use **tsup** for builds. Output goes to `dist/`.
 - Tests use **Vitest** with happy-dom. E2e uses **Playwright** with Chromium.
@@ -153,94 +153,48 @@ hand (see any existing `.changeset/*.md` file for the format).
 - iOS / tvOS app (`apps/ios` — ships via TestFlight / App Store, not npm)
 - Linux app (`apps/linux` — ships via PKGBUILD / manual install, not npm)
 - Docs, tests, CI, refactors with no published API change
-- Work that stays on `develop` and is not ready to publish
+- Work that is not ready to publish (merge it without a changeset; it ships when a later changeset versions the affected package)
 
 No CI check enforces changesets. Forgetting one does not break the build — npm
 just won't get new versions until a changeset lands on `main`.
 
-### Day-to-day on `develop`
+### Day-to-day: pull requests straight to `main`
 
-Do **not** monitor for changesets during normal dev. Batch at release time: before
-the `develop → main` merge, ask *"did any publishable package change?"* — if yes,
-include a changeset in that PR.
+There is no `develop` branch (retired 2026-11-07). Branch from `origin/main`, open
+the PR against `main`, and merge with **Create a merge commit**. Agents work in a
+mono lane (`scripts/lane.sh claim`), whose `idle-screens` tree starts at `origin/main`.
+
+**Merging a PR that carries a changeset is a release.** The Release workflow runs
+on every push to `main`: if pending changesets exist it versions the packages,
+auto-merges the "chore: version packages" PR and publishes to npm in the same run.
+So add a changeset only when the change is ready to reach npm consumers; a PR
+without one merges to `main` and waits for the next PR that has one.
 
 ### Release flow
 
-**Process playbook (promote-from-develop, no freeze):** `idle-mono/scripts/RELEASE.md`
-Helpers: `scripts/release.sh cut|promote|dual-land|guide`. Research canvas: `agentic-releases`.
-
 ```
-# INNER — green Cut-From SHA; agents keep landing on develop afterward:
-make preflight X=screens ARGS=--e2e
-scripts/release.sh cut <slug>          # snapshot; record Cut-From on the PR
-
-# OUTER — babysit CI; on red fix develop then promote (not dual-land first):
-#   scripts/release.sh promote <sha>
-release/* PR → merge-commit → Release auto-merges version PR + publishes npm
-
-# BACK — metadata-sync only; mid-train develop commits = next cut
+# in a lane, on a branch from origin/main:
+make preflight X=screens ARGS=--e2e     # green before you push
+pnpm changeset                          # only when a publishable package changed
+# PR → main, merge commit → Release versions + publishes in the same run
 ```
 
-On the same `main` push, GitHub Pages deploys the playground independently.
-The Mac DMG is a separate manual `mac-v*` tag.
+To release work that already merged without a changeset, open a PR whose only
+change is the changeset. On the same `main` push, GitHub Pages deploys the
+playground independently. The Mac DMG is a separate manual `mac-v*` tag.
 
-### After every release: sync `develop` back from `main` (do not skip)
+After npm shows the new versions, consume them in idle-server: see
+`idle-mono/scripts/RELEASE.md` (the dispatch to idle-server's Consume workflow
+runs only when `IDLE_SERVER_DISPATCH_TOKEN` is set; otherwise run it by hand).
 
-The `changesets/action` "version packages" PR — the version bumps, CHANGELOG
-entries, and **deletion of the consumed `.changeset/*.md`** — lands on `main`,
-not `develop`. If `develop` isn't fast-forwarded afterward it keeps the stale,
-already-consumed changeset, and the **next** `develop → main` merge re-bumps
-and **re-publishes the same content under a new version**. This bit us once:
-the v1-ceiling batch shipped as `schema@2.3.0` from main while `develop` sat at
-`2.2.0` with the changeset still present, primed to re-ship as `2.4.0`.
-
-So the release flow's real last step is:
-
-```
-# after the version-packages PR merges to main:
-git checkout develop && git fetch origin && git merge --ff-only origin/main
-```
-
-**This only works if the `develop → main` PR was a true merge.** If it was
-**squash**-merged, develop is not a descendant of main and there is nothing to
-fast-forward — `--ff-only` fails and it is tempting to skip the step. Check
-first:
+Verify a release landed — the consumed changesets are gone and the source
+version matches what npm serves:
 
 ```bash
-git rev-list --parents -n 1 <the-release-merge-sha> | wc -w   # 2 = squash, 3 = merge
-git merge-base --is-ancestor origin/main origin/develop && echo "already synced"
+git fetch origin && git ls-tree --name-only origin/main .changeset/   # config.json + README.md only
+git show origin/main:packages/schema/package.json | grep '"version"'
+npm view @idle-screens/schema version
 ```
-
-Squash also *inverts* the danger. With a true merge, develop's stale versions
-would conflict on the next merge; with squash they are carried wholesale
-**onto main**, silently regressing published version numbers.
-
-After a squash, a plain `git merge origin/main` conflicts across everything
-both sides touched since the old base. Do a metadata-only sync instead — same
-end state, no conflicts:
-
-1. copy `packages/*/package.json` and `packages/*/CHANGELOG.md` from `main`
-2. delete only the changesets `main` actually consumed — `git cat-file -e
-   <release-sha>:.changeset/<file>` tells you whether a file predates the
-   release (consumed, delete it) or was added after (keep it)
-3. leave root `package.json` alone; it carries develop-only overrides
-
-**The same applies to anything merged directly to `main`** — Dependabot bumps,
-CI workflow changes. A later squash from `develop` reverts them. Mirror them
-back to `develop` or they are temporary. (Seen 2026-07-27: PRs #28/#30/#32 had
-to be carried back by hand.)
-
-Verify the sync worked — the consumed changesets are gone and the source
-version matches what npm now serves:
-
-```bash
-ls .changeset/*.md                          # only README.md should remain
-node -p "require('./packages/schema/package.json').version"
-npm view @idle-screens/schema version       # should match the line above
-```
-
-If the merge is *not* ff-only, `develop` has diverged and needs a real merge;
-investigate before publishing anything else.
 
 Config: `.changeset/config.json` — `access: "public"`, `baseBranch: "main"`,
 `updateInternalDependencies: "patch"`.
@@ -266,8 +220,8 @@ published via OIDC, remove the repo `NPM_TOKEN` secret and prefer
 
 ## Branching
 
-- **`main`** -- production. Pushes trigger CI + release (changesets publish to npm) + playground deploy to GitHub Pages. Do not push directly; merge from `develop`.
-- **`develop`** -- day-to-day work. Pushes trigger CI only. Default working branch.
+- **`main`** -- the only long-lived branch. Every change lands through a pull request into it (merge commit). Pushes trigger CI + release (changesets publish to npm when pending) + playground deploy to GitHub Pages. Do not push directly.
+- Feature branches (`feat/…`, `fix/…`, `chore/…`) are cut from `origin/main` and deleted after merge. `develop` was retired on 2026-11-07; its last commit is the tag `archive/develop`.
 
 ## Conventions
 

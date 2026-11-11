@@ -176,7 +176,12 @@ function enumHint(root: unknown, path: string, message: string): string {
   const v = valueAtPath(root, path);
   if (!isStr(v)) return '';
   const options = m
-    ? m[1]!.split(' | ').map((o) => o.replace(/ \(.*$/, '').replace(/^'(.*)'$/, '$1'))
+    ? m[1]!.split(' | ').map((o) => {
+        // indexOf, not /\ \(.*$/ — that rescans to the end from every ' (' (CodeQL polynomial ReDoS).
+        const gloss = o.indexOf(' (');
+        const bare = gloss < 0 ? o : o.slice(0, gloss);
+        return bare.length > 1 && bare.startsWith("'") && bare.endsWith("'") ? bare.slice(1, -1) : bare;
+      })
     : [...prose![1]!.matchAll(/'([^']+)'/g)].map((x) => x[1]!);
   const near = nearest(v, options);
   return near ? ` — did you mean '${near}'?` : '';
@@ -195,7 +200,7 @@ export const MOTION_FIELDS = {
   orbit: ['speed', 'radius', 'center'],
   wander: ['speed', 'angle', 'meander', 'coherence', 'ease'],
   warp: ['speed', 'center'],
-  path: ['points', 'duration', 'curve', 'closed', 'scatter'],
+  path: ['points', 'duration', 'curve', 'closed', 'scatter', 'phase', 'loop'],
 } as const satisfies Record<string, readonly string[]>;
 /**
  * The idle-sequence envelope's fields, a segment's, and each transition
@@ -743,7 +748,11 @@ function validateTimelineKeys(spec: SaverSpec, errOuter: (p: string, m: string) 
           warn(`${p}.path`, 'timeline-key-no-effect', `'${key.path}' is overridden by ${cp.includes('.parts.') ? "that part's" : "the sprite's"} gradient, so this key changes nothing on screen — key its gradient's stops (\`…gradient.stops.N.color\`) instead`);
         }
       }
-      if (structuralSignature(applied) !== baseSig) {
+      // A path's fixed `phase` is structural (it sits in `motion`), but its
+      // rebuild re-places only that layer's entities along their own path —
+      // the seeded draw is kept, so nothing re-seeds and the key glides.
+      const phaseKey = /^layers\.\d+\.motion\.phase$/.test(cp) && (readSpecPath(base, cp.slice(0, -'.phase'.length)) as { type?: unknown } | undefined)?.type === 'path';
+      if (!phaseKey && structuralSignature(applied) !== baseSig) {
         warn(`${p}.path`, 'timeline-structural-key', `'${key.path}' is structural (placement, count, motion, size…): the scene rebuilds at this key and entities re-seed — a pop, not a glide. Animate paint (colour, opacity, transform, polygon points) instead`);
       }
     }
@@ -1713,6 +1722,12 @@ function validateMotion(motion: unknown, path: string, err: (p: string, m: strin
     const scatterCap = isViewport ? LIMITS.maxMeander / refVp : LIMITS.maxMeander;
     if (motion.scatter !== undefined && (!isNum(motion.scatter) || motion.scatter <= 0 || motion.scatter > scatterCap)) {
       err(`${path}.scatter`, `must be > 0 and <= ${isViewport ? scatterCap.toFixed(3) + ' viewport-units' : LIMITS.maxMeander + ' px'}`);
+    }
+    if (motion.phase !== undefined && (!isNum(motion.phase) || motion.phase < 0 || motion.phase >= 1)) {
+      err(`${path}.phase`, 'must be a number, 0 <= phase < 1 (the fraction of the lap at t = 0)');
+    }
+    if (motion.loop !== undefined && motion.loop !== 'loop' && motion.loop !== 'once' && motion.loop !== 'hold') {
+      err(`${path}.loop`, "must be 'loop' | 'once' | 'hold'");
     }
   } else {
     err(`${path}.type`, 'must be drift | rise | bounce | static | orbit | wander | warp | path');

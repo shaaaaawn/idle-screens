@@ -29,7 +29,10 @@ test.describe('passthrough stages', () => {
             .locator('main :is(h1,h2,p,li,img)')
             .evaluateAll((els) => els.filter((e) => (e as HTMLElement).style.transform.startsWith('translateY')).length)
             // The stage iframe can be swapped mid-poll ("Frame was detached"): that is a "not yet", not a failure.
-            .catch(() => 0),
+            .catch((e: Error) => {
+              if (/detached/i.test(e.message)) return 0;
+              throw e;
+            }),
         { timeout: 15_000 },
       )
       .toBeGreaterThan(0);

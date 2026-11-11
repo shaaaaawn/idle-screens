@@ -108,6 +108,11 @@ export interface Entity {
     phase: number; // 0..1 offset along the path
     offX: number; // per-entity scatter (px)
     offY: number;
+    /**
+     * Lap progress (laps from the start of the lap, ≥ `phase`) where the motion
+     * rests — `loop: 'once'` / `'hold'` only, absent on a looping path.
+     */
+    stop?: number;
   };
 }
 
@@ -200,7 +205,12 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
   // showed it full-width — a renderer-vs-perception split that burned four
   // publishes to isolate. Upscaling is equally wrong: it invents phantom cells
   // beyond the authored lattice. Grid cost is already bounded by maxPerLayer.
-  const effectiveCount = countScale === 1 || layer.layout !== undefined
+  // A path with a fixed `phase` is exempt for the same reason: it is
+  // choreography (entity i at phase + i/count), and a scaled count would add
+  // a phantom dancer on a 4K wall or drop one on a phone. Productions used
+  // to buy this exemption by declaring a one-cell grid on every dancer.
+  const fixedPhase = layer.motion.type === 'path' && layer.motion.phase !== undefined;
+  const effectiveCount = countScale === 1 || layer.layout !== undefined || fixedPhase
     ? layer.count
     : Math.max(1, Math.min(
         Math.round(layer.count * countScale),
@@ -359,7 +369,10 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
       };
     } else if (m.type === 'path') {
       motion = 'path';
+      // Drawn even when `phase` fixes it: skipping the draw would shift every
+      // later seeded value in this layer and the next (determinism).
       pathPhase = rng.next();
+      if (m.phase !== undefined) pathPhase = (m.phase + i / effectiveCount) % 1;
       if (m.scatter) {
         pathOffX = rng.range(-1, 1) * m.scatter * scale;
         pathOffY = rng.range(-1, 1) * m.scatter * scale;
@@ -473,6 +486,10 @@ export function buildEntities(layer: LayerSpec, rng: Rng, w: number, h: number, 
               phase: pathPhase,
               offX: pathOffX,
               offY: pathOffY,
+              // Only when declared, so a looping path's entity is unchanged.
+              ...(m.loop === 'once' || m.loop === 'hold'
+                ? { stop: pathStop(m.loop, m.closed !== false, pathPts.length, pathPhase) }
+                : {}),
             },
           }
         : {}),
@@ -697,11 +714,53 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, u: number): 
   return 0.5 * (2 * p1 + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
 }
 
+/**
+ * Where a `once` / `hold` path rests, as lap progress counted from the start
+ * of the lap the entity begins on (so ≥ `phase`). `once` rests where the lap
+ * ends — the first point, 1. `hold` rests the first time it reaches the LAST
+ * point: a closed lap passes it at (n − 1)/n (the closing segment back to
+ * the first point is never run), an open lap — there and back — at 1/2. An
+ * entity that starts past that point reaches it on the next lap.
+ */
+export function pathStop(loop: 'once' | 'hold', closed: boolean, n: number, phase: number): number {
+  if (loop === 'once') return 1;
+  const end = closed ? (n - 1) / n : 0.5;
+  return phase <= end ? end : end + 1;
+}
+
+/**
+ * Time (ms) into a `once` / `hold` pass at scene time `t`: `t` itself, or
+ * with `emit` the time into the current event — every event replays the
+ * pass from `phase`, as `ease` restarts its travel. Never negative.
+ */
+function pathPassTime(e: Entity, t: number): number {
+  let tl = t;
+  if (e.emit) tl = (((t - e.emit.phase) % e.emit.every) + e.emit.every) % e.emit.every;
+  return tl > 0 ? tl : 0;
+}
+
+/**
+ * The earliest scene time a `trail` behind `e` may sample at `t`. Under
+ * `emit` a once / hold path replays its pass every event, so its position
+ * jumps back to `phase` when an event opens; echoes from before that would
+ * draw a ribbon across the jump. Every other entity: 0, the clock's start.
+ */
+export function trailSince(e: Entity, t: number): number {
+  return e.path?.stop !== undefined && e.emit ? t - pathPassTime(e, t) : 0;
+}
+
 function pathPosition(e: Entity, t: number): { x: number; y: number } {
   const p = e.path!;
   const n = p.pts.length;
-  let s = ((t / p.duration) + p.phase) % 1;
-  if (s < 0) s += 1;
+  let s: number;
+  if (p.stop === undefined) {
+    s = ((t / p.duration) + p.phase) % 1;
+    if (s < 0) s += 1;
+  } else {
+    // The loop's own lap progress, stopped at `stop` — so until it stops, a
+    // once / hold path is exactly the looping one.
+    s = Math.min(p.phase + pathPassTime(e, t) / p.duration, p.stop) % 1;
+  }
   if (!p.closed) {
     // Ping-pong so open paths reverse smoothly instead of teleporting.
     const pp = s * 2;
@@ -811,8 +870,28 @@ export function positionAt(e: Entity, t: number, w: number, h: number): Placed {
  */
 export function headingAt(e: Entity, t: number, w: number, h: number): number | null {
   const dtMs = 32;
-  const t1 = t < dtMs ? t + dtMs : t;
-  const t0 = t1 - dtMs;
+  const p = e.path;
+  if (p?.stop !== undefined) {
+    // A path at rest keeps the heading it arrived with — at rest the
+    // difference is zero, and an oriented sprite would snap to 0 on landing.
+    // Sample the last dtMs of the pass, one-sided and ending at the stop, so a
+    // phase near the stop (or an `emit` event opened before t = 0) still has one.
+    const tl = pathPassTime(e, t);
+    const tStop = (p.stop - p.phase) * p.duration;
+    if (tl > tStop) {
+      if (tStop <= 0) return null;
+      const base = t - tl;
+      return headingBetween(e, base + Math.max(0, tStop - dtMs), base + tStop, w, h);
+    }
+  }
+  // Under `emit` a stopping path restarts every event: look forward, not back
+  // across the restart jump, for the first dtMs of each pass.
+  const lead = p?.stop !== undefined ? pathPassTime(e, t) : t;
+  const t1 = lead < dtMs ? t + dtMs : t;
+  return headingBetween(e, t1 - dtMs, t1, w, h);
+}
+
+function headingBetween(e: Entity, t0: number, t1: number, w: number, h: number): number | null {
   const a = positionAt(e, t0, w, h);
   const b = positionAt(e, t1, w, h);
   const dx = b.x - a.x;
@@ -1064,6 +1143,7 @@ export function textWidthEm(str: string, metrics: TextMetricsClass = 'proportion
       continue;
     }
     w += charWidthEm(str[i]!, metrics);
+    if (cp > 0xffff) i++; // a supplementary glyph (emoji) is one glyph, two code units
   }
   return w;
 }

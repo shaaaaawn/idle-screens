@@ -795,3 +795,20 @@ describe('text under a paint transform (X834)', () => {
     expect(Math.abs(textSprites(scaled, opts)[0]!.sizePx - textSprites(unscaled, opts)[0]!.sizePx * 2.5)).toBeLessThanOrEqual(1.5);
   });
 });
+
+// perceiveScene handed adviseSpec the timeline-resolved spec, so every
+// timeline-aware advisory was missing from previewScene while publish (which
+// calls adviseSpec with the full spec) reported it.
+describe('perceiveScene advisories', () => {
+  it('match adviseSpec on a scene with a timeline', () => {
+    const spec = {
+      schemaVersion: 1, id: 'adv', label: 'Adv', background: { type: 'solid', color: '#000000' },
+      layers: [{ key: 'dot', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'circle', radius: [0.2, 0.2], color: '#ffffff' }, motion: { type: 'static' }, opacity: 1, life: { enter: 1000 } }],
+      timeline: { loop: true, duration: 4000, keys: [{ t: 0, path: 'layers.0.opacity', value: 1, dur: 500 }, { t: 2000, path: 'layers.0.opacity', value: 0.2, dur: 500 }] },
+    } as unknown as SaverSpec;
+    const viewport = { width: 1920, height: 1080 };
+    const direct = adviseSpec(spec, viewport, { t: 5000 }).map((a) => a.code).sort();
+    expect(direct.length).toBeGreaterThan(0);
+    expect(perceiveScene(spec, { viewport, t: 5000 }).advisories.map((a) => a.code).sort()).toEqual(direct);
+  });
+});
