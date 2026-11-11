@@ -51,6 +51,11 @@ final class AppState {
     @ObservationIgnored var lastSynced: SyncTarget?
     /// The target a sync send is waiting to settle on; nil once it is sent.
     @ObservationIgnored var pendingSync: SyncTarget?
+    /// The viewer key being checked or minted for one screen and channel
+    /// (`screenViewerKeyKey`), so two pushes at once share one grant.
+    @ObservationIgnored var screenKeyMints: [String: Task<String, Error>] = [:]
+    /// When the keyring's private channels were last added to a cached wall.
+    @ObservationIgnored var keyringRowsAddedAt: Date?
     /// Failure claiming a pair code. Separate from `pairPushError` so a failed
     /// push doesn't surface as a stale error inside "Add a screen".
     var pairClaimError: String?
@@ -62,9 +67,12 @@ final class AppState {
         // confirmation is put to the person — see MCPClient.callTool.
         self.mcp = MCPClient(baseURL: baseURL, transport: transport,
                              identity: .current(), confirmer: MCPConfirmPrompt.confirmer)
-        self.gallery = GalleryClient(baseURL: baseURL, transport: transport)
+        let store = CredentialStore()
+        // A private channel's reads need the key this phone holds for it.
+        self.gallery = GalleryClient(baseURL: baseURL, transport: transport,
+                                     key: { store.token(for: $0) })
         self.pairClient = PairClient(baseURL: baseURL, transport: transport)
-        self.store = CredentialStore()
+        self.store = store
         self.credentials = store.load()
         self.pairedScreens = Self.loadPairedScreens()
         // The wall as it was last time, on the very first frame: launch opens

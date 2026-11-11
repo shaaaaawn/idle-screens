@@ -105,8 +105,9 @@ struct RecordedControlTrack: Decodable, Equatable, Sendable {
     let deltas: [Delta]
 }
 
-/// A scene as it was published — `GET /c/:id/scene/:sceneId`. Public, and
-/// complete: spec, seed and track, which is what makes a past moment
+/// A scene as it was published — `GET /c/:id/scene/:sceneId`. Read
+/// anonymously on a public channel and with this device's key on a private
+/// one (`channelRead`), and complete: spec, seed and track, which is what makes a past moment
 /// re-renderable rather than a screenshot.
 struct RecordedScene: Decodable, Equatable, Sendable {
     let id: Int?
@@ -191,7 +192,7 @@ extension GalleryClient {
         let url = baseURL
             .appendingPathComponent("c").appendingPathComponent(channelId)
             .appendingPathComponent("scene").appendingPathComponent(String(sceneId))
-        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        let (data, http) = try await channelRead(url, channelId: channelId)
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(status: http.statusCode,
                                          body: String(data: data, encoding: .utf8) ?? "")

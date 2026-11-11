@@ -133,16 +133,25 @@ extension AppState {
         guard verdict.valid else { throw VJError.tokenDeclined(channelId: channelId) }
         // The server's word, not the prefix's: the prefix is a hint for logs.
         let role = verdict.role ?? ChannelRole.hint(fromToken: token)
-        if let index = credentials.firstIndex(where: { $0.channelId == channelId }) {
-            // A better key for a channel already on the ring replaces the old
-            // one; a lesser key must not quietly demote you. Compare against
-            // the role actually in effect — for a pre-role entry that's the
-            // old token's prefix hint, not the (nil) stored role field.
-            // (`self.` is required here: the local `role` below would
-            // otherwise shadow the `role(for:)` method of the same name.)
-            if let held = self.role(for: channelId), let role, role < held {
-                throw VJError.lesserKey(held: held, offered: role)
+        // A better key for a channel already on the ring replaces the old
+        // one; a lesser key must not quietly demote you. Compare against
+        // the role actually in effect — for a pre-role entry that's the
+        // old token's prefix hint, not the (nil) stored role field.
+        // (`self.` is required here: the local `role` below would
+        // otherwise shadow the `role(for:)` method of the same name.)
+        // A refused key is no key at all: a lesser one that works may
+        // replace it (the private gate's "Add a new key"). Checked before
+        // `credentials` is indexed, so no suspension sits between the
+        // lookup and the write.
+        if credentials.contains(where: { $0.channelId == channelId }),
+           let held = self.role(for: channelId), let role, role < held {
+            var heldWorks = false
+            if let current = store.token(for: channelId) {
+                heldWorks = try await gallery.verdict(channelId: channelId, token: current).valid
             }
+            if heldWorks { throw VJError.lesserKey(held: held, offered: role) }
+        }
+        if let index = credentials.firstIndex(where: { $0.channelId == channelId }) {
             // Store the replacement token before the role metadata that
             // describes it — a failed Keychain write must not leave the
             // credential list claiming a role for a token we don't hold.
@@ -161,6 +170,14 @@ extension AppState {
             credentials.append(ChannelCredential(channelId: channelId, label: label,
                                                  createdAt: Date(), role: role))
             store.save(credentials)
+        }
+        // A private channel is on no listing: the key is what puts it on the
+        // wall, so put it there now rather than on the next refresh.
+        if verdict.access == "private", !hidden.isHidden(channelId), !channels.contains(where: { $0.id == channelId }) {
+            let label = credentials.first { $0.channelId == channelId }?.label ?? channelId
+            if let row = await gallery.fetchPrivateChannel(channelId: channelId, label: label) {
+                channels.append(row)
+            }
         }
     }
 

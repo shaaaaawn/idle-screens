@@ -45,7 +45,15 @@ final class ChannelSession {
         case connecting     // no frame yet — hold the channel's own backdrop
         case live           // rendering
         case unreachable    // gave up; offer a retry
+        /// A private channel this device cannot open: no key for it, or
+        /// (`refused`) the key it holds was turned away. Not a network
+        /// failure, so not "Try again" — the fix is a key from its owner.
+        case locked(refused: Bool)
+        /// The channel was deleted (4410). Final: no retry can bring it back.
+        case deleted
     }
+
+    var isLocked: Bool { if case .locked = phase { return true } else { return false } }
 
     private(set) var phase: Phase = .connecting
     /// Backdrop colour taken from the spec before anything renders, so the
@@ -57,6 +65,16 @@ final class ChannelSession {
     private(set) var backdropBottom: String?
 
     private var channelId: String?
+    /// Whether this device holds a key for the channel. In host mode the page
+    /// answers the handshake itself (its storage was seeded with the key), so
+    /// this only decides what an unanswered `auth-required` means.
+    private var holdsKey: @MainActor () -> Bool = { false }
+    /// The hosted page's socket was let in (`auth-ok`) on this connection.
+    /// A 4401 after that is a key revoked or rotated under a page that was
+    /// watching, not proof the key held here is refused.
+    private var proved = false
+    /// The key itself, for socket mode, read on every connect.
+    private var key: @Sendable () -> String? = { nil }
     private let ws: ChannelWSClient
     private let baseURL: URL
     private var task: Task<Void, Never>?
@@ -69,9 +87,15 @@ final class ChannelSession {
 
     /// Paint the gallery's inline spec immediately so the first frame is real
     /// content, then let the socket's snapshot replace it.
-    func start(channelId: String, seedSpec: SpecSubset?, source: Source = .socket) {
+    func start(channelId: String, seedSpec: SpecSubset?, source: Source = .socket,
+               key: @escaping @Sendable () -> String? = { nil }) {
         self.source = source
         self.channelId = channelId
+        self.key = key
+        // Held means usable: a malformed stored value is never sent, so it
+        // is no key at all to the gate.
+        self.holdsKey = { key().map(ChannelTokenFormat.isWellFormedToken) ?? false }
+        proved = false
         backdrop = seedSpec?.background?.primaryColor
         phase = hasScene ? .live : .connecting
         armConnectTimeout()
@@ -96,7 +120,7 @@ final class ChannelSession {
         task = Task { [weak self] in
             guard let self else { return }
             do {
-                for try await event in await ws.events(baseURL: baseURL, channelId: channelId) {
+                for try await event in await ws.events(baseURL: baseURL, channelId: channelId, token: self.key) {
                     guard !Task.isCancelled else { break }
                     self.handle(event)
                 }
@@ -117,7 +141,7 @@ final class ChannelSession {
     func retry() {
         guard let channelId else { return }
         phase = .connecting
-        start(channelId: channelId, seedSpec: nil, source: source)
+        start(channelId: channelId, seedSpec: nil, source: source, key: key)
     }
 
     /// One raw frame from the hosted page's socket. Same parser as our own
@@ -125,6 +149,26 @@ final class ChannelSession {
     func ingest(_ raw: String) {
         guard source == .host, let event = ChannelWSClient.parse(raw) else { return }
         handle(event)
+    }
+
+    /// The hosted page's channel socket closed with this code. Only the two
+    /// the server uses to mean "don't come back" matter: the page itself does
+    /// not reconnect after either, so without this the screen would sit on
+    /// its last frame (or a spinner) with nothing to say.
+    func hostClosed(code: Int) {
+        guard source == .host else { return }
+        switch code {
+        case ChannelWSClient.closeUnauthorized:
+            timeoutTask?.cancel()
+            // Let in, then shut out: "Try again" reloads the page, which
+            // re-proves with a good key or lands on the gate with a bad one.
+            phase = proved ? .unreachable : .locked(refused: holdsKey())
+        case ChannelWSClient.closeDeleted:
+            timeoutTask?.cancel()
+            phase = .deleted
+        default:
+            break
+        }
     }
 
     /// The web view failed before any frame arrived (offline, DNS, 5xx).
@@ -140,7 +184,8 @@ final class ChannelSession {
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
-            guard let self, !Task.isCancelled, !self.hasScene else { return }
+            guard let self, !Task.isCancelled, !self.hasScene, !self.isLocked,
+                  self.phase != .deleted else { return }
             self.phase = .unreachable
         }
     }
@@ -170,6 +215,22 @@ final class ChannelSession {
                 try? await Task.sleep(for: .milliseconds(ttlMs))
                 self?.overlayText = nil
             }
+        case .authRequired(let answered):
+            // Socket mode says whether it answered; a hosted page answers from
+            // the storage it was seeded with, which holds a key exactly when
+            // this device does.
+            if !(answered || holdsKey()) {
+                timeoutTask?.cancel()
+                phase = .locked(refused: false)
+            }
+        case .refused:
+            timeoutTask?.cancel()
+            phase = .locked(refused: true)
+        case .deleted:
+            timeoutTask?.cancel()
+            phase = .deleted
+        case .authOK:
+            proved = true
         case .delta, .track, .reseed, .switchChannel:
             break
         }

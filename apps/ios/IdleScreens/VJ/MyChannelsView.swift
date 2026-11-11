@@ -375,9 +375,15 @@ struct AddExistingChannelSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
 
-    @State private var channelId = ""
+    @State private var channelId: String
     @State private var token = ""
     @State private var error: String?
+
+    /// `channelId` prefills the channel, for a private channel's gate: the
+    /// person is looking at it, and only the key is missing.
+    init(channelId: String = "") {
+        _channelId = State(initialValue: channelId)
+    }
 
     /// Local checks first — a malformed token shouldn't cost a round trip
     /// that comes back as an opaque failure.

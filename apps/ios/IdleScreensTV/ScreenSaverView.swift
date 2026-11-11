@@ -20,7 +20,11 @@ struct ScreenSaverView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if app.sleeping {
+            if let gate = app.privateGate {
+                // A private channel this TV cannot open. Before this, a
+                // spinner that never ended.
+                PrivateGateView(gate: gate, channelId: app.selectedChannelId ?? "")
+            } else if app.sleeping {
                 // Sleeping is intentional darkness — but say so quietly, or a
                 // sleeping channel is indistinguishable from a broken one.
                 ZStack {
@@ -354,6 +358,47 @@ struct ScreenSaverView: View {
             if case .past = app.timeline { return }   // "not live" stays said
             showChrome = false
         }
+    }
+}
+
+/// A private channel without a key that opens it. A TV cannot type a key
+/// (the 10-foot rule PairView states), so the copy names the device that can
+/// hand it one: the paired iPhone, sending the channel from its app.
+private struct PrivateGateView: View {
+    let gate: TVAppState.PrivateGate
+    let channelId: String
+
+    var body: some View {
+        ZStack {
+            ProceduralChannelArt(channelId: channelId)
+                .opacity(0.35)
+                .ignoresSafeArea()
+            VStack(spacing: 20) {
+                Image(systemName: gate == .refused ? "lock.trianglebadge.exclamationmark" : "lock.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("PRIVATE CHANNEL")
+                    .font(.tvKicker)
+                    .kerning(2.2)
+                    .foregroundStyle(Color.appAccent)
+                Text(gate == .refused
+                     ? "This TV's key no longer opens it"
+                     : "This TV needs a key to show it")
+                    .font(.tvScreenTitle)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                Text(gate == .refused
+                     ? "Ask the channel's owner for a new key, then send the channel to this TV from the idle screens app on your iPhone."
+                     : "Send it to this TV from the idle screens app on an iPhone that holds a key for it.")
+                    .font(.tvBody)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 900)
+            }
+            .shadow(color: .black.opacity(0.6), radius: 20)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("private-gate")
     }
 }
 

@@ -49,6 +49,10 @@ struct WebSceneView: UIViewRepresentable {
     /// Bump to force a reload (the native "Try again").
     var reloadCount: Int = 0
     var onFrame: (String) -> Void
+    /// The page's channel socket closed, with this code. The server's 4401
+    /// (no key, or a refused one) and 4410 (deleted) are final: the page will
+    /// not reconnect, so native has to say what happened.
+    var onClose: ((Int) -> Void)? = nil
     /// 3D models still downloading in the page (0 = the scene has its cast).
     var onAssets: ((Int) -> Void)? = nil
     /// Fish a 3D tank has spawned so far, and the cast it is filling toward
@@ -86,6 +90,7 @@ struct WebSceneView: UIViewRepresentable {
         coordinator.onAssets = onAssets
         coordinator.onPinned = onPinned
         coordinator.onFish = onFish
+        coordinator.onClose = onClose
         coordinator.returned = returnCount
         return coordinator
     }
@@ -122,6 +127,7 @@ struct WebSceneView: UIViewRepresentable {
                 // Parked mid-switch: the switch itself reports, once drawn.
                 if host.switching { return }
                 if let frame = host.lastFrame { coordinator.onFrame(frame) }
+                if let code = host.lastClose { coordinator.onClose?(code) }
                 if let assets = host.lastAssets { coordinator.onAssets?(assets) }
                 if let fish = host.lastFish { coordinator.onFish?(fish, host.lastWant) }
                 if host.painted { coordinator.onPinned?() }
@@ -210,6 +216,7 @@ struct WebSceneView: UIViewRepresentable {
         context.coordinator.onAssets = onAssets
         context.coordinator.onPinned = onPinned
         context.coordinator.onFish = onFish
+        context.coordinator.onClose = onClose
         context.coordinator.onReused = onReused
         context.coordinator.onFailure = onFailure
         if let webView = container.webView { context.coordinator.cameBack(returnCount, in: webView) }
@@ -227,11 +234,19 @@ struct WebSceneView: UIViewRepresentable {
         let host = coordinator.host ?? coordinator
         host.sink = nil
         SwipeTiming.mark("web view dismantled (\(host.channelId))")
-        if let key = coordinator.poolKey {
+        if let key = coordinator.poolKey, !Self.isFinalClose(host.lastClose) {
             WebScenePool.shared.park(key, webView: webView, host: host)
         } else {
             WebScenePool.teardown(webView)
         }
+    }
+
+    /// A page whose channel socket the server closed for good (4401: no key
+    /// or a refused one; 4410: deleted) never reconnects. Parked, it would
+    /// hand the next visit a dead page that replays the refusal, even after a
+    /// new key has landed: torn down instead.
+    static func isFinalClose(_ code: Int?) -> Bool {
+        code == ChannelWSClient.closeUnauthorized || code == ChannelWSClient.closeDeleted
     }
 
     // MARK: Page bootstrap
@@ -319,6 +334,9 @@ struct WebSceneView: UIViewRepresentable {
               const socket = channelSocket(url);
               if (socket) {
                 ws.addEventListener('message', (e) => { if (typeof e.data === 'string') post('frame', e.data, socket); });
+                // The close CODE only (a clamped integer): 4401 and 4410 are
+                // the server saying "don't come back", which the page obeys.
+                ws.addEventListener('close', (e) => { post('close', String((e.code | 0) & 0xffff), socket); });
               }
               return ws;
             };
@@ -410,14 +428,10 @@ struct WebSceneView: UIViewRepresentable {
         """
     }
 
-    /// The server's own shape for a channel token (`^isk_[A-Za-z0-9_-]+$`),
-    /// checked per character. Not a regex on purpose: `$` also matches before a
-    /// trailing newline, so "isk_abc\n" would pass one.
+    /// The server's own shape for a channel token (see
+    /// `ChannelTokenFormat.isWellFormedToken`, shared with the TV's socket).
     static func isWellFormed(_ token: String) -> Bool {
-        guard token.hasPrefix("isk_"), token.count > 4 else { return false }
-        return token.unicodeScalars.allSatisfy { scalar in
-            scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
-        }
+        ChannelTokenFormat.isWellFormedToken(token)
     }
 
     // MARK: Coordinator
@@ -439,6 +453,7 @@ struct WebSceneView: UIViewRepresentable {
         var onPinned: (() -> Void)?
         var onFish: ((Int, Int?) -> Void)?
         var onReused: (() -> Void)?
+        var onClose: ((Int) -> Void)?
         var sawFrame = false
         var loaded: (String, Int) = ("", -1)
         /// Set on a host whose page is being shown by another view.
@@ -447,6 +462,9 @@ struct WebSceneView: UIViewRepresentable {
         var host: Coordinator?
         var poolKey: WebScenePool.Key?
         private(set) var lastFrame: String?
+        /// The live channel socket's close code, kept for a pooled page's
+        /// next owner; cleared by the next frame (the page reconnected).
+        private(set) var lastClose: Int?
         private(set) var lastAssets: Int?
         private(set) var lastFish: Int?
         private(set) var lastWant: Int?
@@ -552,6 +570,7 @@ struct WebSceneView: UIViewRepresentable {
             self.channelId = channelId
             sawFrame = false
             lastFrame = nil
+            lastClose = nil
             lastAssets = nil
             lastFish = nil
             lastWant = nil
@@ -628,6 +647,7 @@ struct WebSceneView: UIViewRepresentable {
                 guard payload["socket"] as? String == Self.socketPath(channelId) else { return }
                 if !sawFrame { sawFrame = true; SwipeTiming.mark("first socket frame") }
                 lastFrame = body
+                lastClose = nil
                 // Mid-switch, the frame waits for the new canvas (delivered with
                 // `onReused`): a view reveals a beat after its first frame, and
                 // in a switched page that beat can land before the canvas has
@@ -652,6 +672,11 @@ struct WebSceneView: UIViewRepresentable {
                 if kind == "fish" { lastFish = max(0, min(n, 999)) } else { lastWant = max(0, min(n, 999)) }
                 SwipeTiming.mark("fish \(lastFish ?? 0)/\(lastWant.map(String.init) ?? "?")")
                 out?.onFish?(lastFish ?? 0, lastWant)
+            case "close":
+                guard payload["socket"] as? String == Self.socketPath(channelId),
+                      let code = Int(body), (1000...4999).contains(code) else { return }
+                lastClose = code
+                out?.onClose?(code)
             case "pinned":
                 SwipeTiming.mark("pinned scene painted")
                 painted = true

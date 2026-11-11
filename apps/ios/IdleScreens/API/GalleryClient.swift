@@ -16,8 +16,13 @@ enum GalleryError: LocalizedError, Equatable {
 actor GalleryClient {
     let baseURL: URL
     let transport: any HTTPTransport
+    /// The key this device holds for a channel, if any — for the per-channel
+    /// reads a private channel gates (`channelRead`).
+    private let key: @Sendable (String) -> String?
 
-    init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport()) {
+    init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(),
+         key: @escaping @Sendable (String) -> String? = { _ in nil }) {
+        self.key = key
         self.baseURL = baseURL
         self.transport = transport
     }
@@ -103,13 +108,37 @@ actor GalleryClient {
         return dir.appendingPathComponent("channels-\(host).json")
     }
 
-    /// `GET /c/:channelId/state` — public read-only state.
+    /// A per-channel read (`/state`, `/history`, `/scene/:n`): anonymous
+    /// first, and again with this device's key only when the channel answers
+    /// 403 because it is private. Anonymous first keeps public reads on the
+    /// edge cache (a request carrying a key never reads it) and keeps a key
+    /// off the wire wherever it is not needed. The key rides a header, never
+    /// the URL.
+    func channelRead(_ url: URL, channelId: String) async throws -> (Data, HTTPURLResponse) {
+        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        guard http.statusCode == 403, Self.isPrivateRefusal(data),
+              let key = key(channelId), ChannelTokenFormat.isWellFormedToken(key) else {
+            return (data, http)
+        }
+        var request = URLRequest(url: url)
+        request.setValue(key, forHTTPHeaderField: "X-Idle-Token")
+        return try await transport.data(for: request)
+    }
+
+    /// The read gate's own refusal: `403 {code: "private"}`.
+    static func isPrivateRefusal(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return object["code"] as? String == "private"
+    }
+
+    /// `GET /c/:channelId/state` — read-only state (a private channel's needs
+    /// this device's key; see `channelRead`).
     func fetchState(channelId: String) async throws -> ChannelState {
         let url = baseURL
             .appendingPathComponent("c")
             .appendingPathComponent(channelId)
             .appendingPathComponent("state")
-        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        let (data, http) = try await channelRead(url, channelId: channelId)
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
         }
@@ -117,6 +146,38 @@ actor GalleryClient {
             throw GalleryError.invalidResponse
         }
         return state
+    }
+
+    /// A private channel on this device's keyring, as a gallery row. The
+    /// listing never carries one (private forces unlisted), so without this
+    /// a key opened nothing to watch. `/state` has the fields the row reads
+    /// (`scene`, `resolvedSpec`, `access`, `lastEvent`, `sleeping`), and its
+    /// name under `meta.label` (the keyring's is the fallback). nil for a public
+    /// channel: those reach the wall through the listing or not at all.
+    func fetchPrivateChannel(channelId: String, label: String) async -> PublicChannel? {
+        let url = baseURL.appendingPathComponent("c").appendingPathComponent(channelId)
+            .appendingPathComponent("state")
+        guard let (data, http) = try? await channelRead(url, channelId: channelId) else { return nil }
+        // The key was sent and refused (revoked or rotated): keep the row, so
+        // opening it reaches the gate's "Add a new key" instead of the
+        // channel quietly leaving the wall.
+        // Only a key that was actually sent: a malformed one never is.
+        if http.statusCode == 403, Self.isPrivateRefusal(data),
+           let held = key(channelId), ChannelTokenFormat.isWellFormedToken(held) {
+            return PublicChannel(channelId: channelId, label: label, tags: nil, viewers: nil, access: "private")
+        }
+        guard (200...299).contains(http.statusCode),
+              let row = try? JSONDecoder().decode(PublicChannel.self, from: data),
+              row.access == "private" else { return nil }
+        // `/state` names the channel under `meta.label`; the keyring's own
+        // name (often just the id) is the fallback.
+        let named = (try? JSONDecoder().decode(StateMeta.self, from: data))?.meta?.label
+        return row.withIdentity(channelId: channelId, label: named ?? label)
+    }
+
+    private struct StateMeta: Decodable {
+        struct Meta: Decodable { let label: String? }
+        let meta: Meta?
     }
 
     /// `POST /c/:channelId/verify` — check a capability token before saving it.
