@@ -2,8 +2,10 @@
 //!
 //! A private channel answers its socket with `auth-required` and the page
 //! answers from `localStorage["isk:<channel>"]` (idle-server
-//! `site/src/lib/tokens.ts`). This app's page storage starts empty, so a
-//! script that runs before any page script puts the key there. The key never
+//! `site/src/lib/tokens.ts`). A channel view uses an ephemeral network
+//! session (webview.rs), so its page storage starts empty on every run and
+//! the key is never written to WebKit's on-disk storage; a script that runs
+//! before any page script puts the key there. The key never
 //! goes in the channel URL: URLs land in logs and history.
 //!
 //! Where keys live: one file per channel, `<config>/keys/<channel-id>`,

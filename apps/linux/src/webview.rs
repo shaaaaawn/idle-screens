@@ -14,7 +14,17 @@ const QUIT_URI: &str = "idle-screens://quit";
 /// Build a webview showing the session URL, wired for fade-in, crash recovery,
 /// and channel→bundled fallback.
 pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
-    let view = webkit6::WebView::new();
+    // A channel page gets a throwaway session, like the Mac's `.nonPersistent()`
+    // store: the key seeded below must live only in its 0600 key file, never in
+    // WebKit's on-disk localStorage, and removing that file must stop the
+    // screen from presenting it on the next run (keys.rs).
+    let view = if matches!(state.settings.mode, Mode::Channel(_)) {
+        webkit6::WebView::builder()
+            .network_session(&webkit6::NetworkSession::new_ephemeral())
+            .build()
+    } else {
+        webkit6::WebView::new()
+    };
 
     // Black before first paint — never a white flash.
     view.set_background_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
