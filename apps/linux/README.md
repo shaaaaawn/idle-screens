@@ -150,8 +150,9 @@ sudo cp -r webroot/. /usr/share/idle-screens/web/
 ### Option C — PKGBUILD / AUR-style
 
 ```bash
-./scripts/make-src-tarball.sh
-makepkg -si   # using packaging/PKGBUILD
+./scripts/make-src-tarball.sh                      # writes dist/idle-screens-wayland-<ver>-src.tar.gz
+cp dist/idle-screens-wayland-*-src.tar.gz packaging/
+cd packaging && makepkg -si                        # makepkg uses the local tarball instead of the release URL
 ```
 
 ## Idle integration

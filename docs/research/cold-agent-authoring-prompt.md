@@ -89,10 +89,8 @@ Motion:
 2. Invent your own original theme — don't duplicate an existing one.
 3. Add your spec to `examples.ts` and the `EXAMPLE_SPECS` array.
 4. Wire it into the playground:
-   - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to `ALL_SAVERS`
-   - `apps/playground/src/schema-panel.ts` — add import, button, handler, examples entry
+   - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to the saver list
    - `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
-   - `docs/specs/behavior-contract.md` — update saver count
 5. Run: `pnpm build && pnpm test && pnpm test:e2e`
 6. Start the dev server (`pnpm dev`) and verify it looks good in the browser.
 
