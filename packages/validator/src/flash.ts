@@ -118,7 +118,7 @@ function analyzeChannel(
   areaThreshold: number,
 ): ChannelReport {
   const times = samples.map((s) => s.t);
-  const first = pick(samples[0]);
+  const first = samples[0] ? pick(samples[0]) : undefined;
   if (!first) return { fails: false, worstTileFlashesPerSecond: 0, flashingAreaFraction: 0 };
   const tiles = first.length;
   let worst = 0;
@@ -135,7 +135,7 @@ function analyzeChannel(
   }
   const flashingAreaFraction = tiles > 0 ? dangerous / tiles : 0;
   return {
-    fails: flashingAreaFraction >= areaThreshold,
+    fails: dangerous > 0 && flashingAreaFraction >= areaThreshold,
     worstTileFlashesPerSecond: worst,
     flashingAreaFraction,
   };

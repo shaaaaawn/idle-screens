@@ -370,7 +370,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
   }
   const world = worldMarks(params);
   for (const s of rig.spots) {
-    if (s.mark && !(s.mark in OPEN_MARKS) && !(s.mark in world)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
+    if (s.mark && !Object.hasOwn(OPEN_MARKS, s.mark) && !Object.hasOwn(world, s.mark)) out.push({ path: 'spotRig', message: `no "${s.mark}" mark in this scene — that spot is dark` });
   }
   if (str('vignette')) {
     const indoors = params.interior === 'geode';
@@ -381,7 +381,7 @@ export function validateMetaquariumParams(params: Readonly<Record<string, unknow
     push('signs', signs.problems);
     if (params.interior === 'geode') out.push({ path: 'signs', also: ['interior'], message: 'signs stand outdoors — none are built inside a geode home' });
     else {
-      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !(m in OPEN_MARKS) && !(m in world)))];
+      const missing = [...new Set(signs.entries.flatMap((e) => [e.place, e.target]).filter((m): m is string => !!m && !Object.hasOwn(OPEN_MARKS, m) && !Object.hasOwn(world, m)))];
       for (const m of missing) {
         out.push({ path: 'signs', also: ['landmark', 'geodeHomes', 'paths', 'fountain'], message: `no "${m}" in this scene (${MARK_NEEDS[m] ?? 'its world part is off'}) — that sign stands in the open` });
       }
@@ -475,7 +475,7 @@ function dependencyProblems(params: Readonly<Record<string, unknown>>): ParamPro
     const { actors } = v;
     if (actors > cast) out.push({ path: 'vignette', also: castParams, message: `needs ${actors} fish (actors a–${'abcd'[actors - 1]} are slots 0–${actors - 1}), but ${castWhy}` });
     // A breed's own gesture (an octopus's ink) on an actor of another breed does nothing.
-    const slotBreeds = expandFishMixSlots(mix, 3).map((sl) => sl.breed);
+    const slotBreeds = expandFishMixSlots(mix, 4).map((sl) => sl.breed); // four actors, a–d
     for (const [g, breeds] of Object.entries(BREED_GESTURES) as [string, readonly string[]][]) {
       for (let a = 0; a < actors; a++) {
         if (!v.beats.some((b) => b.actors[a]?.gesture === g)) continue;

@@ -53,7 +53,7 @@ export function parseFloorCover(src: string): { cover: FloorCover; problems: str
     const m = /[a-z0-9]\s+[a-z0-9]/.test(part) ? null : /^([a-z]+)(?::([0-9]+))?(?:\/([a-z]+))?$/.exec(part.replace(/\s+/g, ''));
     if (!m) { bad('expected kind[/style] — lawn mosaic mat steps ripples'); continue; }
     const kind = m[1]!, style = m[3];
-    if (!(kind in KINDS)) { bad('kinds: lawn mosaic mat steps ripples'); continue; }
+    if (!Object.hasOwn(KINDS, kind)) { bad('kinds: lawn mosaic mat steps ripples'); continue; }
     const k = kind as keyof typeof KINDS, styles = KINDS[k] as readonly string[];
     if (m[2] !== undefined) bad(`${kind} has no count`);
     if (style && !styles.includes(style)) { bad(`${kind} styles: ${styles.join(' ')}`); continue; }

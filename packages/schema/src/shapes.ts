@@ -764,6 +764,7 @@ function parseAndFlatten(d: string): { rings: Pt[][]; lines: Array<{ points: Pt[
   while (i < tokens.length) {
     let cmd = tokens[i]!;
     if (/^[a-zA-Z]$/.test(cmd)) i++;
+    else if (lastCmd === 'Z' || lastCmd === 'z') throw new Error('expected a command after Z (a number cannot repeat Z)'); // Z takes no arguments: repeating it would never advance
     else if (lastCmd) cmd = lastCmd === 'M' ? 'L' : lastCmd === 'm' ? 'l' : lastCmd; // implicit repeat
     else throw new Error('path must start with M');
     const rel = cmd === cmd.toLowerCase() && cmd !== 'z' ? true : false;

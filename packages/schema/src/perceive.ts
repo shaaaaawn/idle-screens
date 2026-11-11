@@ -2237,7 +2237,10 @@ export function perceiveScene(spec: SaverSpec, opts: LuminanceGridOptions = {}):
     form: layerCohesion(spec, opts),
     colour: sceneColour(spec, opts),
     text: textSprites(spec, opts),
-    advisories: adviseSpec(spec, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
+    // The timed spec, as publish passes it: the timeline-aware advisories
+    // (life-runs-once, flash-near-limit, loop-seam, path-runs-once) read the
+    // keys, which the resolved spec no longer has.
+    advisories: adviseSpec(timed, opts.viewport ?? { width: 1920, height: 1080 }, { t: opts.t, seed: opts.seed }),
   };
 }
 
