@@ -8,7 +8,7 @@
  */
 
 import type { Entity } from './simulate';
-import { isPathPolygon, isShapedSprite, pathParts, polygonArea } from './shapes';
+import { isPathPolygon, isShapedSprite, pathParts, ruleArea } from './shapes';
 import { fieldRgb, fieldRgbAt, fieldSampleTime, hexToRgb255, rgb255Luma } from './field';
 import type { FieldBackground, LayerSpec, SaverSpec } from './types';
 
@@ -57,7 +57,7 @@ export function spriteLuma(layer: LayerSpec, e: Entity): number {
         for (const st of part.gradient.stops) { const o = st.opacity ?? 1; g += hexLuma(st.color) * o + pc * (1 - o); }
         l = g / part.gradient.stops.length;
       } else l = pc;
-      const w = Math.max(1e-4, part.fill ? polygonArea(part.flat.points.map(([x, y]) => ({ x, y }))) : part.box.hw * part.box.hh * 0.1) * part.opacity;
+      const w = Math.max(1e-4, part.fill ? ruleArea(part.flat.points, part.rule === 'evenodd', 1, 1) : part.box.hw * part.box.hh * 0.1) * part.opacity;
       sum += l * w; wsum += w;
     }
     if (wsum > 0) return sum / wsum;
