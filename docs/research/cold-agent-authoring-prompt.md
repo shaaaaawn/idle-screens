@@ -84,10 +84,11 @@ Motion:
 
 ## What to do
 
-1. Read `packages/schema/src/examples.ts` to see existing specs (aquarium, rain,
-   snowfall, lanterns) for reference.
+1. Read the specs under `packages/schema/src/examples/` (one file per spec —
+   aquarium, rain, snowfall, lanterns, …) for reference.
 2. Invent your own original theme — don't duplicate an existing one.
-3. Add your spec to `examples.ts` and the `EXAMPLE_SPECS` array.
+3. Add your spec as a new file in `packages/schema/src/examples/` and register it
+   in `SCHEMA_EXAMPLES` (`examples/index.ts`); `EXAMPLE_SPECS` derives from it.
 4. Wire it into the playground:
    - `apps/playground/src/main.ts` — add `compileSaver(YOUR_SPEC)` to the saver list
    - `apps/playground/e2e/savers.spec.ts` — add id to `ALL_IDS`, update count
