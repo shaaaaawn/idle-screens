@@ -1,5 +1,28 @@
 # @idle-screens/schema
 
+## 3.18.1
+
+### Patch Changes
+
+- aaf2a5d: Fixes from an audit; no format change.
+  
+  - **schema:** a number after `Z` in a path (`M0 0 L1 0 L1 1 Z 5 5`) made the parser repeat `Z` forever, so `flattenPath`, `validateSpec` and `compileSaver` never returned. It is now a parse error, "expected a command after Z".
+  - **schema:** the publish flash gate did not count a whole-object key on `groups.<id>` (a value like `{ opacity: 0 }`) as a luminance change, so a timeline that strobed whole groups that way passed. It is checked like `groups.<id>.opacity` now.
+  - **schema:** `perceiveScene` gave `adviseSpec` the timeline-resolved spec, so the timeline-aware advisories (`life-runs-once`, `flash-near-limit`, `loop-seam`, `path-runs-once`) were missing from perception while `adviseSpec` on the same spec reported them.
+  - **validator:** `analyzeFlashes([])` threw; it now returns a passing report. With `areaThreshold: 0`, a clip with no flashes no longer fails.
+  - **core:** closing `<idle-screen>`, or removing it from the page, while an async saver `mount()` was still in flight let that saver install into the closed dialog and keep running hidden. Both now invalidate the pending mount.
+  - **saver-metaquarium:** names in the param mini-languages were looked up through the prototype chain, so `constructor` or `toString` passed as a real kind, mark or material. `floorCover: "constructor/x"` then threw on every frame and in `validateMetaquariumParams`. `floorCover`, `vignette`, `choreography`, `pyramidMix` and the guide's mark checks now accept own names only, and `pyramidMix` refuses a weight above 1e6 (a non-finite one, or two near 1e308, broke its weighted pick). The guide also checks vignette gestures for all four actors (a–d); actor d used to read as "fish".
+- 25109b7: Three more places where perception now measures what the renderer paints:
+  
+  - **One text width model.** The perception text box used a flat 0.62 em per glyph. The advisories used the glyph-metrics table but ignored the font. Both now use the same table, chosen by the label's font, as textBlock line breaking does: proportional faces by character class, and monospace faces by their advance. Thirty narrow "i"s at 40 px now measure 420 px proportional and 720 px monospace, where both used to read 745 px. A monospace label running off the edge is now flagged `text-off-screen`.
+  - **Soft path drawings in the luminance maps.** The canvas paints a `soft` single-path drawing through a radial gradient over its unit circle, but the luminance grid painted it solid. It now lights a unit square at about 30 % of its solid ink. A path with its own `gradient` still paints only that gradient, as the renderer does.
+  - **Fill rules in ink areas.** A fill's area now counts what its rule paints, in dominance, scene colour, describe's area and the colour and luma part weights. An even-odd hole is empty, an overlap counts once, and a self-crossing star's centre counts once. Before, a nested square drawn the same way round counted 1.25× its outer square under either rule (now 0.75 even-odd, 1.0 nonzero). Outlines wound 0 or 1 everywhere keep their exact shoelace area, including holes the default `auto` rule winds against their container.
+  
+  Among the shipped examples, only the six with text move: their labels are re-measured. No advisory, pattern-hazard verdict or top layer changes.
+- Updated dependencies [aaf2a5d]
+  - @idle-screens/validator@0.1.3
+  - @idle-screens/core@0.4.8
+
 ## 3.18.0
 
 ### Minor Changes

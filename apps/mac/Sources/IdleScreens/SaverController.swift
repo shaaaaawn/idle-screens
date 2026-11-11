@@ -347,11 +347,41 @@ final class SaverController: NSObject, WKNavigationDelegate {
     }
 
     if let channel {
+      Self.seedKey(in: webView, for: channel)
       webView.load(URLRequest(url: channel))
     } else {
       loadBundled(into: webView, saverId: saverId)
     }
     return webView
+  }
+
+  /// Put the key this Mac holds for the channel `url` shows into the page's
+  /// storage before any page script runs (`ChannelKeySeed`), so a private
+  /// channel answers its socket's `auth-required` instead of showing the
+  /// gate. Replaces the previous seed: one document, one channel's key.
+  static func seedKey(in webView: WKWebView, for url: URL) {
+    let controller = webView.configuration.userContentController
+    controller.removeAllUserScripts()
+    guard let source = ChannelKeySeed.script(for: url, server: ServerEndpoint.base, key: ChannelToken.load)
+    else { return }
+    controller.addUserScript(
+      WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+  }
+
+  /// Every main-frame load re-seeds for the channel it is going to: a paired
+  /// phone's push makes the page navigate itself to another channel
+  /// (`location.href`, idle-server useChannel `switch`), and that channel's
+  /// key is the one its socket will ask for.
+  func webView(
+    _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+    decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+  ) {
+    if action.targetFrame?.isMainFrame != false, let url = action.request.url,
+      url.scheme == "http" || url.scheme == "https"
+    {
+      Self.seedKey(in: webView, for: url)
+    }
+    decisionHandler(.allow)
   }
 
   /// A ceiling on what the host page may attempt, when this machine cannot drive

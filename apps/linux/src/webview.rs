@@ -14,7 +14,17 @@ const QUIT_URI: &str = "idle-screens://quit";
 /// Build a webview showing the session URL, wired for fade-in, crash recovery,
 /// and channel→bundled fallback.
 pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
-    let view = webkit6::WebView::new();
+    // A channel page gets a throwaway session, like the Mac's `.nonPersistent()`
+    // store: the key seeded below must live only in its 0600 key file, never in
+    // WebKit's on-disk localStorage, and removing that file must stop the
+    // screen from presenting it on the next run (keys.rs).
+    let view = if matches!(state.settings.mode, Mode::Channel(_)) {
+        webkit6::WebView::builder()
+            .network_session(&webkit6::NetworkSession::new_ephemeral())
+            .build()
+    } else {
+        webkit6::WebView::new()
+    };
 
     // Black before first paint — never a white flash.
     view.set_background_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
@@ -28,6 +38,37 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
 
     // A screensaver has no right-click menu.
     view.connect_context_menu(|_, _, _| true);
+
+    // Private channels: put this machine's key for the channel being loaded
+    // into the page's storage before any page script runs (keys.rs), so the
+    // page answers its socket's `auth-required` instead of showing the gate.
+    // Every navigation re-seeds: a paired phone's push makes the page load
+    // another channel itself (`location.href`), and that channel's key is the
+    // one its socket asks for. Only the channel URL's own origin is seeded.
+    // Connected before the quit handler below, so the seed is in place before
+    // any handler lets a navigation go.
+    if let Mode::Channel(channel_url) = &state.settings.mode {
+        if let Some(origin) = crate::keys::origin(channel_url) {
+            let keys_dir = crate::keys::keys_dir(&crate::config::config_dir());
+            seed_key(&view, &state.current_url(), &origin, &keys_dir);
+            view.connect_decide_policy(move |view, decision, decision_type| {
+                if decision_type == PolicyDecisionType::NavigationAction {
+                    let uri = decision
+                        .downcast_ref::<NavigationPolicyDecision>()
+                        .and_then(|nav| nav.navigation_action())
+                        .and_then(|action| action.request())
+                        .and_then(|req| req.uri());
+                    if let Some(uri) = uri {
+                        if crate::keys::origin(&uri).as_deref() == Some(origin.as_str()) {
+                            seed_key(view, &uri, &origin, &keys_dir);
+                        }
+                    }
+                }
+                // Not decided here: the default (or the quit handler) decides.
+                false
+            });
+        }
+    }
 
     // Escape in the webview → native quit via custom URI. Windowed dev needs
     // it because there is no input watcher to dismiss the window; kiosk needs
@@ -102,6 +143,25 @@ pub fn build(state: &Rc<AppState>) -> webkit6::WebView {
 
     view.load_uri(&state.current_url());
     view
+}
+
+/// Replace the page-start script with the seed for `url`'s channel, or none.
+fn seed_key(view: &webkit6::WebView, url: &str, origin: &str, keys_dir: &std::path::Path) {
+    let Some(manager) = view.user_content_manager() else {
+        return;
+    };
+    manager.remove_all_scripts();
+    if let Some(source) =
+        crate::keys::seed_script(url, origin, |id| crate::keys::load(keys_dir, id))
+    {
+        manager.add_script(&webkit6::UserScript::new(
+            &source,
+            webkit6::UserContentInjectedFrames::TopFrame,
+            webkit6::UserScriptInjectionTime::Start,
+            &[],
+            &[],
+        ));
+    }
 }
 
 /// One-way native→JS bridge (the web bundle exposes `window.__idleScreensMac`).
