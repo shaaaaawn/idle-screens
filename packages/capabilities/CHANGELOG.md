@@ -1,5 +1,11 @@
 # @idle-screens/capabilities
 
+## 0.2.2
+
+### Patch Changes
+
+- d897f02: README: note that the package has no runtime dependencies, and which saver uses it. No code change; this release is the first one published through npm Trusted Publishing.
+
 ## 0.2.1
 
 ### Patch Changes
