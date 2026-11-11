@@ -57,8 +57,14 @@ export interface TimelineFlashReport {
   boundariesPerSecond?: number;
 }
 
-/** Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are. */
-const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background|draw)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$/;
+/**
+ * Paths whose value changes what a pixel's luminance is (paint), as opposed to where things are.
+ * A whole-object key (`layers.<n>`, `groups.<id>`) can carry paint (`{ opacity: 0 }`) inside it,
+ * so it counts too, deliberately conservative: a transform-only one is a candidate here and the
+ * rendered WCAG analysis that follows decides whether it actually flashes (such a key can
+ * only fail a scene closed by pushing a dense one past the sample budget).
+ */
+const LUMA_PATH = /(^|\.)(opacity|alpha|color|colors|stops|bands|gradient|stroke|fill|background|draw)(\.|$)|(^|\.)(sprite|parts?)$|^layers\.\d+$|^groups\.[^.]+$/;
 /** More than 3 flashes is at least 8 reversals; allow one that starts just before the window. */
 const MIN_BOUNDARIES = 7;
 /** Frames analysed together (one run of the WCAG analyzer). */

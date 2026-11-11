@@ -207,8 +207,8 @@ script for [`apps/linux`](apps/linux/README.md).
 
 ## Contributing and releases
 
-Day-to-day work goes to `develop` through pull requests. `main` is the
-release branch: every push to it runs the release workflow.
+Work goes straight to `main` through pull requests; there is no separate
+development branch. Every push to `main` runs the release workflow.
 
 Releases use [changesets](https://github.com/changesets/changesets). If a
 change affects what an npm consumer gets, add a changeset with

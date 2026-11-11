@@ -1163,7 +1163,7 @@ final class TVAppState {
         guard let seq = activeSequence, let cue = Self.segmentCue(track), cue != lastSegmentCue,
               case .object(let d) = cue, let value = d["value"]?.number else { return }
         lastSegmentCue = cue
-        let index = max(0, min(seq.segments.count - 1, Int(value.rounded())))
+        let index = max(0, min(seq.segments.count - 1, Int(min(Double(seq.segments.count - 1), max(0, value.rounded())))))
         let start = seq.segmentStart(index)
         sequenceReleasedBelow = index
         sequenceEpoch = Date().addingTimeInterval(-start)

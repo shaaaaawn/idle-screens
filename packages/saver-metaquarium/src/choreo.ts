@@ -102,14 +102,14 @@ export function parseChoreography(value: string, moves: readonly string[]): Chor
         if (!mod) { problems.push(`"${raw}": "${tok}" is not >to, @face, ~turn, ^leap, /lean, %crouch, *groove, xspeed or =pose`); continue; }
         const [, op, arg] = mod as unknown as [string, string, string];
         if (op === '>') {
-          const mark = CHOREO_MARKS[arg];
+          const mark = Object.hasOwn(CHOREO_MARKS, arg) ? CHOREO_MARKS[arg] : undefined;
           const xy = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(arg);
           if (mark) cue.to = mark;
           else if (xy) cue.to = [clamp(Number(xy[1]), -6, 6), clamp(Number(xy[2]), -6, 6)];
           else problems.push(`"${raw}": travel to "${arg}" — a mark (${Object.keys(CHOREO_MARKS).join(' ')}) or side,depth`);
         } else if (op === '@') {
           const named: Record<string, number | 'cam'> = { cam: 'cam', room: 0, front: 0, back: 180, left: -90, right: 90 };
-          if (arg in named) cue.face = named[arg]!;
+          if (Object.hasOwn(named, arg)) cue.face = named[arg]!;
           else if (Number.isFinite(Number(arg))) cue.face = Number(arg);
           else problems.push(`"${raw}": face "${arg}" — degrees, cam, room, left, right or back`);
         } else if (op === '/') {

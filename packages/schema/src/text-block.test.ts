@@ -549,6 +549,9 @@ describe('textBlock anchor in perception and steering', () => {
 
 describe('full-width (CJK) metrics (X614)', () => {
   it('a full-width glyph advances a whole em; halfwidth kana stays narrow', () => {
+    // A supplementary non-CJK glyph (emoji) is one glyph, not one per surrogate half.
+    expect(textWidthEm('😀')).toBeCloseTo(textWidthEm('\ud83d'), 9);
+    expect(textWidthEm('😀😀')).toBeCloseTo(2 * textWidthEm('😀'), 9);
     expect(textWidthEm('カタカナ')).toBeCloseTo(4, 9);
     expect(textWidthEm('漢字かな한글')).toBeCloseTo(6, 9);
     expect(textWidthEm('ＡＢ')).toBeCloseTo(2, 9); // fullwidth forms

@@ -112,3 +112,17 @@ describe('analyzeFlashes — approximate red flash', () => {
     expect(r.passes).toBe(false);
   });
 });
+
+describe('analyzeFlashes — edge inputs', () => {
+  it('passes an empty sample list instead of throwing', () => {
+    expect(() => analyzeFlashes([])).not.toThrow();
+    expect(analyzeFlashes([]).passes).toBe(true);
+  });
+
+  it('does not fail a static clip when areaThreshold is 0', () => {
+    const still = Array.from({ length: 30 }, (_, i) => ({ t: i * 33, lum: [0.5, 0.5, 0.5, 0.5], red: [0, 0, 0, 0] }));
+    const r = analyzeFlashes(still, { areaThreshold: 0 });
+    expect(r.general.fails).toBe(false);
+    expect(r.passes).toBe(true);
+  });
+});

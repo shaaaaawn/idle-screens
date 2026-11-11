@@ -434,7 +434,7 @@ describe('validateSequence — unknown keys (vork-review A7)', () => {
     expect(paths(s)).toEqual([]);
   });
 
-  it('still reports the envelope when the segments are missing', () => {
+  it('still reports the envelope when the segments are empty', () => {
     const r = validateSequence(env({ segments: [], looop: true }));
     expect(r.valid).toBe(false);
     expect((r.warnings ?? []).map((w) => w.path)).toEqual(['looop']);

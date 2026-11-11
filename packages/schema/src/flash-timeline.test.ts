@@ -164,6 +164,20 @@ describe('timelineFlashReport', () => {
     expect(checked(scene('#000000', [fullFrame('bottom', '#000000'), fullFrame('top', '#ffffff')], keys)).fails).toBe(true);
   });
 
+  it('counts whole-object `groups.<id>` keys as paint, like `groups.<id>.opacity`', () => {
+    // Three stacked full-frame layers, each in its own group, whose groups are
+    // switched on and off by whole-object keys: 10 full-frame black/white flips
+    // a second. The `.opacity` spelling was caught; this one passed.
+    const layers = [fullFrame('a', '#ffffff'), fullFrame('b', '#000000'), fullFrame('c', '#ffffff')]
+      .map((l, i) => ({ ...l, group: `g${'abc'[i]}` }));
+    const keys: unknown[] = [];
+    const offs: Record<string, number> = { c: 0, b: 67, a: 133 };
+    for (const [n, o] of Object.entries(offs)) for (let i = 0; i < 20; i++) keys.push(step(o + i * 200, `groups.g${n}`, { opacity: i % 2 === 0 ? 1 : 0 }));
+    const spec = { ...scene('#000000', layers, keys), groups: { ga: { opacity: 1 }, gb: { opacity: 1 }, gc: { opacity: 1 } } } as unknown as SaverSpec;
+    expect(validateSpec(structuredClone(spec)).valid).toBe(true);
+    expect(timelineFlashReport(spec).fails).toBe(true);
+  });
+
   it('does not let a harmless dense section hide a later strobe', () => {
     const keys = [];
     // 0-1 s: eight paths with keys 25 ms apart (each path is 200 ms apart) that change nothing visible.
