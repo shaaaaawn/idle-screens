@@ -427,11 +427,14 @@ describe('perception reads what is on screen', () => {
 // gate on a 28-tile drawing went from 0.14 s to 1.8 s. The ring must be shared
 // by outline, so `ringFill`'s memo (keyed on the ring) hits.
 describe('polygonUnitRing is shared by outline, not by sprite object', () => {
-  const path = 'M -1 0 A 1 1 0 0 1 0 -1 M 0 1 A 1 1 0 0 1 1 0';
+  const path = 'M 0 -1 L 1 1 L -1 1 Z';
   it('two path sprites with one outline share a ring', () => {
-    const a = { kind: 'polygon', parts: [{ path, fill: false, stroke: { color: '#fff', width: 0.1 } }] } as unknown as PolygonSprite;
-    const b = { ...a, parts: [{ path, fill: false, stroke: { color: '#f00', width: 0.1 } }] } as unknown as PolygonSprite;
-    expect(polygonUnitRing(b)).toBe(polygonUnitRing(a));
+    // A closed, filled part, so the ring really is this outline (not the default hexagon).
+    const a = { kind: 'polygon', parts: [{ path, fill: true, color: '#fff' }] } as unknown as PolygonSprite;
+    const b = { ...a, parts: [{ path, fill: true, color: '#f00' }] } as unknown as PolygonSprite;
+    const ring = polygonUnitRing(a);
+    expect(ring.length).toBeLessThan(6);
+    expect(polygonUnitRing(b)).toBe(ring);
     const c = { kind: 'polygon', path: 'M 0 -1 L 1 1 L -1 1 Z' } as unknown as PolygonSprite;
     expect(polygonUnitRing({ ...c })).toBe(polygonUnitRing(c));
   });
