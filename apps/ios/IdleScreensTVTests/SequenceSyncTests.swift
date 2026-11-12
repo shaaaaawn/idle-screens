@@ -171,4 +171,23 @@ final class SequenceSyncTests: XCTestCase {
         old.handle(.snapshot(ChannelSnapshot(resolvedSpec: seqJSON, epoch: nowMs - 80_000, sleeping: false, now: nowMs)))
         XCTAssertEqual(old.sequenceSegmentKey, "b")
     }
+    @MainActor
+    func testAPublishWakesAndAReseedKeepsTheSleep() throws {
+        let baseURL = URL(string: "https://example.com")!
+        let app = TVAppState(gallery: GalleryClient(baseURL: baseURL), mcp: MCPClient(baseURL: baseURL),
+                             ws: ChannelWSClient(), pair: PairClient(baseURL: baseURL), baseURL: baseURL)
+        let spec = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"layers":[]}"#.utf8))
+        app.handle(.snapshot(ChannelSnapshot(epoch: 1000, sleeping: true, pausedMs: 0, sleptAt: 5000)))
+        XCTAssertTrue(app.sleeping)
+        // A reseed of an asleep channel: still asleep, its clock frozen at the new epoch.
+        let reseed = try XCTUnwrap(ChannelWSClient.parse(
+            #"{"type":"scene","spec":{"layers":[]},"seed":2,"epoch":9000,"sleeping":true,"sleptAt":9000}"#))
+        app.handle(reseed)
+        XCTAssertTrue(app.sleeping)
+        XCTAssertEqual(app.channelPause, .init(sleptAt: 9000))
+        // A publish to an asleep channel wakes it; no `wake` message follows.
+        app.handle(.scene(spec: spec, seed: 3, epoch: 20_000))
+        XCTAssertFalse(app.sleeping)
+        XCTAssertEqual(app.channelPause, .init())
+    }
 }

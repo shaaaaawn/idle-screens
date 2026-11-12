@@ -680,7 +680,11 @@ final class TVAppState {
             steeredJSON = nil; steerShown = nil; currentSpecJSON = nil
             sceneRevision &+= 1
             render(shown, fallbackSeed: seed ?? 42)
-        case .scene(let spec, let seed, let transition, let epoch, let track, let sleptAt):
+        case .scene(let spec, let seed, let transition, let epoch, let track, let sceneSleeping, let sleptAt):
+            // A publish wakes the channel without a `wake` message; only a
+            // reseed's scene keeps it asleep, and says so (as the web reads it).
+            sleeping = sceneSleeping ?? false
+            if !sleeping { sleepBeganAt = nil }
             if let epoch {
                 // A new scene starts its clock with no pause behind it.
                 channelEpochMs = epoch
@@ -1072,6 +1076,9 @@ final class TVAppState {
         let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date().addingTimeInterval(serverSkew),
                                        pause: channelPause)
         sequenceEpoch = Date().addingTimeInterval(-baseT)
+        // Mounted asleep, at the frozen clock: only the time from here to the
+        // wake is time this sequence must give back.
+        if sleeping { sleepBeganAt = Date() }
         if let bed = seq.bed {
             bedSeed = seq.bedSeed(fallback: fallbackSeed ?? 42)
             bedClockOffset = baseT
@@ -1329,6 +1336,7 @@ final class TVAppState {
         let start = seq.segmentStart(index)
         sequenceReleasedBelow = index
         sequenceEpoch = Date().addingTimeInterval(-start)
+        if sleeping { sleepBeganAt = Date() }
         sequenceTask?.cancel()
         // A cue back to 0 under loop is the jump a lap wrap makes: it plays
         // the last segment's transition, as the wrap does.

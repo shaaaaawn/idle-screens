@@ -60,7 +60,7 @@ final class SteeringRuleTests: XCTestCase {
             return XCTFail("seed message")
         }
         XCTAssertEqual(seed, 77); XCTAssertEqual(epoch, 123)
-        guard case .scene(_, _, _, _, let track, _)? = ChannelWSClient.parse(##"{"type":"scene","spec":{"layers":[]},"track":{"deltas":[]}}"##) else {
+        guard case .scene(_, _, _, _, let track, _, _)? = ChannelWSClient.parse(##"{"type":"scene","spec":{"layers":[]},"track":{"deltas":[]}}"##) else {
             return XCTFail("scene message")
         }
         XCTAssertNotNil(track)

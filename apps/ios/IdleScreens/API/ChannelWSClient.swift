@@ -102,9 +102,11 @@ enum ChannelWSEvent: Equatable, Sendable {
     /// `epoch`: the publish time (ms) the channel's shared clock counts from.
     /// `track`: the scene's control track — kept steers, and a publish's own
     /// glide (`fromPublish`) that each screen plays from its mount.
-    /// `sleptAt`: a reseed of an asleep channel says where its clock stands.
+    /// `sleeping` / `sleptAt`: only a reseed sends a scene without waking the
+    /// channel, and says so (with where its clock stands). Absent = awake:
+    /// a publish shows the scene.
     case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
-               track: JSONValue? = nil, sleptAt: Int? = nil)
+               track: JSONValue? = nil, sleeping: Bool? = nil, sleptAt: Int? = nil)
     /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
     case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
@@ -416,6 +418,7 @@ actor ChannelWSClient {
                 transition: SceneTransition(message["transition"]),
                 epoch: message["epoch"]?.intValue,
                 track: message["track"],
+                sleeping: message["sleeping"]?.boolValue,
                 sleptAt: message["sleptAt"]?.intValue
             )
         case "seed":
