@@ -56,8 +56,8 @@
     },
     "starfish": {
       "source": "rig/starfish.glb", "delivered": "source/starfish.glb", "rig": "rig/starfish.py",
-      "kind": "voxel", "size": 1.0, "motion": "starfish", "roles": {}, "splitByBone": ["GLOW-Tips"],
-      "notes": "The first breed drawn in-house, in our designer's style: rig/starfish-model.mjs writes source/starfish.glb voxel by voxel (whole cubes, one mesh per material, already role-named). The tips are GLOW-Tips (no 'eye' in a glow name), split one primitive per arm (splitByBone) so each is a small light riding its own tip. Rigged in Blender by rig/starfish.py, which never edits the model: the disc and its face, two blinking eyes, five arms in three rigid links each; clips crawl, idle, wave, stand, curl. src/starfish.ts drives them."
+      "kind": "voxel", "size": 1.0, "motion": "starfish", "roles": {}, "splitByBone": ["GLOW-Tips"], "ao": true,
+      "notes": "The first breed drawn in-house, in our designer's style: rig/starfish-model.mjs writes source/starfish.glb voxel by voxel (whole cubes, one mesh per material, already role-named). The tips are GLOW-Tips (no 'eye' in a glow name), split one primitive per arm (splitByBone) so each is a small light riding its own tip. Each arm is laid on its own grid along it (straight edges), domed, with raised tubercles and an upturned glowing tip; the coat carries baked occlusion (ao). Rigged in Blender by rig/starfish.py, which never edits the model: the disc and its face, two blinking eyes, five arms in three links each, every joint blended so an arm bends; clips crawl, idle, wave, stand, curl. src/starfish.ts drives them."
     },
     "octopus": {
       "source": "rig/octopus.glb", "delivered": "source/octopus.glb", "rig": "rig/octopus.py",
