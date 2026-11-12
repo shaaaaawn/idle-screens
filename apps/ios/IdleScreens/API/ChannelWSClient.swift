@@ -88,6 +88,11 @@ struct ChannelSnapshot: Equatable, Sendable {
     var presets: [String]?
     /// The server's wall clock when it sent this (ms): the device's skew.
     var now: Int?
+    /// Total time asleep since `epoch` (ms): off the channel's shared clock.
+    var pausedMs: Int? = nil
+    /// While asleep, when the sleep began (server ms): the shared clock
+    /// stands there until the wake.
+    var sleptAt: Int? = nil
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
@@ -97,16 +102,22 @@ enum ChannelWSEvent: Equatable, Sendable {
     /// `epoch`: the publish time (ms) the channel's shared clock counts from.
     /// `track`: the scene's control track — kept steers, and a publish's own
     /// glide (`fromPublish`) that each screen plays from its mount.
+    /// `sleeping` / `sleptAt`: only a reseed sends a scene without waking the
+    /// channel, and says so (with where its clock stands). Absent = awake:
+    /// a publish shows the scene.
     case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
-               track: JSONValue? = nil)
+               track: JSONValue? = nil, sleeping: Bool? = nil, sleptAt: Int? = nil)
     /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
     case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
     /// The channel's whole control track after a steer (the server sends it
     /// beside every `delta` so screens converge instead of stacking steers).
     case track(JSONValue?, epoch: Int?)
-    case sleep
-    case wake
+    /// The channel paused. `sleptAt`: when (server ms), where its shared
+    /// clock stands until the wake.
+    case sleep(sleptAt: Int? = nil)
+    /// The channel resumed. `pausedMs`: the total time asleep since the epoch.
+    case wake(pausedMs: Int? = nil)
     case overlay(text: String?, ttl: Int?)
     /// A paired phone retargeted this screen: a channel, and optionally one
     /// stored scene of it to pin (`sceneId`; nil = live).
@@ -380,6 +391,12 @@ actor ChannelWSClient {
 
     // MARK: - Parsing
 
+    /// A server timestamp (ms); a negative one is broken and reads as missing.
+    static func serverTime(_ value: JSONValue?) -> Int? {
+        guard let ms = value?.intValue, ms >= 0 else { return nil }
+        return ms
+    }
+
     static func parse(_ text: String) -> ChannelWSEvent? {
         guard let data = text.data(using: .utf8),
               let message = try? JSONDecoder().decode([String: JSONValue].self, from: data),
@@ -396,7 +413,9 @@ actor ChannelWSClient {
                 sleeping: message["sleeping"]?.boolValue,
                 viewers: message["viewers"]?.intValue,
                 presets: message["presets"]?.stringArray,
-                now: message["now"]?.intValue
+                now: message["now"]?.intValue,
+                pausedMs: message["pausedMs"]?.intValue,
+                sleptAt: Self.serverTime(message["sleptAt"])
             ))
         case "scene":
             return .scene(
@@ -404,7 +423,9 @@ actor ChannelWSClient {
                 seed: message["seed"]?.intValue,
                 transition: SceneTransition(message["transition"]),
                 epoch: message["epoch"]?.intValue,
-                track: message["track"]
+                track: message["track"],
+                sleeping: message["sleeping"]?.boolValue,
+                sleptAt: Self.serverTime(message["sleptAt"])
             )
         case "seed":
             return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
@@ -414,9 +435,9 @@ actor ChannelWSClient {
         case "track":
             return .track(message["track"], epoch: message["epoch"]?.intValue)
         case "sleep":
-            return .sleep
+            return .sleep(sleptAt: Self.serverTime(message["sleptAt"]))
         case "wake":
-            return .wake
+            return .wake(pausedMs: message["pausedMs"]?.intValue)
         case "overlay":
             return .overlay(
                 text: message["text"]?.stringValue,

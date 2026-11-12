@@ -199,7 +199,10 @@ final class ChannelSession {
             if let spec = snapshot.resolvedSpec ?? snapshot.scene ?? snapshot.spec {
                 decode(spec, fallbackSeed: snapshot.epoch)
             }
-        case .scene(let spec, let seed, _, _, _):
+        case .scene(let spec, let seed, _, _, _, let sceneSleeping, _):
+            // A publish wakes the channel without a `wake` message; only a
+            // reseed's scene keeps it asleep, and says so (as the TV reads it).
+            sleeping = sceneSleeping ?? false
             if let spec { decode(spec, fallbackSeed: seed) }
         case .sleep:
             sleeping = true
