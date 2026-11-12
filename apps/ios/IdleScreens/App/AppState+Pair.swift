@@ -398,7 +398,10 @@ extension AppState {
             guard canAdminister(credential.channelId) else { return nil }
             let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: credential.channelId)
             guard let grant = Self.loadScreenGrant(slot: slot) else { return nil }
-            return HeldScreenKey(channelId: credential.channelId, channelLabel: credential.label,
+            // The wall's name for the channel, as the person knows it. The
+            // keyring's own label is often just the id (a key added by link).
+            let name = channels.first { $0.id == credential.channelId }?.displayLabel ?? credential.label
+            return HeldScreenKey(channelId: credential.channelId, channelLabel: name,
                                  slot: slot, grant: grant)
         }
     }

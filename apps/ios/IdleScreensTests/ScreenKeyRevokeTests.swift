@@ -193,6 +193,18 @@ final class ScreenKeyRevokeTests: XCTestCase {
         XCTAssertNotNil(KeychainHelper.load(key: slot))
     }
 
+    /// Found in the sim run: a key added by link is kept under its id, so the
+    /// dialog said "quiet-aurora-b1". It names the channel as the wall does.
+    func testTheDialogNamesTheChannelAsTheWallDoes() {
+        KeychainHelper.save(key: slot, value: AppState.encodeScreenGrant(.init(id: "feedfacecafe", token: viewer)))
+        let (app, _) = makeApp { _ in (Data(), 404) }
+        app.credentials = [ChannelCredential(channelId: channelId, label: channelId, createdAt: Date(), role: .owner)]
+        XCTAssertEqual(app.screenKeys(for: screen).first?.channelLabel, channelId, "no wall row: the keyring's label")
+        app.channels = [PublicChannel(channelId: channelId, label: "Lanterns (sim 433)", tags: nil, viewers: nil,
+                                      access: "private")]
+        XCTAssertEqual(app.screenKeys(for: screen).first?.channelLabel, "Lanterns (sim 433)")
+    }
+
     func testOnlyAnOwnerIsOfferedTheRevoke() {
         KeychainHelper.save(key: slot, value: AppState.encodeScreenGrant(.init(id: "feedfacecafe", token: viewer)))
         let (app, _) = makeApp(role: .editor) { _ in (Data(), 404) }
