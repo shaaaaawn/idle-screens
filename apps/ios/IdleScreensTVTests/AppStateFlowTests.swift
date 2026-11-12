@@ -150,9 +150,9 @@ final class AppStateFlowTests: XCTestCase {
     func testSleepWakeAndViewerCount() {
         let app = makeApp()
         app.selectChannel("mid")
-        app.handle(.sleep)
+        app.handle(.sleep())
         XCTAssertTrue(app.sleeping)
-        app.handle(.wake)
+        app.handle(.wake())
         XCTAssertFalse(app.sleeping)
     }
 

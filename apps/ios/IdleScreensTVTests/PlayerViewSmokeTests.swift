@@ -63,9 +63,9 @@ final class PlayerViewSmokeTests: XCTestCase {
     func testSleepingClassicAndInvisibleScenes() {
         let app = makeApp()
         app.selectChannel("tide")
-        app.handle(.sleep)
+        app.handle(.sleep())
         render(app)
-        app.handle(.wake)
+        app.handle(.wake())
         for id in ["warp", "rainstorm", "metaquarium", "flying-toasters"] {
             app.handle(.scene(spec: json("{\"id\":\"\(id)\"}"), seed: 2))
             render(app)
