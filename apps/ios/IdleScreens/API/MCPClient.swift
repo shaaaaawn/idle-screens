@@ -212,8 +212,14 @@ actor MCPClient {
     /// or when the tool reports `isError`. A `confirmation_required` answer is
     /// put to the person (via `confirmer`) and, on yes, repeated once with the
     /// server's token; on no it throws `.cancelled` and sends nothing more.
+    ///
+    /// `approved`: the person already said yes to exactly this action, in the
+    /// app's own dialog that named what it does (unpairing a TV and revoking
+    /// the keys made for it). The server's question is then answered without
+    /// asking again; nothing else skips it.
     @discardableResult
-    func callTool(_ name: String, arguments: [String: JSONValue] = [:], intent: String? = nil) async throws -> String {
+    func callTool(_ name: String, arguments: [String: JSONValue] = [:], intent: String? = nil,
+                  approved: Bool = false) async throws -> String {
         let args = attributed(name, arguments, intent: intent)
         let first = try await send(name, args)
         guard first.isError else { return first.text }
@@ -221,11 +227,13 @@ actor MCPClient {
         guard failure.code == "confirmation_required", let state = first.envelope?.requestState, !state.isEmpty else {
             throw MCPError.tool(failure)
         }
-        // No way to ask (e.g. a background path): surface the server's question
-        // as the error, never a silent no-op.
-        guard let confirmer else { throw MCPError.tool(failure) }
-        guard await confirmer(MCPConfirmationRequest(tool: name, message: failure.message)) else {
-            throw MCPError.cancelled(tool: name)
+        if !approved {
+            // No way to ask (e.g. a background path): surface the server's
+            // question as the error, never a silent no-op.
+            guard let confirmer else { throw MCPError.tool(failure) }
+            guard await confirmer(MCPConfirmationRequest(tool: name, message: failure.message)) else {
+                throw MCPError.cancelled(tool: name)
+            }
         }
         var confirmed = args
         confirmed["confirm"] = .string(state)

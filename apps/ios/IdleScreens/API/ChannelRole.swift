@@ -157,11 +157,14 @@ extension MCPClient {
 
     /// Ends exactly one relationship. Every other key keeps working. The
     /// server asks first (`confirmation_required`); `callTool` puts its
-    /// sentence to the person and repeats the call only on yes.
-    func revokeToken(channelId: String, token: String, id: String, label: String? = nil) async throws {
+    /// sentence to the person and repeats the call only on yes. `approved`:
+    /// the person already confirmed this revoke in the app's own dialog
+    /// (see `callTool`).
+    func revokeToken(channelId: String, token: String, id: String, label: String? = nil,
+                     approved: Bool = false) async throws {
         let whose = label.map { " for “\($0)”" } ?? ""
         try await callTool("revokeToken", arguments: [
             "channelId": .string(channelId), "token": .string(token), "id": .string(id),
-        ], intent: "user revoked the key\(whose) from the \(identity.surface) app")
+        ], intent: "user revoked the key\(whose) from the \(identity.surface) app", approved: approved)
     }
 }

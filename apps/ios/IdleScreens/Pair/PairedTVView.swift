@@ -15,6 +15,9 @@ struct PairedTVView: View {
     @State private var showingScanner = false
     @State private var manualCode = ""
     @State private var sendingTo: PairedScreen?
+    /// A screen being unpaired that holds viewer keys this phone made for it,
+    /// with those keys: the dialog offers to revoke them.
+    @State private var unpairing: (screen: PairedScreen, keys: [AppState.HeldScreenKey])?
     @State private var toast: String?
     @State private var screenKind: ScreenKind = .appleTV
     @State private var showingAddScreen = false
@@ -294,6 +297,24 @@ struct PairedTVView: View {
                 }
             }
         }
+        .confirmationDialog(
+            unpairing.map { "Unpair this \($0.screen.kind.label)?" } ?? "",
+            isPresented: Binding(get: { unpairing != nil }, set: { if !$0 { unpairing = nil } }),
+            titleVisibility: .visible,
+            presenting: unpairing
+        ) { pending in
+            Button("Unpair and revoke its keys", role: .destructive) {
+                Task {
+                    let failed = await app.unpair(pending.screen, revokeKeys: true)
+                    flash(failed.isEmpty ? "Unpaired; its keys are revoked"
+                                         : app.pairPushError ?? "Unpaired; a key couldn't be revoked")
+                }
+            }
+            Button("Unpair, keep its keys") { app.unpair(pending.screen) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(Self.unpairMessage(pending.screen, keys: pending.keys))
+        }
         .refreshable { await app.refreshScreenStatuses() }
         .task {
             // Poll while this page is on screen so the dots stay honest.
@@ -302,6 +323,17 @@ struct PairedTVView: View {
                 try? await Task.sleep(for: .seconds(10))
             }
         }
+    }
+
+    /// What revoking does, naming the channels: this is the person's one
+    /// confirmation for every revoke the unpair makes.
+    static func unpairMessage(_ screen: PairedScreen, keys: [AppState.HeldScreenKey]) -> String {
+        let names = keys.map(\.channelLabel).joined(separator: ", ")
+        let one = keys.count == 1
+        let channels = one ? "a private channel" : "\(keys.count) private channels"
+        return "This phone made it a viewer key for \(channels): \(names). "
+            + "Revoking \(one ? "that key" : "those keys") means this \(screen.kind.label) can no longer open "
+            + (one ? "it" : "them") + ", even if someone else pairs it."
     }
 
     private func flash(_ message: String) {
@@ -351,7 +383,10 @@ struct PairedTVView: View {
                     }
                 } label: { Label("Check it's there", systemImage: "dot.radiowaves.left.and.right") }
             }
-            Button(role: .destructive) { app.unpair(screen) } label: {
+            Button(role: .destructive) {
+                let keys = app.screenKeys(for: screen)
+                if keys.isEmpty { app.unpair(screen) } else { unpairing = (screen, keys) }
+            } label: {
                 Label("Unpair", systemImage: "minus.circle")
             }
         } label: {
