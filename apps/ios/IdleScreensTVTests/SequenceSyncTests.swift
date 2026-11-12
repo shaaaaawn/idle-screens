@@ -192,6 +192,13 @@ final class SequenceSyncTests: XCTestCase {
         app.handle(reseed)
         XCTAssertTrue(app.sleeping)
         XCTAssertEqual(app.channelPause, .init(sleptAt: 9000))
+        // A sleeping scene with no epoch on an awake TV stands the clock at its sleptAt.
+        let awake = TVAppState(gallery: GalleryClient(baseURL: baseURL), mcp: MCPClient(baseURL: baseURL),
+                               ws: ChannelWSClient(), pair: PairClient(baseURL: baseURL), baseURL: baseURL)
+        awake.handle(.snapshot(ChannelSnapshot(epoch: 1000, sleeping: false)))
+        awake.handle(.scene(spec: spec, seed: 2, sleeping: true, sleptAt: 7000))
+        XCTAssertTrue(awake.sleeping)
+        XCTAssertEqual(awake.channelPause, .init(sleptAt: 7000))
         // A publish to an asleep channel wakes it; no `wake` message follows.
         app.handle(.scene(spec: spec, seed: 3, epoch: 20_000))
         XCTAssertFalse(app.sleeping)

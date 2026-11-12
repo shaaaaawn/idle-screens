@@ -689,8 +689,11 @@ final class TVAppState {
                 // Awake, the clock no longer stands at a sleep, even when
                 // this scene carries no epoch to rebase on.
                 channelPause.sleptAt = nil
-            } else if sleepBeganAt == nil {
-                sleepBeganAt = Date()
+            } else {
+                if sleepBeganAt == nil { sleepBeganAt = Date() }
+                // Asleep with no new epoch: the clock stands at the server's
+                // sleep start, as on `.sleep` (a new epoch is handled below).
+                if epoch == nil, channelPause.sleptAt == nil { channelPause.sleptAt = sleptAt }
             }
             if let epoch {
                 // A new scene starts its clock with no pause behind it.
