@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A screen this phone can steer — Apple TV, Mac, or Linux display.
@@ -334,8 +335,132 @@ extension AppState {
 
     /// Where the viewer key this phone minted for one screen is kept, so a
     /// re-send reuses it rather than minting another (a channel holds 32).
-    static func screenViewerKeyKey(deviceId: String, channelId: String) -> String {
+    nonisolated static func screenViewerKeyKey(deviceId: String, channelId: String) -> String {
         "screen.viewer.\(deviceId).\(channelId)"
+    }
+
+    /// The label a screen's minted viewer key carries in the channel's key
+    /// list, so its owner can tell which TV it opens.
+    nonisolated static func screenKeyLabel(_ screen: PairedScreen) -> String {
+        "\(screen.kind.label) \(screen.deviceId.prefix(8))"
+    }
+
+    /// A viewer key this phone minted for one screen on one channel: the
+    /// grant id `revokeToken` names it by, and the token itself.
+    struct ScreenGrant: Codable, Equatable, Sendable {
+        /// nil for a slot written before ids were kept, which held the bare
+        /// token (see `grantId(ofToken:)`).
+        var id: String?
+        let token: String
+    }
+
+    nonisolated static func encodeScreenGrant(_ grant: ScreenGrant) -> String {
+        String(decoding: (try? JSONEncoder().encode(grant)) ?? Data(), as: UTF8.self)
+    }
+
+    /// A slot's value: `{id, token}` JSON, or a bare token from before ids
+    /// were kept. nil for anything else, so a corrupt slot is never sent.
+    nonisolated static func decodeScreenGrant(_ raw: String) -> ScreenGrant? {
+        if let grant = try? JSONDecoder().decode(ScreenGrant.self, from: Data(raw.utf8)) {
+            return ChannelTokenFormat.isWellFormedToken(grant.token) ? grant : nil
+        }
+        return ChannelTokenFormat.isWellFormedToken(raw) ? ScreenGrant(id: nil, token: raw) : nil
+    }
+
+    nonisolated static func loadScreenGrant(slot: String) -> ScreenGrant? {
+        KeychainHelper.load(key: slot).flatMap(decodeScreenGrant)
+    }
+
+    /// The grant id the server gives a token: the first 12 hex characters of
+    /// its SHA-256 (idle-server `grantIdOf`). Only for a slot kept before ids
+    /// were; `revokeScreenKey` checks it against `listTokens` before using it.
+    nonisolated static func grantId(ofToken token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined().prefix(12).description
+    }
+
+    // MARK: Revoking a screen's keys
+
+    /// A viewer key this phone minted for a screen, on a channel it still owns.
+    struct HeldScreenKey: Equatable, Sendable {
+        let channelId: String
+        /// The channel's name on this phone's keyring.
+        let channelLabel: String
+        let slot: String
+        let grant: ScreenGrant
+    }
+
+    /// The viewer keys this phone minted for `screen` that it can revoke:
+    /// only an owner mints them, and only an owner can revoke. A slot on a
+    /// channel this phone no longer owns stays, and its key is still in that
+    /// channel's key list under the screen's label.
+    func screenKeys(for screen: PairedScreen) -> [HeldScreenKey] {
+        credentials.compactMap { credential in
+            guard canAdminister(credential.channelId) else { return nil }
+            let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: credential.channelId)
+            guard let grant = Self.loadScreenGrant(slot: slot) else { return nil }
+            // The wall's name for the channel, as the person knows it. The
+            // keyring's own label is often just the id (a key added by link).
+            let name = channels.first { $0.id == credential.channelId }?.displayLabel ?? credential.label
+            return HeldScreenKey(channelId: credential.channelId, channelLabel: name,
+                                 slot: slot, grant: grant)
+        }
+    }
+
+    /// Unpair a screen and, with `revokeKeys`, revoke every viewer key this
+    /// phone minted for it, so a TV that is sold or lost no longer opens
+    /// those private channels. The person approved the revokes once, in the
+    /// unpair dialog that named the channels, so the server's per-key
+    /// question is not asked again. Returns the channels whose key is still
+    /// valid; `pairPushError` names them.
+    @discardableResult
+    func unpair(_ screen: PairedScreen, revokeKeys: Bool) async -> [String] {
+        let held = revokeKeys ? screenKeys(for: screen) : []
+        unpair(screen)
+        var failed: [String] = []
+        for key in held {
+            do {
+                try await revokeScreenKey(key, for: screen)
+            } catch {
+                failed.append(key.channelLabel)
+            }
+        }
+        if !failed.isEmpty {
+            pairPushError = "Unpaired, but the \(screen.kind.label)'s key for \(failed.joined(separator: ", ")) "
+                + "couldn't be revoked. Revoke “\(Self.screenKeyLabel(screen))” from that channel's keys."
+        }
+        return failed
+    }
+
+    enum RevokeScreenKeyError: Error, Equatable {
+        case noOwnerKey
+        case unknownGrant
+    }
+
+    private func revokeScreenKey(_ key: HeldScreenKey, for screen: PairedScreen) async throws {
+        guard let owner = token(for: key.channelId) else { throw RevokeScreenKeyError.noOwnerKey }
+        // Already dead (the owner revoked it by hand, or rotated with every
+        // grant): nothing left but to forget it. A check that could not be
+        // made throws, and the slot is kept for another try.
+        guard try await gallery.verdict(channelId: key.channelId, token: key.grant.token).valid else {
+            KeychainHelper.delete(key: key.slot)
+            return
+        }
+        let id: String
+        if let known = key.grant.id {
+            id = known
+        } else {
+            // A slot from before ids were kept. Revoke the derived id only if
+            // the channel lists it; never a guess.
+            let derived = Self.grantId(ofToken: key.grant.token)
+            let grants = try await mcp.listTokens(channelId: key.channelId, token: owner)
+            guard grants.contains(where: { $0.id == derived && $0.role == .viewer }) else {
+                throw RevokeScreenKeyError.unknownGrant
+            }
+            id = derived
+        }
+        try await mcp.revokeToken(channelId: key.channelId, token: owner, id: id,
+                                  label: Self.screenKeyLabel(screen), approved: true)
+        KeychainHelper.delete(key: key.slot)
     }
 
     /// The sealed viewer key to send with a push, or nil when none is needed
@@ -385,18 +510,22 @@ extension AppState {
     private func screenViewerKey(channelId: String, owner held: String, for screen: PairedScreen) async throws -> String {
         let slot = Self.screenViewerKeyKey(deviceId: screen.deviceId, channelId: channelId)
         if let running = screenKeyMints[slot] { return try await running.value }
-        let label = "\(screen.kind.label) \(screen.deviceId.prefix(8))"
+        let label = Self.screenKeyLabel(screen)
         let task = Task { [gallery, mcp] () async throws -> String in
             // A check that could not be made (network, 429, 5xx) throws and
             // fails the push; only the server's `valid: false` re-mints.
-            if let kept = KeychainHelper.load(key: slot),
-               try await gallery.verdict(channelId: channelId, token: kept).valid {
-                return kept
+            if let kept = Self.loadScreenGrant(slot: slot),
+               try await gallery.verdict(channelId: channelId, token: kept.token).valid {
+                return kept.token
             }
             let minted = try await mcp.createToken(channelId: channelId, token: held, role: .viewer, label: label)
             // An unkept key is not sent: the next push could not find it and
-            // would mint yet another.
-            guard KeychainHelper.save(key: slot, value: minted.token) else { throw ScreenKeyError.notStored }
+            // would mint yet another. Its id is kept with it, so unpairing
+            // the screen can revoke it (`unpair(_:revokeKeys:)`).
+            let grant = ScreenGrant(id: minted.id, token: minted.token)
+            guard KeychainHelper.save(key: slot, value: Self.encodeScreenGrant(grant)) else {
+                throw ScreenKeyError.notStored
+            }
             return minted.token
         }
         screenKeyMints[slot] = task
