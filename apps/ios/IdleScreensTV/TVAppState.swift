@@ -684,7 +684,14 @@ final class TVAppState {
             // A publish wakes the channel without a `wake` message; only a
             // reseed's scene keeps it asleep, and says so (as the web reads it).
             sleeping = sceneSleeping ?? false
-            if !sleeping { sleepBeganAt = nil }
+            if !sleeping {
+                sleepBeganAt = nil
+                // Awake, the clock no longer stands at a sleep, even when
+                // this scene carries no epoch to rebase on.
+                channelPause.sleptAt = nil
+            } else if sleepBeganAt == nil {
+                sleepBeganAt = Date()
+            }
             if let epoch {
                 // A new scene starts its clock with no pause behind it.
                 channelEpochMs = epoch
@@ -719,11 +726,22 @@ final class TVAppState {
             if channelPause.sleptAt == nil { channelPause.sleptAt = sleptAt }
         case .wake(let pausedMs):
             let wasSleeping = sleeping
+            let prevPausedMs = max(0, channelPause.pausedMs ?? 0)
             sleeping = false
             channelPause.sleptAt = nil
             if let pausedMs { channelPause.pausedMs = pausedMs }
-            // An open screen resumes where it paused, as the web's do.
-            if wasSleeping, let began = sleepBeganAt { resumeSequence(after: Date().timeIntervalSince(began)) }
+            // An open screen resumes where it paused, as the web's do — but
+            // only against a server that keeps the pause (`pausedMs` present
+            // and valid). An older one counts the sleep, so a TV opened after
+            // the wake would count it too: the open one must not hold back.
+            if wasSleeping, let began = sleepBeganAt, let pausedMs, pausedMs >= 0 {
+                let local = Date().timeIntervalSince(began)
+                // The server's own pause delta is the authority; the device's
+                // receipt-to-receipt time only caps it when this sequence
+                // mounted partway through the sleep (or rebased under it).
+                let serverDelta = Double(pausedMs - prevPausedMs) / 1000
+                resumeSequence(after: serverDelta > 0 ? min(local, serverDelta) : local)
+            }
             sleepBeganAt = nil
         case .overlay(let text, let ttl):
             overlayText = text

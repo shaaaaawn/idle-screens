@@ -391,6 +391,12 @@ actor ChannelWSClient {
 
     // MARK: - Parsing
 
+    /// A server timestamp (ms); a negative one is broken and reads as missing.
+    static func serverTime(_ value: JSONValue?) -> Int? {
+        guard let ms = value?.intValue, ms >= 0 else { return nil }
+        return ms
+    }
+
     static func parse(_ text: String) -> ChannelWSEvent? {
         guard let data = text.data(using: .utf8),
               let message = try? JSONDecoder().decode([String: JSONValue].self, from: data),
@@ -409,7 +415,7 @@ actor ChannelWSClient {
                 presets: message["presets"]?.stringArray,
                 now: message["now"]?.intValue,
                 pausedMs: message["pausedMs"]?.intValue,
-                sleptAt: message["sleptAt"]?.intValue
+                sleptAt: Self.serverTime(message["sleptAt"])
             ))
         case "scene":
             return .scene(
@@ -419,7 +425,7 @@ actor ChannelWSClient {
                 epoch: message["epoch"]?.intValue,
                 track: message["track"],
                 sleeping: message["sleeping"]?.boolValue,
-                sleptAt: message["sleptAt"]?.intValue
+                sleptAt: Self.serverTime(message["sleptAt"])
             )
         case "seed":
             return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
@@ -429,7 +435,7 @@ actor ChannelWSClient {
         case "track":
             return .track(message["track"], epoch: message["epoch"]?.intValue)
         case "sleep":
-            return .sleep(sleptAt: message["sleptAt"]?.intValue)
+            return .sleep(sleptAt: Self.serverTime(message["sleptAt"]))
         case "wake":
             return .wake(pausedMs: message["pausedMs"]?.intValue)
         case "overlay":

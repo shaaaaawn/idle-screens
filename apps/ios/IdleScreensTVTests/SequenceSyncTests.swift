@@ -61,9 +61,14 @@ final class SequenceSyncTests: XCTestCase {
     }
 
     func testAgreesWithAScreenThatStayedOpen() {
-        // Paused at 4 s, resumed for 1 s.
-        let openThrough: Double = 4000 + 1000
-        XCTAssertEqual(baseMs(seq(loop: false), epoch: 0, now: 25_000, .init(pausedMs: 20_000)), openThrough, accuracy: 1e-3)
+        // A screen open through the sleep: it held at 4 s while asleep…
+        let once = seq(loop: false)
+        let held = baseMs(once, epoch: 0, now: 24_000, .init(sleptAt: 4000))
+        XCTAssertEqual(held, 4000, accuracy: 1e-3)
+        // …then played 1 s after the wake. A screen opened at that moment,
+        // from the wake's pause total alone, lands on the same instant.
+        let openedLater = baseMs(once, epoch: 0, now: 25_000, .init(pausedMs: 20_000))
+        XCTAssertEqual(openedLater, held + 1000, accuracy: 1e-3)
     }
 
     func testWrapsALoopOnChannelTime() {
@@ -122,6 +127,8 @@ final class SequenceSyncTests: XCTestCase {
         XCTAssertEqual(ChannelWSClient.parse(#"{"type":"sleep","sleptAt":4000}"#), .sleep(sleptAt: 4000))
         XCTAssertEqual(ChannelWSClient.parse(#"{"type":"wake","pausedMs":20000}"#), .wake(pausedMs: 20_000))
         XCTAssertEqual(ChannelWSClient.parse(#"{"type":"sleep"}"#), .sleep(sleptAt: nil))
+        // A negative sleep start is broken: read as missing, not as a clock frozen at 0.
+        XCTAssertEqual(ChannelWSClient.parse(#"{"type":"sleep","sleptAt":-5}"#), .sleep(sleptAt: nil))
     }
 
     @MainActor
