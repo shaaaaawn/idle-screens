@@ -93,6 +93,34 @@ struct ChannelSnapshot: Equatable, Sendable {
     /// While asleep, when the sleep began (server ms): the shared clock
     /// stands there until the wake.
     var sleptAt: Int? = nil
+    /// The playhead (channel time, phase 8b): the shared clock's anchor,
+    /// rate and position beside the epoch. Absent = rate 1 from the epoch.
+    var playhead: Playhead? = nil
+}
+
+/// The channel's playhead as the server sends it (idle-server
+/// `src/channel-clock.ts` `Playhead`): where the shared clock stood at `at`
+/// (`t`, ms of channel time), how fast it runs since (0 = paused, keeping its
+/// place), and the time asleep by `at` (ms). `clock.rate` and
+/// `clock.position` re-anchor it; nothing moves the epoch.
+struct Playhead: Equatable, Sendable {
+    var at: Double
+    var t: Double
+    var rate: Double
+    var paused: Double
+
+    init(at: Double, t: Double, rate: Double, paused: Double) {
+        self.at = at; self.t = t; self.rate = rate; self.paused = paused
+    }
+
+    /// Four finite numbers, or nothing: a malformed playhead is ignored, not trusted.
+    init?(_ value: JSONValue?) {
+        guard case .object(let o)? = value,
+              let at = o["at"]?.number, let t = o["t"]?.number,
+              let rate = o["rate"]?.number, let paused = o["paused"]?.number,
+              [at, t, rate, paused].allSatisfy(\.isFinite) else { return nil }
+        self.init(at: at, t: t, rate: rate, paused: paused)
+    }
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
@@ -105,8 +133,14 @@ enum ChannelWSEvent: Equatable, Sendable {
     /// `sleeping` / `sleptAt`: only a reseed sends a scene without waking the
     /// channel, and says so (with where its clock stands). Absent = awake:
     /// a publish shows the scene.
+    /// `pausedMs` / `playhead`: the program handed back after a scene window
+    /// (channel time, phase 3b) comes on its own clock, sleep left out.
     case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
-               track: JSONValue? = nil, sleeping: Bool? = nil, sleptAt: Int? = nil)
+               track: JSONValue? = nil, sleeping: Bool? = nil, sleptAt: Int? = nil,
+               pausedMs: Int? = nil, playhead: Playhead? = nil)
+    /// The playhead moved (channel time, phase 8b): the same scene, its
+    /// shared clock re-anchored. A clock for another epoch is stale.
+    case clock(epoch: Int?, playhead: Playhead?, pausedMs: Int?)
     /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
     case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
@@ -415,7 +449,8 @@ actor ChannelWSClient {
                 presets: message["presets"]?.stringArray,
                 now: message["now"]?.intValue,
                 pausedMs: message["pausedMs"]?.intValue,
-                sleptAt: Self.serverTime(message["sleptAt"])
+                sleptAt: Self.serverTime(message["sleptAt"]),
+                playhead: Playhead(message["playhead"])
             ))
         case "scene":
             return .scene(
@@ -425,8 +460,13 @@ actor ChannelWSClient {
                 epoch: message["epoch"]?.intValue,
                 track: message["track"],
                 sleeping: message["sleeping"]?.boolValue,
-                sleptAt: Self.serverTime(message["sleptAt"])
+                sleptAt: Self.serverTime(message["sleptAt"]),
+                pausedMs: message["pausedMs"]?.intValue,
+                playhead: Playhead(message["playhead"])
             )
+        case "clock":
+            return .clock(epoch: message["epoch"]?.intValue, playhead: Playhead(message["playhead"]),
+                          pausedMs: message["pausedMs"]?.intValue)
         case "seed":
             return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
         case "delta":

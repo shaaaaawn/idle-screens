@@ -654,7 +654,8 @@ final class TVAppState {
             if let epoch = snapshot.epoch { channelEpochMs = epoch }
             // The snapshot states the whole pause; absent fields = none.
             channelPause = ChannelPause(pausedMs: snapshot.pausedMs,
-                                        sleptAt: (snapshot.sleeping ?? false) ? snapshot.sleptAt : nil)
+                                        sleptAt: (snapshot.sleeping ?? false) ? snapshot.sleptAt : nil,
+                                        playhead: snapshot.playhead)
             if let now = snapshot.now { serverSkew = Double(now) / 1000 - Date().timeIntervalSince1970 }
             // The web seeds a scene with the spec's seed, else the scene's, else 42.
             let sceneSeed: Int? = { if case .object(let o)? = snapshot.scene { return o["seed"]?.intValue } else { return nil } }()
@@ -680,7 +681,8 @@ final class TVAppState {
             steeredJSON = nil; steerShown = nil; currentSpecJSON = nil
             sceneRevision &+= 1
             render(shown, fallbackSeed: seed ?? 42)
-        case .scene(let spec, let seed, let transition, let epoch, let track, let sceneSleeping, let sleptAt):
+        case .scene(let spec, let seed, let transition, let epoch, let track, let sceneSleeping, let sleptAt,
+                    let scenePausedMs, let scenePlayhead):
             // A publish wakes the channel without a `wake` message; only a
             // reseed's scene keeps it asleep, and says so (as the web reads it).
             sleeping = sceneSleeping ?? false
@@ -700,6 +702,10 @@ final class TVAppState {
                 channelEpochMs = epoch
                 channelPause = ChannelPause(sleptAt: sleeping ? (sleptAt ?? epoch) : nil)
             }
+            // The program handed back after a scene window comes on its own clock
+            // (channel time, phase 3b): its time asleep and its playhead ride along.
+            if let scenePausedMs { channelPause.pausedMs = scenePausedMs }
+            if let scenePlayhead { channelPause.playhead = scenePlayhead }
             if let spec {
                 // A publish replaces the scene, and the steers made on the old one.
                 if timeline == .live {
@@ -722,11 +728,19 @@ final class TVAppState {
                 applySpec(mount, fallbackSeed: seed ?? 42)
                 if timeline == .live, track != nil { applyLiveTrack(track) }
             }
+        case .clock(let epoch, let playhead, let pausedMs):
+            // The playhead moved (channel time, phase 8b): the same scene, its clock re-anchored.
+            guard epoch == nil || epoch == channelEpochMs else { break }
+            channelPause.playhead = playhead
+            if let pausedMs { channelPause.pausedMs = pausedMs }
+            if timeline == .live { followPlayhead() }
         case .sleep(let sleptAt):
             // The shared clock stands at the sleep's start until the wake.
             if !sleeping { sleepBeganAt = Date() }
             sleeping = true
             if channelPause.sleptAt == nil { channelPause.sleptAt = sleptAt }
+            // Steered by a playhead, the frame holds through the sleep on the shared clock.
+            if channelPause.playhead != nil, timeline == .live { followPlayhead() }
         case .wake(let pausedMs):
             let wasSleeping = sleeping
             let prevPausedMs = max(0, channelPause.pausedMs ?? 0)
@@ -737,7 +751,10 @@ final class TVAppState {
             // only against a server that keeps the pause (`pausedMs` present
             // and valid). An older one counts the sleep, so a TV opened after
             // the wake would count it too: the open one must not hold back.
-            if wasSleeping, let began = sleepBeganAt, let pausedMs, pausedMs >= 0 {
+            if channelPause.playhead != nil {
+                // Steered, the shared clock already left the sleep out: just follow it.
+                if timeline == .live { followPlayhead() }
+            } else if wasSleeping, let began = sleepBeganAt, let pausedMs, pausedMs >= 0 {
                 let local = Date().timeIntervalSince(began)
                 // The server's own pause delta is the authority; the device's
                 // receipt-to-receipt time only caps it when this sequence
@@ -1047,10 +1064,13 @@ final class TVAppState {
         var pausedMs: Int?
         /// While asleep: when the sleep began (server ms).
         var sleptAt: Int?
+        /// The playhead (channel time, phase 8b). A new epoch drops it, as `rebased` does.
+        var playhead: Playhead?
 
-        init(pausedMs: Int? = nil, sleptAt: Int? = nil) {
+        init(pausedMs: Int? = nil, sleptAt: Int? = nil, playhead: Playhead? = nil) {
             self.pausedMs = pausedMs
             self.sleptAt = sleptAt
+            self.playhead = playhead
         }
 
         /// The pause after a message that may carry a new epoch (the site's
@@ -1111,8 +1131,12 @@ final class TVAppState {
         } else {
             clearBed()
         }
+        sceneClock = nil
+        bedClock = nil
         applySegment(seq, at: baseT, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
+        // Opened on a paused or slowed clock: follow it from the first frame.
+        if channelPause.playhead != nil { followPlayhead() }
     }
 
     /// Seconds already elapsed on a `sync: 'epoch'` sequence's shared clock
@@ -1124,16 +1148,70 @@ final class TVAppState {
     nonisolated static func sequenceBaseT(_ seq: SequenceSubset, epochMs: Int?, now: Date,
                                           pause: ChannelPause = ChannelPause()) -> TimeInterval {
         guard seq.sync == "epoch", let epochMs else { return 0 }
-        let nowMs = now.timeIntervalSince1970 * 1000
-        let clockNow = pause.sleptAt.map { min(nowMs, Double($0)) } ?? nowMs
-        let pausedMs = Double(max(0, pause.pausedMs ?? 0))
-        var elapsed = max(0, clockNow - Double(epochMs) - pausedMs) / 1000
+        var elapsed = channelElapsedMs(epochMs: epochMs, nowMs: now.timeIntervalSince1970 * 1000, pause: pause) / 1000
         if seq.loop == true {
             var lap: TimeInterval = 0
             for seg in seq.segments { guard let d = seg.duration else { break }; lap += d / 1000 }
             if lap > 0 { elapsed = elapsed.truncatingRemainder(dividingBy: lap) }
         }
         return elapsed
+    }
+
+    /// Ms of channel time since the epoch, as the server reckons it (idle-server
+    /// `src/channel-clock.ts` `channelElapsed`, ported exactly and held to its
+    /// output by `ChannelClockParityTests`): wall time minus the time asleep,
+    /// standing at `sleptAt` while asleep, and from the playhead's anchor at its
+    /// rate once one is set.
+    nonisolated static func channelElapsedMs(epochMs: Int, nowMs: Double, pause: ChannelPause) -> Double {
+        let done = Double(max(0, pause.pausedMs ?? 0))
+        let current = pause.sleptAt.map { max(0, nowMs - Double($0)) } ?? 0
+        let pausedTotal = done + current
+        guard let p = pause.playhead else { return max(0, nowMs - Double(epochMs) - pausedTotal) }
+        let awake = max(0, nowMs - p.at - (pausedTotal - p.paused))
+        return max(0, p.t + p.rate * awake)
+    }
+
+    // MARK: The playhead (channel time, phase 8b)
+
+    /// The playhead's clocks for the renderers on screen: nil = their own
+    /// clocks from mount (no playhead, exactly as before).
+    private(set) var sceneClock: SceneClock?
+    private(set) var bedClock: SceneClock?
+
+    /// The rate the shared clock runs at now: 0 asleep or paused.
+    var playheadRate: Double { sleeping ? 0 : (channelPause.playhead?.rate ?? 1) }
+
+    /// Where the active sequence is on the shared clock now.
+    private func sharedSequenceT(_ seq: SequenceSubset, at now: Date = Date()) -> TimeInterval {
+        Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: now.addingTimeInterval(serverSkew), pause: channelPause)
+    }
+
+    /// Put the sequence where the shared clock says and run its renderers at
+    /// the clock's rate: a seek lands on its segment, a pause holds the frame
+    /// (no segment advance, no keyframe or morph drivers), a rate scales the
+    /// renderers and the segment timing. Called when the playhead moves, and
+    /// on sleep and wake while one is set.
+    private func followPlayhead() {
+        guard channelPause.playhead != nil, let seq = activeSequence, seq.sync == "epoch",
+              channelEpochMs != nil else {
+            sceneClock = nil
+            bedClock = nil
+            return
+        }
+        let now = Date()
+        let T = sharedSequenceT(seq, at: now)
+        let rate = playheadRate
+        sequenceTask?.cancel()
+        applySegment(seq, at: T, fallbackSeed: sequenceFallbackSeed, advancing: false)
+        sceneClock = SceneClock(anchor: now, t: sceneClockOffset, rate: rate)
+        bedClock = hasBed ? SceneClock(anchor: now, t: T, rate: rate) : nil
+        if rate > 0 {
+            scheduleSequenceAdvance(fallbackSeed: sequenceFallbackSeed)
+        } else {
+            // Held: nothing on the segment's own wall-clock drivers moves either.
+            stopKeyframes()
+            stopMorph()
+        }
     }
 
     private func stopSequence() {
@@ -1301,14 +1379,22 @@ final class TVAppState {
             while !Task.isCancelled {
                 guard let self, let seq = self.activeSequence,
                       let epoch = self.sequenceEpoch else { return }
-                let now = Date().timeIntervalSince(epoch)
+                // With a playhead the sequence runs on the shared clock, at its rate (phase 8b).
+                let steered = self.channelPause.playhead != nil && seq.sync == "epoch"
+                let rate = steered ? self.playheadRate : 1
+                guard rate > 0 else { return }
+                let now = steered ? self.sharedSequenceT(seq) : Date().timeIntervalSince(epoch)
                 // A durationless tail with no loop holds forever; an
                 // `advance: 'input'` hold waits for the clicker.
                 guard let wait = seq.nextBoundary(after: now, releasedBelow: self.sequenceReleasedBelow) else { return }
-                try? await Task.sleep(for: .seconds(wait + 0.02))
+                try? await Task.sleep(for: .seconds(wait / rate + 0.02))
                 guard !Task.isCancelled else { return }
-                self.applySegment(seq, at: Date().timeIntervalSince(epoch),
+                self.applySegment(seq, at: steered ? self.sharedSequenceT(seq) : Date().timeIntervalSince(epoch),
                                   fallbackSeed: fallbackSeed)
+                if steered {
+                    // The new segment's renderer starts at its own local time, on the shared clock's rate.
+                    self.sceneClock = SceneClock(anchor: Date(), t: self.sceneClockOffset, rate: rate)
+                }
             }
         }
     }
