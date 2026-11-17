@@ -33,6 +33,30 @@ xcodebuild -project IdleScreens.xcodeproj -scheme IdleScreens \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
+## Widgets and Control Center (`IdleScreensWidgets`)
+
+A WidgetKit extension puts channels on the paired screens without opening the
+app: a Home Screen widget (small 2×2, medium 4, large 3×3 tiles — tap one to
+send it to every screen, or to the one picked in the widget's settings), a
+Control Center / Lock Screen control (a configured channel, or "next channel"),
+and `SendChannelIntent` for Siri, Shortcuts and the Action button.
+
+- **Shared state is the Keychain, not an App Group.** The app writes
+  `RemoteSnapshot` (screens, quick channels, server URL) device-only into its
+  own access group, which both targets list in `keychain-access-groups`; the
+  screens' `isp_` push tokens are read from the same group at send time.
+  An App Group would need a new identifier and new profiles for no gain.
+- **Private channels go through the app.** Their viewer key is minted and
+  sealed per screen in the app, so their tiles are links
+  (`idlescreens://send/<id>`), never widget buttons.
+- **Widget buttons take plain ids** (`SendTileIntent`). An `AppEntity` set on a
+  `Button(intent:)` reached `perform()` as nil, so every tile sent "the next
+  channel"; `SendChannelIntent`'s entities are for the Shortcuts/Siri UI only.
+- **Testing:** pair the tvOS and iPhone simulators against a lane server
+  (`SIMCTL_CHILD_IDLE_SCREENS_BASE_URL`), add the widget through the Home
+  Screen editor, tap tiles and watch the TV. Widget taps arrive late on a busy
+  Mac; wait ~15 s before judging a screenshot.
+
 ## Apple TV (`IdleScreensTV`)
 
 The same project builds an Apple TV app: a 10-foot channel gallery that renders

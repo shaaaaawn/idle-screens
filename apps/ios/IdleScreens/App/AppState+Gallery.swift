@@ -31,6 +31,7 @@ extension AppState {
             if let fresh = await shelves { categories = fresh }
             galleryError = nil
             galleryLoadedAt = Date()
+            refreshRemoteSnapshot()
         } catch {
             // The listing failing costs the listing, not the keyring: each
             // private channel is its own read.
