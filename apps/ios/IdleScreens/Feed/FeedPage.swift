@@ -307,6 +307,8 @@ struct FeedPage: View {
             try? await Task.sleep(for: .seconds(1.5))
             if !Task.isCancelled { sceneWaitOver = true }
         }
+        // A page swiped past before its read started drops out of the queue.
+        .onDisappear { app.unwantDetail(channelId) }
         .onAppear {
             if launchPicture == nil {
                 launchPicture = WebScenePool.shared.launchStill(channelId: channelId, signature: channel.lastEventAt)
