@@ -20,8 +20,9 @@ final class AppIntentsMetadataTests: XCTestCase {
 
     static func reservedWords(in text: String) -> [String] {
         // System identifiers ("com.apple.link.systemProtocol.…") are not
-        // display text; a dotted token with no spaces is one.
-        if !text.contains(" "), text.contains("."), text.wholeMatch(of: /[A-Za-z0-9_.-]+/) != nil { return [] }
+        // display text. Only that prefix is exempt, so dotted display text
+        // such as "Apple.com" is still checked.
+        if text.hasPrefix("com.apple."), text.wholeMatch(of: /[A-Za-z0-9_.-]+/) != nil { return [] }
         let words = Set(text.lowercased().split { !$0.isLetter }.map(String.init))
         return reserved.filter(words.contains)
     }
@@ -33,6 +34,7 @@ final class AppIntentsMetadataTests: XCTestCase {
         XCTAssertEqual(Self.reservedWords(in: "Machine room"), [], "whole words only")
         XCTAssertEqual(Self.reservedWords(in: "Mac"), ["mac"], "a one-word title still counts")
         XCTAssertEqual(Self.reservedWords(in: "com.apple.link.systemProtocol.WidgetConfiguration"), [])
+        XCTAssertEqual(Self.reservedWords(in: "Apple.com"), ["apple"], "dotted display text is not an identifier")
     }
 
     func testNoIntentTextNamesAnApplePlatform() throws {
