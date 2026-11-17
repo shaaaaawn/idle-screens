@@ -325,7 +325,10 @@ struct FeedPage: View {
         .onChange(of: isActive) { _, nowActive in
             if nowActive { activate() } else { deactivate() }
         }
-        .onDisappear { deactivate() }
+        .onDisappear {
+            app.unwantDetail(channelId)
+            deactivate()
+        }
     }
 
     // MARK: Lifecycle

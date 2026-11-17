@@ -163,6 +163,7 @@ struct MyChannelsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             // Its scene, if the wall lists it and the one known is stale.
             .onAppear { if let channel { app.wantDetail(channel) } }
+            .onDisappear { app.unwantDetail(credential.channelId) }
             .overlay(alignment: .topLeading) {
                 if channel?.sleeping == true {
                     Label("asleep", systemImage: "moon.fill")

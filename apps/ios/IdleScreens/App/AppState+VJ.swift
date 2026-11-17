@@ -123,8 +123,10 @@ extension AppState {
     /// native renderer happens not to read). If the read fails, the copy the
     /// wall already holds.
     private func rawSpec(of channelId: String) async -> JSONValue? {
-        if let fresh = try? await details.fetchNow(channelId), let spec = fresh.rawSpec { return spec }
-        return channels.first { $0.id == channelId }?.rawSpec
+        guard let fresh = try? await details.fetchNow(channelId) else {
+            return channels.first { $0.id == channelId }?.rawSpec
+        }
+        return fresh.rawSpec
     }
 
     /// Add a channel created elsewhere. The token is verified against

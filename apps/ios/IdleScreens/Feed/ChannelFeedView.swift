@@ -285,7 +285,6 @@ struct ChannelFeedView: View {
         resync(reader)
     }
 
-    /// Scroll the selected page into place after layout has caught up.
     /// The scenes of the pages a swipe reaches next, before it reaches them:
     /// a page waits for its scene before it builds its web view
     /// (`FeedPage.sceneKnown`), so one fetched ahead never waits.
@@ -298,6 +297,7 @@ struct ChannelFeedView: View {
         }
     }
 
+    /// Scroll the selected page into place after layout has caught up.
     private func resync(_ reader: ScrollViewProxy) {
         // Read the selection when the scroll runs, not when it was asked for:
         // a refresh moves it in between, and a scroll queued with the old id

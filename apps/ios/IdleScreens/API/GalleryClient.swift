@@ -112,10 +112,11 @@ actor GalleryClient {
     private func migrateFullListCache() {
         let legacy = fullListCacheFileURL()
         guard let data = try? Data(contentsOf: legacy) else { return }
-        defer { try? FileManager.default.removeItem(at: legacy) }
         guard case .array(let rows)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { return }
         let dir = detailsDirectoryURL()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // The legacy file goes only once every scene it held is on disk (or
+        // was deliberately skipped): a failed write keeps it for next launch.
+        var complete = (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
         for row in rows {
             guard case .object(let fields) = row, case .string(let id)? = fields["id"],
                   let rowData = try? JSONEncoder().encode(row),
@@ -123,8 +124,9 @@ actor GalleryClient {
                   let bytes = reduced.bytes else { continue }
             let file = detailFileURL(id, in: dir)
             if FileManager.default.fileExists(atPath: file.path) { continue }
-            try? bytes.write(to: file, options: .atomic)
+            if (try? bytes.write(to: file, options: .atomic)) == nil { complete = false }
         }
+        if complete { try? FileManager.default.removeItem(at: legacy) }
     }
 
     /// `GET /api/categories` — editorial shelf catalog. Cached to disk like

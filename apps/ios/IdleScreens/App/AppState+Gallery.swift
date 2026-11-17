@@ -19,8 +19,10 @@ extension AppState {
             // Shelves are an enhancement: a categories failure must never cost
             // the wall itself, so it is fetched alongside and allowed to fail.
             async let shelves = try? gallery.fetchCategories()
-            let listed = details.apply(to: hidden.visible(try await gallery.fetchChannels()))
-            let fresh = listed + (await keyringPrivateChannels(missingFrom: listed))
+            let listed = hidden.visible(try await gallery.fetchChannels())
+            // Scenes can land while the keyring rows are read, so they are
+            // applied after that await, not before it.
+            let fresh = details.apply(to: listed + (await keyringPrivateChannels(missingFrom: listed)))
             // A private row added while this load was in flight (a key just
             // saved, `addExistingChannel`) is kept, not overwritten.
             let ids = Set(fresh.map(\.id))
@@ -106,7 +108,14 @@ extension AppState {
     /// batch.
     func mergeDetails(_ batch: [String: ChannelDetail]) {
         guard channels.contains(where: { batch[$0.id] != nil }) else { return }
-        channels = channels.map { row in batch[row.id].map(row.with) ?? row }
+        // An older scene never replaces one the row already shows: a response
+        // that was in flight when the listing advanced is dropped there (a row
+        // with no scene yet still takes it — an old poster beats none).
+        channels = channels.map { row in
+            guard let detail = batch[row.id] else { return row }
+            if row.detailLoaded, let at = row.lastEventAt, let have = detail.lastEventAt, have < at { return row }
+            return row.with(detail)
+        }
     }
 
     /// Take a channel off this device's wall, now and on every reload.

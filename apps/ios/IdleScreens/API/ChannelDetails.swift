@@ -62,7 +62,17 @@ struct ChannelDetail: Equatable, Sendable {
         /// The reduced form of a `/state` (or full listing row) body.
         static func from(_ data: Data) -> Reduced? {
             guard var reduced = try? JSONDecoder().decode(Reduced.self, from: data) else { return nil }
-            if reduced.resolvedSpec != nil { reduced.scene?.spec = nil }
+            guard reduced.resolvedSpec != nil, reduced.scene?.spec != nil else { return reduced }
+            // The decoder falls back to `scene.spec` when `resolvedSpec` does
+            // not read as a spec, so drop it only if the poster comes out the
+            // same without it.
+            var slim = reduced
+            slim.scene?.spec = nil
+            if let want = try? JSONDecoder().decode(PublicChannel.self, from: data),
+               let bytes = slim.bytes, let got = ChannelDetail(reduced: bytes),
+               got == ChannelDetail(row: want) {
+                return slim
+            }
             return reduced
         }
 
@@ -192,6 +202,9 @@ final class ChannelDetails {
     private func landed(_ id: String, _ detail: ChannelDetail?, wasRunning: Bool) {
         if wasRunning { running.remove(id) }
         if let detail {
+            // A read that started earlier can land after a newer one (a mix's
+            // `fetchNow` racing a tile's): never replace newer with older.
+            if let have = known[id]?.lastEventAt, let at = detail.lastEventAt, at < have { pump(); return }
             known[id] = detail
             failedAt[id] = nil
             arrived[id] = detail

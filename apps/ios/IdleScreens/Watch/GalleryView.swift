@@ -736,7 +736,8 @@ struct MixSourcePreview: View {
     let channel: PublicChannel
 
     /// Who can be offered: a schema scene, or one whose scene is not known
-    /// yet. A classic saver has nothing to preview and was never offered.
+    /// yet. A classic saver has nothing to preview: it is dropped
+    /// as soon as its scene loads (a slim row cannot say before then).
     static func offered(_ channel: PublicChannel) -> Bool {
         channel.spec != nil || !channel.detailLoaded
     }
