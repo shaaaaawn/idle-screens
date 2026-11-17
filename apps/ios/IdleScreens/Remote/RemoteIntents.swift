@@ -81,7 +81,9 @@ struct ScreenQuery: EntityQuery {
 /// the screens on to the next one in the quick list.
 struct SendChannelIntent: AppIntent {
     static let title: LocalizedStringResource = "Send a Channel to Your Screens"
-    static let description = IntentDescription("Shows a channel on your paired Apple TV, Mac or Linux screens.")
+    // Intent text must not name Apple products (ITMS-90626 rejected build
+    // 2026111701 for "Apple TV, Mac"); AppIntentsMetadataTests guards it.
+    static let description = IntentDescription("Shows a channel on your paired screens.")
 
     @Parameter(title: "Channel", description: "Leave empty to move on to the next channel.")
     var channel: ChannelEntity?
