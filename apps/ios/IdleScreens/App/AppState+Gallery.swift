@@ -21,8 +21,11 @@ extension AppState {
             async let shelves = try? gallery.fetchCategories()
             let listed = hidden.visible(try await gallery.fetchChannels())
             // Scenes can land while the keyring rows are read, so they are
-            // applied after that await, not before it.
-            let fresh = details.apply(to: listed + (await keyringPrivateChannels(missingFrom: listed)))
+            // applied after that await, not before it. Only to the listed
+            // rows: a private row's read was gated by its key, and a refused
+            // placeholder must not be filled from a scene cached before.
+            let privateRows = await keyringPrivateChannels(missingFrom: listed)
+            let fresh = details.apply(to: listed) + privateRows
             // A private row added while this load was in flight (a key just
             // saved, `addExistingChannel`) is kept, not overwritten.
             let ids = Set(fresh.map(\.id))
