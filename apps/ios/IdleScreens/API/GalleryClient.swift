@@ -27,12 +27,19 @@ actor GalleryClient {
         self.transport = transport
     }
 
-    /// `GET /api/channels` — public channel list. Successful responses are
+    /// `GET /api/channels?slim=1` — the public channel list without its
+    /// scenes: 34 KB on prod (2026-11-16) where the full list was 1.9–2.5 MB,
+    /// most of it the Screen Test reels' sequences. A tile's scene comes from
+    /// `fetchDetail` when it shows (`ChannelDetails`). Successful responses are
     /// cached to disk so a cold launch can render instantly from
     /// `cachedChannels()` while the refresh is in flight.
     func fetchChannels() async throws -> [PublicChannel] {
-        let url = baseURL.appendingPathComponent("api/channels")
-        let (data, http) = try await transport.data(for: URLRequest(url: url))
+        // Not `appendingPathComponent("api/channels?slim=1")`: that encodes
+        // the `?` into the path.
+        var parts = URLComponents(url: baseURL.appendingPathComponent("api/channels"),
+                                  resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "slim", value: "1")]
+        let (data, http) = try await transport.data(for: URLRequest(url: parts.url!))
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
         }
@@ -40,10 +47,84 @@ actor GalleryClient {
             throw GalleryError.invalidResponse
         }
         try? data.write(to: cacheFileURL(), options: .atomic)
-        // Opportunistic cleanup of the pre-`v2` blob this version supersedes —
-        // a missing file or a failed removal doesn't affect the refresh.
+        // The full list an earlier build cached becomes per-channel scenes
+        // once, so the first launch after the update keeps every poster.
+        migrateFullListCache()
+        // Opportunistic cleanup of the pre-`v2` blob — a missing file or a
+        // failed removal doesn't affect the refresh.
         try? FileManager.default.removeItem(at: legacyCacheFileURL())
+        pruneDetails(keeping: Set(channels.map(\.id)))
         return channels
+    }
+
+    /// `GET /c/:id/state`, reduced to the scene half of a row and kept on
+    /// disk by channel. Read with this device's key on a private channel
+    /// (`channelRead`); a private channel's scene is never written to disk.
+    func fetchDetail(channelId: String) async throws -> ChannelDetail {
+        let url = baseURL.appendingPathComponent("c").appendingPathComponent(channelId)
+            .appendingPathComponent("state")
+        let (data, http) = try await channelRead(url, channelId: channelId)
+        guard (200...299).contains(http.statusCode) else {
+            throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let reduced = ChannelDetail.Reduced.from(data), let bytes = reduced.bytes,
+              let detail = ChannelDetail(reduced: bytes) else {
+            throw GalleryError.invalidResponse
+        }
+        if reduced.access != "private" {
+            let dir = detailsDirectoryURL()
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? bytes.write(to: detailFileURL(channelId, in: dir), options: .atomic)
+        }
+        return detail
+    }
+
+    /// Every channel's scene fetched before, by id. Read once, at launch,
+    /// so the cached wall's posters are there on its first frame.
+    nonisolated func cachedDetails() -> [String: ChannelDetail] {
+        let dir = detailsDirectoryURL()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+        else { return [:] }
+        var out: [String: ChannelDetail] = [:]
+        for file in files where file.pathExtension == "json" {
+            guard let id = file.deletingPathExtension().lastPathComponent.removingPercentEncoding,
+                  let bytes = try? Data(contentsOf: file),
+                  let detail = ChannelDetail(reduced: bytes) else { continue }
+            out[id] = detail
+        }
+        return out
+    }
+
+    /// A channel that left the listing takes its scene off disk with it.
+    private func pruneDetails(keeping ids: Set<String>) {
+        let dir = detailsDirectoryURL()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+        else { return }
+        for file in files {
+            let id = file.deletingPathExtension().lastPathComponent.removingPercentEncoding
+            if id.map(ids.contains) != true { try? FileManager.default.removeItem(at: file) }
+        }
+    }
+
+    /// The full listing builds before this one cached (`channels-v2-<host>`):
+    /// split into per-channel scenes, then deleted. A channel already fetched
+    /// keeps its own (newer) file.
+    private func migrateFullListCache() {
+        let legacy = fullListCacheFileURL()
+        guard let data = try? Data(contentsOf: legacy) else { return }
+        defer { try? FileManager.default.removeItem(at: legacy) }
+        guard case .array(let rows)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { return }
+        let dir = detailsDirectoryURL()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for row in rows {
+            guard case .object(let fields) = row, case .string(let id)? = fields["id"],
+                  let rowData = try? JSONEncoder().encode(row),
+                  let reduced = ChannelDetail.Reduced.from(rowData), reduced.access != "private",
+                  let bytes = reduced.bytes else { continue }
+            let file = detailFileURL(id, in: dir)
+            if FileManager.default.fileExists(atPath: file.path) { continue }
+            try? bytes.write(to: file, options: .atomic)
+        }
     }
 
     /// `GET /api/categories` — editorial shelf catalog. Cached to disk like
@@ -77,31 +158,58 @@ actor GalleryClient {
         return dir.appendingPathComponent("categories-\(host).json")
     }
 
-    /// Last successfully fetched channel list, or nil if never fetched.
-    /// The inline scene specs make cached content fully renderable offline.
+    /// Last successfully fetched channel list, or nil if never fetched. The
+    /// slim rows carry no scene; `cachedDetails()` has the ones fetched before,
+    /// which is what keeps a cached wall renderable offline. On the first
+    /// launch after the update this is the full list an earlier build cached
+    /// (scenes inline) until the first slim fetch replaces it.
     nonisolated func cachedChannels() -> [PublicChannel]? {
-        guard let data = try? Data(contentsOf: cacheFileURL()) else { return nil }
+        guard let data = (try? Data(contentsOf: cacheFileURL())) ?? (try? Data(contentsOf: fullListCacheFileURL()))
+        else { return nil }
         return try? JSONDecoder().decode([PublicChannel].self, from: data)
     }
 
     /// Cache file is keyed by host so localhost dev and prod don't mix.
     ///
-    /// The `v2` bump is deliberate: `PublicChannel` gained `isProtected` and
-    /// `access`, and a cache blob written before that ships them as nil —
-    /// which the Remixable filter and the private-channel gate both read as
-    /// "safe to show". Versioning the filename makes a pre-upgrade cache a
-    /// clean miss instead of a silent, wrongly-permissive decode. Bump this
-    /// again if `PublicChannel` ever gains another field whose absence must
-    /// not be read as a default.
+    /// Versioned on purpose: `PublicChannel` gained `isProtected` and
+    /// `access` (the `v2` bump), and a cache blob written before that ships
+    /// them as nil — which the Remixable filter and the private-channel gate
+    /// both read as "safe to show". A new filename makes a pre-upgrade cache
+    /// a clean miss instead of a silent, wrongly-permissive decode. `slim-v1`
+    /// is the slim listing. Bump it if `PublicChannel` ever gains another
+    /// field whose absence must not be read as a default.
     private nonisolated func cacheFileURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("channels-slim-v1-\(host).json")
+    }
+
+    /// The full listing (scenes inline) that builds before the slim one
+    /// cached. Read as a fallback until `migrateFullListCache` removes it.
+    private nonisolated func fullListCacheFileURL() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"
         return dir.appendingPathComponent("channels-v2-\(host).json")
     }
 
-    /// The pre-`v2` cache blob this version supersedes. Existing installs
-    /// wrote this filename before the bump above and it is now a dead file —
-    /// removed opportunistically once a fresh `v2` write succeeds.
+    /// One reduced `/state` per channel (`ChannelDetail.Reduced`), keyed by
+    /// host like the listing.
+    private nonisolated func detailsDirectoryURL() -> URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let host = baseURL.host ?? "unknown"
+        return dir.appendingPathComponent("channel-details-v1-\(host)", isDirectory: true)
+    }
+
+    private nonisolated func detailFileURL(_ channelId: String, in dir: URL) -> URL {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-_")
+        let name = channelId.addingPercentEncoding(withAllowedCharacters: allowed) ?? channelId
+        return dir.appendingPathComponent(name).appendingPathExtension("json")
+    }
+
+    /// The pre-`v2` cache blob. Existing installs wrote this filename before
+    /// the `v2` bump and it is now a dead file — removed opportunistically
+    /// once a fresh write succeeds.
     private func legacyCacheFileURL() -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let host = baseURL.host ?? "unknown"

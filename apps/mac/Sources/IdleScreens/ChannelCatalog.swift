@@ -2,7 +2,7 @@ import Foundation
 
 /// The channels the menu can offer without the user typing an id.
 ///
-/// Fetched from `/api/channels` and cached in defaults so the menu is populated
+/// Fetched from `/api/channels?slim=1` and cached in defaults so the menu is populated
 /// the instant it opens — a stale list beats an empty one, and a refresh lands
 /// in the background. The cache records which server it came from: switching
 /// `serverBaseURL` (prod ↔ a local wrangler) must not leave the other origin's
@@ -42,6 +42,9 @@ enum ChannelCatalog {
     return Array(picked.prefix(limit))
   }
 
+  /// `?slim=1` on the listing route.
+  static let listQuery = [URLQueryItem(name: "slim", value: "1")]
+
   private static let cacheKey = "channelCatalog"
   private static let cacheOriginKey = "channelCatalogOrigin"
   private static let cacheDateKey = "channelCatalogFetchedAt"
@@ -69,7 +72,9 @@ enum ChannelCatalog {
   /// changed*, so the caller can rebuild the menu without churning it on every
   /// open. Failures are silent: the menu keeps whatever it had.
   static func refresh(completion: @escaping () -> Void) {
-    guard let url = ServerEndpoint.url("/api/channels") else { return }
+    // The slim list: every field `Entry` reads, without each channel's scene.
+    // 34 KB on prod (2026-11-16), where the full list was ~2 MB.
+    guard let url = ServerEndpoint.url("/api/channels", query: listQuery) else { return }
     let origin = ServerEndpoint.base.absoluteString
     URLSession.shared.dataTask(with: url) { data, response, _ in
       guard let data,

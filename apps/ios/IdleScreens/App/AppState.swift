@@ -13,6 +13,9 @@ final class AppState {
     // MARK: Gallery (Watch)
 
     var channels: [PublicChannel] = []
+    /// The scenes the slim listing leaves out, fetched per channel as tiles
+    /// show (`wantDetail`) and merged into `channels` as they land.
+    @ObservationIgnored let details: ChannelDetails
     /// Editorial shelves from `/api/categories` — the same catalog the web
     /// home page groups on, so the two surfaces show the same wall.
     var categories: [ChannelCategory] = []
@@ -76,10 +79,18 @@ final class AppState {
         self.credentials = store.load()
         self.pairedScreens = Self.loadPairedScreens()
         // The wall as it was last time, on the very first frame: launch opens
-        // onto a channel, not onto a loading state. A small file; reading it
-        // here beats a frame of nothing.
-        self.channels = hidden.visible(gallery.cachedChannels() ?? [])
+        // onto a channel, not onto a loading state. The slim list is a small
+        // file and the scenes are the ones fetched before (each reduced to
+        // its spec once); reading them here beats a frame of nothing.
+        let details = ChannelDetails(gallery: gallery, cached: gallery.cachedDetails())
+        self.details = details
+        let cached = hidden.visible(gallery.cachedChannels() ?? [])
+        // The first launch after the update reads the full list an earlier
+        // build cached, scenes inline: keep them for the slim rows to come.
+        details.absorb(cached)
+        self.channels = details.apply(to: cached)
         self.categories = gallery.cachedCategories() ?? []
+        details.onArrive = { [weak self] batch in self?.mergeDetails(batch) }
     }
 
     /// Test-friendly initializer — inject clients backed by a mock transport.
@@ -91,6 +102,8 @@ final class AppState {
         self.store = store
         self.credentials = store.load()
         self.pairedScreens = Self.loadPairedScreens()
+        self.details = ChannelDetails(gallery: gallery)
+        details.onArrive = { [weak self] batch in self?.mergeDetails(batch) }
     }
 }
 

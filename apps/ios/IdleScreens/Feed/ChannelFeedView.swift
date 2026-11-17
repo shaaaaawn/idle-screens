@@ -152,6 +152,7 @@ struct ChannelFeedView: View {
                 SwipeTiming.start("channel \(id ?? "-")")
                 checkSettled()
             }
+            .onChange(of: selection, initial: true) { _, id in prefetchScenes(around: id) }
             .onChange(of: settledPage) { _, _ in checkSettled() }
             // A pending check holds the page list from the view it was started
             // in. A refresh, reorder or hide that drops a page must restart it,
@@ -167,9 +168,12 @@ struct ChannelFeedView: View {
                 }
                 select(next, reader: reader, animated: true)
             }
-            .onChange(of: channels) { _, refreshed in
-                if order.isEmpty { order = refreshed.map(\.id) }
-                if selection == nil || !refreshed.contains(where: { $0.id == selection }) {
+            // On the ids, not the rows: a channel's scene lands in its row
+            // after the page is built (the listing is slim), and re-scrolling
+            // to the selection for that would yank a swipe in progress.
+            .onChange(of: channels.map(\.id)) { _, refreshed in
+                if order.isEmpty { order = refreshed }
+                if selection == nil || !refreshed.contains(where: { $0 == selection }) {
                     selection = pages.first?.id
                 }
                 resync(reader)
@@ -282,6 +286,18 @@ struct ChannelFeedView: View {
     }
 
     /// Scroll the selected page into place after layout has caught up.
+    /// The scenes of the pages a swipe reaches next, before it reaches them:
+    /// a page waits for its scene before it builds its web view
+    /// (`FeedPage.sceneKnown`), so one fetched ahead never waits.
+    private func prefetchScenes(around id: String?) {
+        let pages = self.pages
+        guard let id, let here = pages.firstIndex(where: { $0.id == id }) else { return }
+        // Least wanted first: the most recently wanted is fetched first.
+        for i in [here + 2, here - 1, here + 1, here] where pages.indices.contains(i) {
+            app.wantDetail(app.current(pages[i]))
+        }
+    }
+
     private func resync(_ reader: ScrollViewProxy) {
         // Read the selection when the scroll runs, not when it was asked for:
         // a refresh moves it in between, and a scroll queued with the old id

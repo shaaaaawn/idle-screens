@@ -252,6 +252,7 @@ struct FollowingView: View {
         }
         .frame(width: 40, height: 40)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onAppear { if let row = app.channels.first(where: { $0.id == id }) { app.wantDetail(row) } }
     }
 }
 

@@ -106,22 +106,25 @@ extension AppState {
     /// "mix": keep the channel (and its viewers/screens), change what plays.
     func adoptScene(from sourceChannelId: String, into channelId: String) async throws {
         let token = try requireToken(for: channelId)
-        guard let spec = rawSpec(of: sourceChannelId) else {
-            throw VJError.noScene(channelId: sourceChannelId)
-        }
         isWorking = true
         defer { isWorking = false }
+        guard let spec = await rawSpec(of: sourceChannelId) else {
+            throw VJError.noScene(channelId: sourceChannelId)
+        }
         try await mcp.publishSpec(
             channelId: channelId, token: token, spec: spec,
             seed: Self.randomSeed(),
             intent: "user mixed in the scene from \(sourceChannelId) on the \(mcp.identity.surface) app")
     }
 
-    /// The gallery payload carries each channel's spec verbatim — publish
+    /// The source channel's spec verbatim, read from its `/state` at the tap
+    /// — what it shows now, not when its tile was drawn — and published as
     /// THAT, not a re-encoded SpecSubset (which would drop every field the
-    /// native renderer happens not to read).
-    private func rawSpec(of channelId: String) -> JSONValue? {
-        channels.first { $0.id == channelId }?.rawSpec
+    /// native renderer happens not to read). If the read fails, the copy the
+    /// wall already holds.
+    private func rawSpec(of channelId: String) async -> JSONValue? {
+        if let fresh = try? await details.fetchNow(channelId), let spec = fresh.rawSpec { return spec }
+        return channels.first { $0.id == channelId }?.rawSpec
     }
 
     /// Add a channel created elsewhere. The token is verified against

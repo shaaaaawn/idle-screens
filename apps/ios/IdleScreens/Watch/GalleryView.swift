@@ -680,6 +680,10 @@ struct ChannelPreviewTile: View {
         // Artwork, so dark in either appearance: the placeholder sits under
         // white titles, and a light one would swallow them.
         art.environment(\.colorScheme, .dark)
+            // The listing is slim: the scene this draws is fetched as the
+            // tile shows, and lands in `channel` when it does.
+            .onAppear { app.wantDetail(channel) }
+            .onDisappear { app.unwantDetail(channel.id) }
     }
 
     @ViewBuilder
@@ -723,6 +727,34 @@ struct ChannelPreviewTile: View {
 /// The server thumb in the tile's own shape: a card taller than it is wide
 /// asks for the upright picture (`?aspect=portrait`), a wide one for 16:9, so
 /// a tank on the iPhone grid is composed for the card, not cropped from TV art.
+/// A channel offered as the scene to mix in: its scene when known, a quiet
+/// ground until then. Fetches the scene as it shows, like a gallery tile —
+/// the listing is slim, so a picker that only offered channels whose scene
+/// was already known would open empty.
+struct MixSourcePreview: View {
+    @Environment(AppState.self) private var app
+    let channel: PublicChannel
+
+    /// Who can be offered: a schema scene, or one whose scene is not known
+    /// yet. A classic saver has nothing to preview and was never offered.
+    static func offered(_ channel: PublicChannel) -> Bool {
+        channel.spec != nil || !channel.detailLoaded
+    }
+
+    var body: some View {
+        Group {
+            if let spec = channel.spec {
+                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+            } else {
+                LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        }
+        .onAppear { app.wantDetail(channel) }
+        .onDisappear { app.unwantDetail(channel.id) }
+    }
+}
+
 private struct ShapedThumb<Content: View>: View {
     @Environment(AppState.self) private var app
     let channelId: String
