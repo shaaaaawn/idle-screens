@@ -6,7 +6,8 @@ import TVServices
 /// home screen to ambient art in one click.
 ///
 /// Deliberately standalone: a Top Shelf extension has tight memory limits,
-/// so it decodes the two fields it needs and never imports the render stack.
+/// so it reads the slim listing, decodes the five fields it needs and never
+/// imports the render stack.
 final class ContentProvider: TVTopShelfContentProvider {
 
     private struct Channel: Decodable {
@@ -52,9 +53,19 @@ final class ContentProvider: TVTopShelfContentProvider {
         return TVTopShelfSectionedContent(sections: [section])
     }
 
+    /// `GET /api/channels?slim=1`: every field above, without the scene specs
+    /// the full list carries for the app's live previews (~34 KB against
+    /// ~1.9 MB on 2026-11-17). The query goes through URLComponents because
+    /// `appendingPathComponent("api/channels?slim=1")` percent-encodes the `?`
+    /// into the path and asks for a channel list that doesn't exist.
+    private static var channelsURL: URL {
+        var parts = URLComponents(url: baseURL.appendingPathComponent("api/channels"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "slim", value: "1")]
+        return parts.url!
+    }
+
     private func fetchChannels() async throws -> [Channel] {
-        let url = Self.baseURL.appendingPathComponent("api/channels")
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: Self.channelsURL)
         request.timeoutInterval = 10
         let (data, _) = try await URLSession.shared.data(for: request)
         return try JSONDecoder().decode([Channel].self, from: data)
