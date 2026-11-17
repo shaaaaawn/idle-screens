@@ -266,13 +266,19 @@ export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): 
   return true;
 }
 
-/** A transition's shape with its defaults filled in, so `undefined` and `{ type: 'cut' }` compare equal. */
+/**
+ * An `idle-sequence` envelope rather than a plain scene. It tells the two
+ * apart, which is the mix-up a host can make; it does not validate the
+ * segments inside, which `compileSequence` has already done for anything a
+ * host mounted.
+ */
 function isSequenceShaped(v: unknown): v is IdleSequence {
   if (!v || typeof v !== 'object') return false;
   const s = v as { format?: unknown; segments?: unknown };
   return s.format === 'idle-sequence' && Array.isArray(s.segments);
 }
 
+/** A transition's shape with its defaults filled in, so `undefined` and `{ type: 'cut' }` compare equal. */
 function transitionKey(tr: SequenceTransition | undefined): string {
   if (!tr || tr.type === 'cut') return 'cut';
   if (tr.type === 'morph') return `morph:${tr.dur}:${tr.text ?? 'step'}`;
