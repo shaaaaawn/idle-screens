@@ -199,6 +199,9 @@ final class SlimGalleryClientTests: XCTestCase {
         let client = GalleryClient(baseURL: baseURL, transport: transport)
         let rows = try await client.fetchChannels()
         XCTAssertEqual(rows.count, 47)
+        // The slim row has no `access`; a listed channel is public by the
+        // server's contract, and nil would read as "unknown" to a held key.
+        XCTAssertTrue(rows.allSatisfy { $0.access == "public" })
         let url = try XCTUnwrap(transport.requests.first?.url)
         XCTAssertEqual(url.path, "/api/channels")
         XCTAssertEqual(url.query, "slim=1")
@@ -206,6 +209,7 @@ final class SlimGalleryClientTests: XCTestCase {
         // Cached for the next cold launch, slim.
         XCTAssertEqual(client.cachedChannels()?.count, 47)
         XCTAssertEqual(client.cachedChannels()?.contains { $0.detailLoaded }, false)
+        XCTAssertEqual(client.cachedChannels()?.allSatisfy { $0.access == "public" }, true)
     }
 
     func testADetailIsReadFromStateAndKeptOnDiskForTheNextLaunch() async throws {
@@ -435,6 +439,10 @@ final class SlimWallAppStateTests: XCTestCase {
         await app.loadGallery()
         XCTAssertEqual(app.channels.count, 47)
         XCTAssertFalse(app.channels.contains { $0.detailLoaded }, "the list alone carries no scene")
+        // A listed channel you hold a key for is sent by the widget itself,
+        // as it was with the full list: the slim row is public, not unknown.
+        let listed = try XCTUnwrap(app.channels.first { $0.id == "lobby" })
+        XCTAssertFalse(AppState.needsAppToSend(access: listed.access, holdsKey: true))
 
         let swan = try XCTUnwrap(app.channels.first { $0.id == "swan-lake" })
         app.wantDetail(swan)

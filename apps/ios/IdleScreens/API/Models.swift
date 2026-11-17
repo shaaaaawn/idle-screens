@@ -77,6 +77,22 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
                       detailLoaded: detailLoaded)
     }
 
+    /// A row from the public listing, which never carries a private channel
+    /// (private forces unlisted). The full row said so (`access: "public"`);
+    /// the slim row leaves the key out, and nil reads as "unknown" where a
+    /// held key makes it matter (`AppState.needsAppToSend`), so it is filled
+    /// in here.
+    var asListed: PublicChannel {
+        guard access == nil else { return self }
+        return PublicChannel(channelId: channelId, label: label, tags: tags, viewers: viewers,
+                             sleeping: sleeping, spec: spec, rawSpec: rawSpec,
+                             categoryId: categoryId, categorySort: categorySort,
+                             classicSaverId: classicSaverId, classicParams: classicParams,
+                             createdAt: createdAt, lastEventAt: lastEventAt, saverLabel: saverLabel,
+                             lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: "public",
+                             detailLoaded: detailLoaded)
+    }
+
     /// This row with its scene half from `detail` (a channel's `/state`).
     /// Everything else — name, viewers, sleeping, the last steer — stays the
     /// listing's, which is the fresher of the two.

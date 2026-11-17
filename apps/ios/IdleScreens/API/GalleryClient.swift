@@ -43,7 +43,7 @@ actor GalleryClient {
         guard (200...299).contains(http.statusCode) else {
             throw GalleryError.httpError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
         }
-        guard let channels = try? JSONDecoder().decode([PublicChannel].self, from: data) else {
+        guard let channels = try? JSONDecoder().decode([PublicChannel].self, from: data).map(\.asListed) else {
             throw GalleryError.invalidResponse
         }
         try? data.write(to: cacheFileURL(), options: .atomic)
@@ -166,7 +166,7 @@ actor GalleryClient {
     nonisolated func cachedChannels() -> [PublicChannel]? {
         guard let data = (try? Data(contentsOf: cacheFileURL())) ?? (try? Data(contentsOf: fullListCacheFileURL()))
         else { return nil }
-        return try? JSONDecoder().decode([PublicChannel].self, from: data)
+        return (try? JSONDecoder().decode([PublicChannel].self, from: data))?.map(\.asListed)
     }
 
     /// Cache file is keyed by host so localhost dev and prod don't mix.
