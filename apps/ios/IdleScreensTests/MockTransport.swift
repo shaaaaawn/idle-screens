@@ -1,16 +1,16 @@
 import Foundation
+import os
 @testable import IdleScreens
 
 /// Mock HTTPTransport that records requests and serves canned responses.
 final class MockTransport: HTTPTransport, @unchecked Sendable {
     var handler: @Sendable (URLRequest) throws -> (Data, Int) = { _ in (Data(), 200) }
-    private let lock = NSLock()
-    private var recorded: [URLRequest] = []
+    private let recorded = OSAllocatedUnfairLock(initialState: [URLRequest]())
     /// Requests are recorded from concurrent reads, so access is locked.
-    var requests: [URLRequest] { lock.lock(); defer { lock.unlock() }; return recorded }
+    var requests: [URLRequest] { recorded.withLock { $0 } }
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        lock.lock(); recorded.append(request); lock.unlock()
+        recorded.withLock { $0.append(request) }
         let (data, status) = try handler(request)
         let response = HTTPURLResponse(
             url: request.url ?? URL(string: "https://example.com")!,
