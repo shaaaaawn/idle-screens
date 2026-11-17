@@ -68,6 +68,31 @@ enum KeychainHelper {
         return String(data: data, encoding: .utf8)
     }
 
+    // MARK: This device only
+
+    /// Data kept on this device alone (never synced): the widget snapshot is
+    /// this phone's screens and channels, not something an iPad should show.
+    /// Shared with the widget extension through the app's keychain access
+    /// group, which every target lists first.
+    @discardableResult
+    static func saveLocal(key: String, data: Data) -> Bool {
+        let query = baseQuery(key: key, synchronizable: false)
+        SecItemDelete(query as CFDictionary)
+        var attrs = query
+        attrs[kSecValueData as String] = data
+        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func loadLocal(key: String) -> Data? {
+        var query = baseQuery(key: key, synchronizable: false)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
+    }
+
     static func delete(key: String) {
         SecItemDelete(baseQuery(key: key, synchronizable: true) as CFDictionary)
         SecItemDelete(baseQuery(key: key, synchronizable: false) as CFDictionary)

@@ -143,7 +143,7 @@ extension AppState {
     static let legacyPairedTVKey = "paired_tv"
     static let legacyPairTokenKey = "pair.token"
 
-    static func pairTokenKey(for deviceId: String) -> String { "pair.token.\(deviceId)" }
+    static func pairTokenKey(for deviceId: String) -> String { ScreenRemote.tokenKey(for: deviceId) }
 
     // MARK: Persistence
 
@@ -168,6 +168,7 @@ extension AppState {
 
     func savePairedScreens() {
         UserDefaults.standard.set(try? JSONEncoder().encode(pairedScreens), forKey: Self.pairedScreensKey)
+        refreshRemoteSnapshot()
     }
 
     func token(forScreen deviceId: String) -> String? {

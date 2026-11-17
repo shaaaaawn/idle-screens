@@ -13,6 +13,8 @@ struct IdleScreensApp: App {
             ContentView()
                 .environment(appState)
                 .onOpenURL { url in
+                    // A widget tile for a channel only the app can send.
+                    if appState.handleRemoteLink(url) { return }
                     // A handoff link carries BOTH a channel and a token, so it
                     // is checked first — a pair code never has a token, and
                     // silently treating a grant of control as a pairing
@@ -74,6 +76,8 @@ struct IdleScreensApp: App {
         .onChange(of: scenePhase) {
             // Back in front: refresh the wall only if it is stale. Every
             // return used to refetch it, re-rendering the page you came back to.
+            // Leaving the app: the widgets pick up follows and keys changed here.
+            if scenePhase != .active { appState.refreshRemoteSnapshot() }
             if scenePhase == .active,
                appState.galleryLoadedAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
                 Task { await appState.loadGallery() }

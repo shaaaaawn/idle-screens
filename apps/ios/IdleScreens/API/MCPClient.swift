@@ -3,25 +3,6 @@ import Foundation
 import UIKit
 #endif
 
-// MARK: - Transport
-
-/// Pluggable HTTP transport so clients can be mocked in tests.
-protocol HTTPTransport: Sendable {
-    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse)
-}
-
-struct URLSessionTransport: HTTPTransport {
-    let session: URLSession = .shared
-
-    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MCPError.invalidResponse
-        }
-        return (data, http)
-    }
-}
-
 // MARK: - Errors
 
 /// One tool refusal, as the server's error envelope describes it
