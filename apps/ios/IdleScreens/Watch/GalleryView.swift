@@ -92,11 +92,10 @@ struct GalleryView: View {
         // rows each did a third of.
         // Yours first: the channels you hold a key for, before anything you
         // are merely watching.
+        // A slider, not a grid: every channel you own in one swipeable row,
+        // so a long keyring doesn't push the rest of the page down.
         if !yours.isEmpty {
-            SectionGrid(shelf: HomeSection(id: "yours", title: "Your channels",
-                                           subtitle: yours.count == 1 ? "1 channel" : "\(yours.count) channels",
-                                           ownedTags: [], channels: yours),
-                        columns: gridColumns, cardWidth: gridCardWidth)
+            YourChannelsRail(channels: yours, cardWidth: gridCardWidth)
         }
         if !onNow.isEmpty {
             OnNowRail(channels: onNow)
@@ -351,6 +350,48 @@ private struct OnNowRail: View {
                     .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
             }
             .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Your channels
+
+/// The channels this phone holds a key for, as one horizontal row of poster
+/// cards. Cards are a little narrower than the grid's so the next one peeks
+/// in at the edge and the row reads as something to swipe.
+private struct YourChannelsRail: View {
+    @Environment(\.deviceScale) private var scale
+    let channels: [PublicChannel]
+    let cardWidth: CGFloat
+
+    var body: some View {
+        let width = (cardWidth * 0.82).rounded()
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your channels")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                Text(channels.count == 1 ? "1 channel" : "\(channels.count) channels")
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .padding(.horizontal, DeviceScale.margin(scale))
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+
+            // Free scrolling, deliberately no snapping: with
+            // `.scrollTargetBehavior(.viewAligned)` here, a pull to refresh
+            // that started on this row left the whole Channels page stuck
+            // ~75–130 pt down after the refresh (reproduced every time in the
+            // simulator, 2026-11-17; gone with snapping off).
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: GalleryGrid.spacing) {
+                    ForEach(channels) { channel in
+                        ChannelCard(channel: channel, width: width, peers: channels)
+                    }
+                }
+                .padding(.horizontal, DeviceScale.margin(scale))
+            }
+        }
     }
 }
 
