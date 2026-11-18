@@ -1090,6 +1090,6 @@ struct SceneClock: Equatable, Sendable {
     var rate: Double
 
     func time(at date: Date) -> TimeInterval {
-        t + rate * max(0, date.timeIntervalSince(anchor))
+        max(0, t + max(0, rate) * max(0, date.timeIntervalSince(anchor)))
     }
 }

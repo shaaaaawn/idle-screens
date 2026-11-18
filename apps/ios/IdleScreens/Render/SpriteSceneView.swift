@@ -123,6 +123,8 @@ final class CompiledSpriteScene: SKScene {
     /// The playhead's clock (phase 8b): when set, the scene's time is read from it
     /// on the wall clock the server anchors to, not from SpriteKit's own.
     fileprivate var clock: SceneClock?
+    /// The time last drawn while held, so a held frame is drawn once.
+    private var lastHeldT: TimeInterval?
     private var builtForSize: CGSize = .zero
 
     private let transparentGround: Bool
@@ -759,6 +761,9 @@ final class CompiledSpriteScene: SKScene {
             skLog.notice("first tick scene=\(ObjectIdentifier(self).debugDescription)")
         }
         let t = clock?.time(at: Date()) ?? (currentTime - start)
+        // Held by the playhead (rate 0), the frame is already drawn: skip the work.
+        if let clock, clock.rate == 0, t == lastHeldT { return }
+        lastHeldT = (clock?.rate == 0) ? t : nil
         updateGround(t: t)
 
         for k in driven.indices {

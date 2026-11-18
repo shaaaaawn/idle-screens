@@ -100,8 +100,33 @@ final class ChannelClockParityTests: XCTestCase {
         // A clock for another epoch (the scene has changed since) is ignored.
         app.handle(.clock(epoch: epoch - 1, playhead: Playhead(at: Double(nowMs), t: 0, rate: 1, paused: 0), pausedMs: nil))
         XCTAssertEqual(app.sceneClock?.rate, 0.5)
+        // A clock frame whose playhead failed to decode is ignored: the half-speed one stays.
+        app.handle(.clock(epoch: epoch, playhead: nil, pausedMs: nil))
+        XCTAssertEqual(app.sceneClock?.rate, 0.5)
         // Asleep, the steered frame holds.
         app.handle(.sleep(sleptAt: nowMs + 1000))
         XCTAssertEqual(app.sceneClock?.rate, 0)
+        // A plain scene replaces the sequence: the playhead's clocks go with it.
+        app.handle(.scene(spec: try JSONDecoder().decode(JSONValue.self, from: Data(#"{"layers":[]}"#.utf8)),
+                          seed: 1, epoch: nowMs + 2000))
+        XCTAssertNil(app.sceneClock, "a scene after a sequence runs on its own clock")
+        XCTAssertNil(app.bedClock)
+    }
+
+    func testAFrameCannotCrashOrReverseTheClock() throws {
+        // A number past Int's range is nil, not a trap (`Int(Double)` traps).
+        XCTAssertNil(JSONValue.double(1e300).intValue)
+        XCTAssertNil(JSONValue.double(-1e300).intValue)
+        XCTAssertEqual(JSONValue.double(42.9).intValue, 42)
+        XCTAssertNotNil(ChannelWSClient.parse(#"{"type":"clock","epoch":5000,"pausedMs":1e300,"playhead":{"at":1,"t":2,"rate":1,"paused":0}}"#))
+        // The rate stays in the server's 0...4, whatever a frame says.
+        let fast = try XCTUnwrap(Playhead(.object(["at": .double(1), "t": .double(2), "rate": .double(9), "paused": .double(0)])))
+        XCTAssertEqual(fast.rate, 4)
+        let reverse = try XCTUnwrap(Playhead(.object(["at": .double(1), "t": .double(2), "rate": .double(-2), "paused": .double(0)])))
+        XCTAssertEqual(reverse.rate, 0)
+        // Scene time never runs below zero.
+        let anchor = Date()
+        XCTAssertEqual(SceneClock(anchor: anchor, t: 1, rate: -1).time(at: anchor.addingTimeInterval(10)), 1)
+        XCTAssertEqual(SceneClock(anchor: anchor, t: -5, rate: 1).time(at: anchor), 0)
     }
 }

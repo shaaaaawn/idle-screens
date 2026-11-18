@@ -731,6 +731,9 @@ final class TVAppState {
         case .clock(let epoch, let playhead, let pausedMs):
             // The playhead moved (channel time, phase 8b): the same scene, its clock re-anchored.
             guard epoch == nil || epoch == channelEpochMs else { break }
+            // Every clock frame carries a playhead (the server drops one only with a new
+            // epoch, which comes as a scene): one that fails to decode is ignored, not obeyed.
+            guard let playhead else { break }
             channelPause.playhead = playhead
             if let pausedMs { channelPause.pausedMs = pausedMs }
             if timeline == .live { followPlayhead() }
@@ -1225,6 +1228,9 @@ final class TVAppState {
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
         sequenceWipe = nil
+        // The playhead's clocks belong to the sequence: the scene that replaces it runs on its own.
+        sceneClock = nil
+        bedClock = nil
         clearBed()
     }
 

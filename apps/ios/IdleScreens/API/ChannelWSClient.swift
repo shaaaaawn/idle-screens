@@ -119,8 +119,12 @@ struct Playhead: Equatable, Sendable {
               let at = o["at"]?.number, let t = o["t"]?.number,
               let rate = o["rate"]?.number, let paused = o["paused"]?.number,
               [at, t, rate, paused].allSatisfy(\.isFinite) else { return nil }
-        self.init(at: at, t: t, rate: rate, paused: paused)
+        // The server keeps the rate in 0...4 (`clampRate`); never trust a frame to.
+        self.init(at: at, t: t, rate: min(Self.maxRate, max(0, rate)), paused: paused)
     }
+
+    /// idle-server `channel-clock.ts` `MAX_RATE`.
+    static let maxRate = 4.0
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
@@ -221,7 +225,8 @@ extension JSONValue {
     var intValue: Int? {
         switch self {
         case .int(let i): return i
-        case .double(let d): return Int(d)
+        // Bounds-checked: a huge or non-finite number in a frame is nil, never a trap.
+        case .double(let d): return Int(exactly: d.rounded(.towardZero))
         default: return nil
         }
     }
