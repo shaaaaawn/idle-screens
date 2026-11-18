@@ -667,8 +667,8 @@ private struct CardMenu: View {
             Label(following ? "Unfollow" : "Follow", systemImage: following ? "star.slash" : "star")
         }
         if !app.pairedScreens.isEmpty {
-            Button { Task { await app.pushToAllScreens(channelId: channel.id) } } label: {
-                Label("Play on your screens", systemImage: "play.tv")
+            Button { Task { await app.pushToCastScreens(channelId: channel.id) } } label: {
+                Label("Play on \(app.castTargetsName)", systemImage: "play.tv")
             }
         }
         ShareLink(item: app.gallery.viewerURL(for: channel.id)) {

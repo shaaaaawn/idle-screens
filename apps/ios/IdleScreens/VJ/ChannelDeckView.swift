@@ -93,14 +93,13 @@ struct ChannelDeckView: View {
                 if !app.pairedScreens.isEmpty {
                     Button {
                         run {
-                            let delivered = await app.pushToAllScreens(channelId: credential.channelId)
+                            let delivered = await app.pushToCastScreens(channelId: credential.channelId)
                             if delivered == 0 {
                                 actionError = await app.pairPushError ?? "Couldn't reach your screens."
                             }
                         }
                     } label: {
-                        Label(app.pairedScreens.count > 1 ? "Play on all screens" : "Play on your screen",
-                              systemImage: "play.tv")
+                        Label("Play on \(app.castTargetsName)", systemImage: "play.tv")
                     }
                     .disabled(isSending)
                 }

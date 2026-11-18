@@ -543,10 +543,10 @@ private struct TokenRevealSheet: View {
             if let channelId, !app.pairedScreens.isEmpty {
                 Button {
                     Task {
-                        sentToTV = await app.pushToAllScreens(channelId: channelId) > 0
+                        sentToTV = await app.pushToCastScreens(channelId: channelId) > 0
                     }
                 } label: {
-                    Label(sentToTV ? "Playing on your screen" : "Play on your screen",
+                    Label(sentToTV ? "Playing on \(app.castTargetsName)" : "Play on \(app.castTargetsName)",
                           systemImage: sentToTV ? "checkmark.circle.fill" : "play.tv")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
