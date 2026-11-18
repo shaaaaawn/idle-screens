@@ -19,6 +19,8 @@ struct PairedTVView: View {
     /// with those keys: the dialog offers to revoke them.
     @State private var unpairing: (screen: PairedScreen, keys: [AppState.HeldScreenKey])?
     @State private var toast: String?
+    /// The unpair's report of keys it couldn't revoke (they stay valid).
+    @State private var revokeFailure: String?
     @State private var screenKind: ScreenKind = .appleTV
     @State private var showingAddScreen = false
     /// The Add sheet needs its OWN scanner binding. Two `.sheet` modifiers on
@@ -111,6 +113,28 @@ struct PairedTVView: View {
             } else {
                 unpairedContent
             }
+        }
+        // Both branches: unpairing the last screen swaps pairedContent for
+        // unpairedContent while the unpair's own message is still due.
+        .overlay(alignment: .bottom) {
+            if let toast {
+                Text(toast)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.textPrimary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .glassCapsule(shape: Capsule())
+                    .padding(.bottom, 24)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: toast)
+        // A key the unpair couldn't revoke stays valid until someone revokes
+        // it by hand, so it is an alert the person dismisses, not a toast.
+        .alert("A key wasn't revoked", isPresented: Binding(get: { revokeFailure != nil }, set: { if !$0 { revokeFailure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(revokeFailure ?? "")
         }
         .navigationTitle("screens & sync")
         .navigationBarTitleDisplayMode(embedded ? .inline : .automatic)
@@ -275,19 +299,6 @@ struct PairedTVView: View {
             .padding(20)
             .readableColumn()
         }
-        .overlay(alignment: .bottom) {
-            if let toast {
-                Text(toast)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.textPrimary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .glassCapsule(shape: Capsule())
-                    .padding(.bottom, 24)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: toast)
         .sheet(item: $sendingTo) { screen in
             SendToScreenSheet(screen: screen) { channelId, label in
                 Task {
@@ -306,8 +317,11 @@ struct PairedTVView: View {
             Button("Unpair and revoke its keys", role: .destructive) {
                 Task {
                     let failed = await app.unpair(pending.screen, revokeKeys: true)
-                    flash(failed.isEmpty ? "Unpaired; its keys are revoked"
-                                         : app.pairPushError ?? "Unpaired; a key couldn't be revoked")
+                    if failed.isEmpty {
+                        flash("Unpaired; its keys are revoked")
+                    } else {
+                        revokeFailure = app.pairPushError ?? "Unpaired, but a key couldn't be revoked. Revoke it from the channel's key list."
+                    }
                 }
             }
             Button("Unpair, keep its keys") { app.unpair(pending.screen) }
