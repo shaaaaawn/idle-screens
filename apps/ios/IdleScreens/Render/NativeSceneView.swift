@@ -44,6 +44,8 @@ struct NativeSceneView: View {
     /// The scene's seed, which a `field` background hashes (normalised as
     /// the web's SpecInstance does).
     var seed: Int = 0
+    /// The playhead's clock, when the channel steers it; nil = this view's own clock.
+    var clock: SceneClock? = nil
 
     @State private var start = Date()
     @State private var lastTick: Date?
@@ -60,10 +62,11 @@ struct NativeSceneView: View {
     }
 
     private var animated: some View {
+        // Held by the playhead (rate 0), the frame does not change: stop ticking.
         TimelineView(.animation(minimumInterval: tier == .t3 ? nil : 1.0 / 30.0,
-                                paused: paused)) { context in
+                                paused: paused || clock?.rate == 0)) { context in
             Canvas { ctx, size in
-                let t = context.date.timeIntervalSince(start) + clockOffset
+                let t = clock?.time(at: context.date) ?? (context.date.timeIntervalSince(start) + clockOffset)
                 draw(into: &ctx, size: size, t: t)
             }
             .onChange(of: context.date) { _, newDate in
@@ -1075,4 +1078,18 @@ struct NativeSceneView: View {
 
     /// `LIMITS.maxRevealRise`, em.
     static let maxRevealRise = 1.0
+}
+
+/// A renderer's clock when the channel's playhead steers it (idle-server
+/// channel time, phase 8b): the scene's time at `anchor` was `t`, and it runs
+/// at `rate` since (0 holds the frame, 0.5 is slow motion). A renderer given
+/// none keeps its own clock from mount, exactly as before.
+struct SceneClock: Equatable, Sendable {
+    var anchor: Date
+    var t: TimeInterval
+    var rate: Double
+
+    func time(at date: Date) -> TimeInterval {
+        max(0, t + max(0, rate) * max(0, date.timeIntervalSince(anchor)))
+    }
 }

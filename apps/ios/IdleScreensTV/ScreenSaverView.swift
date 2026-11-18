@@ -108,7 +108,8 @@ struct ScreenSaverView: View {
                             onDowngrade: { app.watchdogDidTrigger() },
                             transparentGround: app.hasBed,
                             clockOffset: app.sceneClockOffset,
-                            seed: app.specSeed
+                            seed: app.specSeed,
+                            clock: app.sceneClock
                         )
                     case .t2:
                         // GPU sprite renderer — no watchdog; SpriteKit maintains
@@ -118,7 +119,8 @@ struct ScreenSaverView: View {
                             background: app.specBackground,
                             transparentGround: app.hasBed,
                             clockOffset: app.sceneClockOffset,
-                            seed: app.specSeed
+                            seed: app.specSeed,
+                            clock: app.sceneClock
                         )
                     case .t1:
                         ThumbStreamView(channelId: app.selectedChannelId ?? "")
@@ -262,10 +264,10 @@ struct ScreenSaverView: View {
         if app.effectiveTier == .t3 {
             NativeSceneView(layers: app.bedScene, background: app.bedBackground,
                             ghosting: app.bedGhosting, renderClass: app.renderClass, tier: .t3,
-                            clockOffset: app.bedClockOffset, seed: app.bedSeed)
+                            clockOffset: app.bedClockOffset, seed: app.bedSeed, clock: app.bedClock)
         } else {
             SpriteSceneView(layers: app.bedScene, background: app.bedBackground,
-                            clockOffset: app.bedClockOffset, seed: app.bedSeed)
+                            clockOffset: app.bedClockOffset, seed: app.bedSeed, clock: app.bedClock)
         }
     }
 
