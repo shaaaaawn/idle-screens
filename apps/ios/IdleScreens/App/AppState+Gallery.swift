@@ -6,7 +6,9 @@ extension AppState {
     /// lands (or is silently kept stale on error — cached beats empty).
     func loadGallery() async {
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
-            channels = hidden.visible(cached)
+            let visible = hidden.visible(cached)
+            details.absorb(visible)
+            channels = details.apply(to: visible)
         }
         if categories.isEmpty, let cached = await gallery.cachedCategories() {
             categories = cached
@@ -18,7 +20,12 @@ extension AppState {
             // the wall itself, so it is fetched alongside and allowed to fail.
             async let shelves = try? gallery.fetchCategories()
             let listed = hidden.visible(try await gallery.fetchChannels())
-            let fresh = listed + (await keyringPrivateChannels(missingFrom: listed))
+            // Scenes can land while the keyring rows are read, so they are
+            // applied after that await, not before it. Only to the listed
+            // rows: a private row's read was gated by its key, and a refused
+            // placeholder must not be filled from a scene cached before.
+            let privateRows = await keyringPrivateChannels(missingFrom: listed)
+            let fresh = details.apply(to: listed) + privateRows
             // A private row added while this load was in flight (a key just
             // saved, `addExistingChannel`) is kept, not overwritten.
             let ids = Set(fresh.map(\.id))
@@ -28,9 +35,11 @@ extension AppState {
                     && keyring.contains(row.id)
             }
             channels = fresh + added
+            details.refresh(channels)
             if let fresh = await shelves { categories = fresh }
             galleryError = nil
             galleryLoadedAt = Date()
+            refreshRemoteSnapshot()
         } catch {
             // The listing failing costs the listing, not the keyring: each
             // private channel is its own read.
@@ -62,7 +71,11 @@ extension AppState {
         // Hidden, or taken off the keyring, while the reads were in flight:
         // still out.
         let keyring = Set(credentials.map(\.channelId))
-        return rows.filter { keyring.contains($0.id) && !hidden.isHidden($0.id) }.sorted { $0.id < $1.id }
+        let kept = rows.filter { keyring.contains($0.id) && !hidden.isHidden($0.id) }.sorted { $0.id < $1.id }
+        // Each is a whole `/state`, scene included: a tile showing one has
+        // nothing to fetch.
+        details.absorb(kept)
+        return kept
     }
 
     /// Add the keyring's private channels to a wall painted from the cache.
@@ -74,6 +87,32 @@ extension AppState {
         let extra = await keyringPrivateChannels(missingFrom: channels)
         let known = Set(channels.map(\.id))
         channels += extra.filter { !known.contains($0.id) }
+    }
+
+    /// A tile showing `channel` is on screen: fetch its scene if the one
+    /// known is missing or older than the listing's row. Cheap to call on
+    /// every appearance.
+    func wantDetail(_ channel: PublicChannel) {
+        details.want(channel)
+    }
+
+    /// The tile left the screen before its scene was asked for.
+    func unwantDetail(_ channelId: String) {
+        details.unwant(channelId)
+    }
+
+    /// `channel` as the wall has it now. A view handed a copy (a shelf's feed
+    /// holds the list it was opened with) reads the scene through this, so a
+    /// scene that landed after it was built still reaches it.
+    func current(_ channel: PublicChannel) -> PublicChannel {
+        channels.first { $0.id == channel.id } ?? channel
+    }
+
+    /// Scenes that landed, into the rows that show them — one write for the
+    /// batch.
+    func mergeDetails(_ batch: [String: ChannelDetail]) {
+        guard channels.contains(where: { batch[$0.id] != nil }) else { return }
+        channels = ChannelDetails.merge(batch, into: channels)
     }
 
     /// Take a channel off this device's wall, now and on every reload.

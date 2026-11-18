@@ -92,14 +92,15 @@ struct GalleryView: View {
         // rows each did a third of.
         // Yours first: the channels you hold a key for, before anything you
         // are merely watching.
+        // A slider, not a grid: every channel you own in one swipeable row,
+        // so a long keyring doesn't push the rest of the page down.
         if !yours.isEmpty {
-            SectionGrid(shelf: HomeSection(id: "yours", title: "Your channels",
-                                           subtitle: yours.count == 1 ? "1 channel" : "\(yours.count) channels",
-                                           ownedTags: [], channels: yours),
-                        columns: gridColumns, cardWidth: gridCardWidth)
+            YourChannelsRail(channels: yours, cardWidth: gridCardWidth)
         }
         if !onNow.isEmpty {
-            OnNowRail(channels: onNow)
+            // Untitled at the top of the page; under "Your channels" it needs
+            // a name, or it reads as more of yours.
+            OnNowRail(channels: onNow, title: yours.isEmpty ? nil : "On now")
         }
         // Four of each category at once, two by two: you can compare them
         // without dragging a strip sideways, and "All N" opens the rest.
@@ -130,13 +131,13 @@ struct GalleryView: View {
         return owned.sorted { ($0.lastEventAt ?? 0) > ($1.lastEventAt ?? 0) }
     }
 
+    /// Never repeats a channel already in "Your channels" just above it (see
+    /// `ChannelFeed.onNow`).
     private var onNow: [PublicChannel] {
-        var seen = Set<String>()
-        let lead = [heroChannel].compactMap { $0 }
-        let latest = ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil }
-        return (lead + following + watchedNow + latest)
-            .filter { $0.sleeping != true && seen.insert($0.id).inserted }
-            .prefix(14).map { $0 }
+        ChannelFeed.onNow(lead: [heroChannel].compactMap { $0 }, following: following,
+                          watchedNow: watchedNow,
+                          latest: ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil },
+                          owned: Set(yours.map(\.id)))
     }
 
 
@@ -282,6 +283,7 @@ struct GalleryView: View {
 private struct OnNowRail: View {
     @Environment(\.deviceScale) private var scale
     let channels: [PublicChannel]
+    var title: String? = nil
     @Environment(AppState.self) private var app
     /// Kept after the reason dialog closes: the "hide it too?" alert that
     /// follows still needs to know which channel it is about.
@@ -290,18 +292,27 @@ private struct OnNowRail: View {
 
     var body: some View {
         let target = reportTarget
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 10) {
-                ForEach(channels) { channel in
-                    NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true,
-                                          onRefresh: { await app.loadGallery() })) {
-                        tile(channel)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu { CardMenu(channel: channel) { reportTarget = channel; showReport = true } }
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            if let title {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                    .padding(.horizontal, DeviceScale.margin(scale))
+                    .accessibilityAddTraits(.isHeader)
             }
-            .padding(.horizontal, DeviceScale.margin(scale))
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(channels) { channel in
+                        NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true,
+                                              onRefresh: { await app.loadGallery() })) {
+                            tile(channel)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { CardMenu(channel: channel) { reportTarget = channel; showReport = true } }
+                    }
+                }
+                .padding(.horizontal, DeviceScale.margin(scale))
+            }
         }
         .reportChannelFlow(isPresented: $showReport,
                            channelLabel: target?.displayLabel ?? "",
@@ -351,6 +362,48 @@ private struct OnNowRail: View {
                     .strokeBorder(Color.appBorder.opacity(0.5), lineWidth: 1)
             }
             .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Your channels
+
+/// The channels this phone holds a key for, as one horizontal row of poster
+/// cards. Cards are a little narrower than the grid's so the next one peeks
+/// in at the edge and the row reads as something to swipe.
+private struct YourChannelsRail: View {
+    @Environment(\.deviceScale) private var scale
+    let channels: [PublicChannel]
+    let cardWidth: CGFloat
+
+    var body: some View {
+        let width = (cardWidth * 0.82).rounded()
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your channels")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                Text(channels.count == 1 ? "1 channel" : "\(channels.count) channels")
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .padding(.horizontal, DeviceScale.margin(scale))
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+
+            // Free scrolling, deliberately no snapping: with
+            // `.scrollTargetBehavior(.viewAligned)` here, a pull to refresh
+            // that started on this row left the whole Channels page stuck
+            // ~75–130 pt down after the refresh (reproduced every time in the
+            // simulator, 2026-11-17; gone with snapping off).
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: GalleryGrid.spacing) {
+                    ForEach(channels) { channel in
+                        ChannelCard(channel: channel, width: width, peers: channels)
+                    }
+                }
+                .padding(.horizontal, DeviceScale.margin(scale))
+            }
+        }
     }
 }
 
@@ -626,8 +679,8 @@ private struct CardMenu: View {
             Label(following ? "Unfollow" : "Follow", systemImage: following ? "star.slash" : "star")
         }
         if !app.pairedScreens.isEmpty {
-            Button { Task { await app.pushToAllScreens(channelId: channel.id) } } label: {
-                Label("Play on your screens", systemImage: "play.tv")
+            Button { Task { await app.pushToCastScreens(channelId: channel.id) } } label: {
+                Label("Play on \(app.castTargetsName)", systemImage: "play.tv")
             }
         }
         ShareLink(item: app.gallery.viewerURL(for: channel.id)) {
@@ -680,6 +733,10 @@ struct ChannelPreviewTile: View {
         // Artwork, so dark in either appearance: the placeholder sits under
         // white titles, and a light one would swallow them.
         art.environment(\.colorScheme, .dark)
+            // The listing is slim: the scene this draws is fetched as the
+            // tile shows, and lands in `channel` when it does.
+            .onAppear { app.wantDetail(channel) }
+            .onDisappear { app.unwantDetail(channel.id) }
     }
 
     @ViewBuilder
@@ -723,6 +780,38 @@ struct ChannelPreviewTile: View {
 /// The server thumb in the tile's own shape: a card taller than it is wide
 /// asks for the upright picture (`?aspect=portrait`), a wide one for 16:9, so
 /// a tank on the iPhone grid is composed for the card, not cropped from TV art.
+/// A channel offered as the scene to mix in: its scene when known, a quiet
+/// ground until then. Fetches the scene as it shows, like a gallery tile —
+/// the listing is slim, so a picker that only offered channels whose scene
+/// was already known would open empty.
+struct MixSourcePreview: View {
+    @Environment(AppState.self) private var app
+    let channel: PublicChannel
+
+    /// Who can be offered: a schema scene, or a listed channel whose scene
+    /// is not known yet. A classic saver has nothing to preview: it is
+    /// dropped as soon as its scene loads (a slim row cannot say before then).
+    /// A private row on the wall was read whole with its key, so one with no
+    /// scene known is a refused key's placeholder — its scene never loads, and
+    /// it would sit in the picker as a dead tile.
+    static func offered(_ channel: PublicChannel) -> Bool {
+        channel.spec != nil || (!channel.detailLoaded && channel.access != "private")
+    }
+
+    var body: some View {
+        Group {
+            if let spec = channel.spec {
+                ScenePreviewView(spec: spec, fallbackSeed: channel.id)
+            } else {
+                LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        }
+        .onAppear { app.wantDetail(channel) }
+        .onDisappear { app.unwantDetail(channel.id) }
+    }
+}
+
 private struct ShapedThumb<Content: View>: View {
     @Environment(AppState.self) private var app
     let channelId: String

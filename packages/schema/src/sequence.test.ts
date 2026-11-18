@@ -2561,6 +2561,18 @@ describe('SequenceInstance — hotSwapSequence', () => {
       expect(sequenceSwapCompatible(base(), edit(2, { transition: { type: 'morph', dur: 1000, text: 'step' } }))).toBe(true);
     });
 
+    it('refuses a plain scene, or anything else that is not a sequence, instead of throwing', () => {
+      // A host that feature-detects the instance but not the incoming spec
+      // (idle-server's viewer, stepping back from a sequence to a scene at the
+      // same seed) used to crash here on `next.segments.length`.
+      const notSeq = (v: unknown) => v as IdleSequence;
+      expect(sequenceSwapCompatible(base(), notSeq(SCENE))).toBe(false);
+      expect(sequenceSwapCompatible(notSeq(SCENE), base())).toBe(false);
+      expect(sequenceSwapCompatible(base(), notSeq({ ...base(), format: undefined }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), notSeq({ ...base(), segments: undefined }))).toBe(false);
+      expect(sequenceSwapCompatible(base(), notSeq(null))).toBe(false);
+    });
+
     it('structure, timing, seed, loop, sync and the bed are pinned', () => {
       expect(sequenceSwapCompatible(base(), { ...base(), segments: base().segments.slice(0, 2) })).toBe(false);
       expect(sequenceSwapCompatible(base(), edit(1, { scene: { ...slide('Beta'), layers: [...slide('Beta').layers, SCENE.layers[0]!] } }))).toBe(false);

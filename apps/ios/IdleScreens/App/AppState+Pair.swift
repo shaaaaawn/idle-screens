@@ -144,7 +144,7 @@ extension AppState {
     static let legacyPairedTVKey = "paired_tv"
     static let legacyPairTokenKey = "pair.token"
 
-    static func pairTokenKey(for deviceId: String) -> String { "pair.token.\(deviceId)" }
+    static func pairTokenKey(for deviceId: String) -> String { ScreenRemote.tokenKey(for: deviceId) }
 
     // MARK: Persistence
 
@@ -169,6 +169,26 @@ extension AppState {
 
     func savePairedScreens() {
         UserDefaults.standard.set(try? JSONEncoder().encode(pairedScreens), forKey: Self.pairedScreensKey)
+        pruneRememberedCastScreens()
+        refreshRemoteSnapshot()
+    }
+
+    /// Drop unpaired screens from the remembered send set, so re-pairing one
+    /// later doesn't tick it again by surprise. Removing the key when nothing
+    /// is left gives the "every screen" default, same as `castTargets`.
+    private func pruneRememberedCastScreens() {
+        let remembered = UserDefaults.standard.stringArray(forKey: Self.castScreensKey) ?? []
+        let kept = Self.prunedCastScreens(remembered: remembered, paired: pairedScreens.map(\.deviceId))
+        guard kept != remembered else { return }
+        if kept.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.castScreensKey)
+        } else {
+            UserDefaults.standard.set(kept, forKey: Self.castScreensKey)
+        }
+    }
+
+    nonisolated static func prunedCastScreens(remembered: [String], paired: [String]) -> [String] {
+        remembered.filter(paired.contains)
     }
 
     func token(forScreen deviceId: String) -> String? {
@@ -554,11 +574,56 @@ extension AppState {
         return hasPublicKey ? .send(held) : .needsRepair
     }
 
-    /// Push to every paired screen — the "put this everywhere" action.
-    /// Returns how many screens accepted it.
+    /// Push to every paired screen. Only the `-push` debug launch argument
+    /// uses it now: what you tap sends to `castTargets`, the screens you chose
+    /// last. Returns how many screens accepted it.
     @discardableResult
     func pushToAllScreens(channelId: String) async -> Int {
         await push(channelId: channelId, sceneId: nil, to: pairedScreens.map(\.deviceId))
+    }
+
+    // MARK: The screens you send to
+
+    static let castScreensKey = "cast.lastScreens"
+
+    /// The screens a send goes to unless you pick others: the ones you chose
+    /// in "Send to screens" last time, minus any since unpaired. Every paired
+    /// screen only when none of those is left — the first send, or after the
+    /// remembered ones were all removed. Before this, every sheet opened with
+    /// every screen ticked and every one-tap "Play" button lit them all.
+    var castTargets: [String] {
+        Self.castTargets(remembered: UserDefaults.standard.stringArray(forKey: Self.castScreensKey) ?? [],
+                         paired: pairedScreens.map(\.deviceId))
+    }
+
+    nonisolated static func castTargets(remembered: [String], paired: [String]) -> [String] {
+        RemoteSnapshot.targets(remembered: remembered, paired: paired)
+    }
+
+    /// Remember a choice of screens for the next send. An empty choice is not
+    /// a choice (the sheet won't send to nobody), so it's ignored.
+    func rememberCastScreens(_ deviceIds: [String]) {
+        guard !deviceIds.isEmpty else { return }
+        UserDefaults.standard.set(deviceIds, forKey: Self.castScreensKey)
+        // The widgets and Control Center send to the same screens.
+        refreshRemoteSnapshot()
+    }
+
+    /// What a one-tap "Play on …" button calls the screens it will light:
+    /// the screen's name for one ("Apple TV"), "all screens" when it's every
+    /// paired screen, else "2 screens".
+    var castTargetsName: String {
+        let targets = castTargets
+        if targets.count == 1, let screen = pairedScreens.first(where: { $0.deviceId == targets[0] }) {
+            return pairedScreens.count == 1 ? "your screen" : screen.kind.label
+        }
+        return targets.count == pairedScreens.count ? "all screens" : "\(targets.count) screens"
+    }
+
+    /// The one-tap send: to the screens you chose last (`castTargets`).
+    @discardableResult
+    func pushToCastScreens(channelId: String) async -> Int {
+        await push(channelId: channelId, sceneId: nil, to: castTargets)
     }
 
     /// Push to the chosen screens at once. Returns how many accepted.

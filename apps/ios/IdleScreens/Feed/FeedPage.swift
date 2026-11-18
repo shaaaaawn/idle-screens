@@ -87,11 +87,24 @@ struct FeedPage: View {
     /// key), so closing the sheet without a new one does not rebuild a page
     /// that would only be refused again.
     @State private var keyAtGate: Int?
+    /// `sceneKnown` stopped waiting for a scene that has not come.
+    @State private var sceneWaitOver = false
 
     static let liveKey = "live"
     private static func key(_ stop: ChannelFeed.Stop) -> String { "s\(stop.sceneId)" }
 
     private var channelId: String { channel.id }
+
+    /// The channel as the wall has it now. The listing is slim and a scene
+    /// lands after the page is built — and a shelf's feed holds the copy it
+    /// was opened with — so every read of the scene goes through this.
+    private var live: PublicChannel { app.current(channel) }
+
+    /// The live web view is not built until the scene is known (or a beat has
+    /// passed): whether it is a 3D tank decides how it is built (`poolable`,
+    /// the tank loader). A channel seen before already knows; one never seen
+    /// waits for its `/state`, ~0.2 s.
+    private var sceneKnown: Bool { live.detailLoaded || sceneWaitOver }
     /// Steering needs an editor or owner key. A viewer key opens a private
     /// channel and must not light up controls that would then be refused.
     private var canSteer: Bool { app.canEdit(channelId) }
@@ -280,12 +293,19 @@ struct FeedPage: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showOverview) {
-            ChannelOverviewSheet(channel: channel, stops: stops, liveEvent: liveEvent,
+            ChannelOverviewSheet(channel: live, stops: stops, liveEvent: liveEvent,
                                  liveLabel: session.sceneLabel ?? channel.saverLabel,
                                  current: moment,
                                  onRefresh: { await loadHistory() }) { key in
                 withAnimation(.easeInOut(duration: 0.4)) { moment = key }
             }
+        }
+        .task(id: channelId) {
+            // Its scene, if the one known is missing or older than the row.
+            app.wantDetail(live)
+            guard !live.detailLoaded else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { sceneWaitOver = true }
         }
         .onAppear {
             if launchPicture == nil {
@@ -305,7 +325,11 @@ struct FeedPage: View {
         .onChange(of: isActive) { _, nowActive in
             if nowActive { activate() } else { deactivate() }
         }
-        .onDisappear { deactivate() }
+        .onDisappear {
+            // A page swiped past before its read started drops out of the queue.
+            app.unwantDetail(channelId)
+            deactivate()
+        }
     }
 
     // MARK: Lifecycle
@@ -313,7 +337,7 @@ struct FeedPage: View {
     private func activate() {
         replayCaptionEntrance()
         let store = app.store, id = channelId
-        session.start(channelId: channelId, seedSpec: channel.spec, source: .host,
+        session.start(channelId: channelId, seedSpec: live.spec, source: .host,
                       key: { store.token(for: id) })
         guard stops.isEmpty else { return }
         Task { await loadHistory() }
@@ -364,7 +388,7 @@ struct FeedPage: View {
            let bg = app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.spec?.background {
             return bg.headColor
         }
-        return session.backdrop ?? channel.spec?.background?.headColor
+        return session.backdrop ?? live.spec?.background?.headColor
     }
 
     private var footHex: String? {
@@ -372,14 +396,14 @@ struct FeedPage: View {
            let bg = app.scenes.scene(channelId: channelId, sceneId: stop.sceneId)?.spec?.background {
             return bg.footColor
         }
-        return session.backdropBottom ?? channel.spec?.background?.footColor ?? topHex
+        return session.backdropBottom ?? live.spec?.background?.footColor ?? topHex
     }
 
     private var topScheme: ColorScheme { Color.isLight(hex: topHex) ? .light : .dark }
     private var footScheme: ColorScheme { Color.isLight(hex: footHex) ? .light : .dark }
 
     private var backdropHex: String {
-        session.backdrop ?? channel.spec?.background?.primaryColor ?? "0A0A0F"
+        session.backdrop ?? live.spec?.background?.primaryColor ?? "0A0A0F"
     }
 
     /// Paint the pages either side BEFORE the swipe reaches them. A page that
@@ -436,7 +460,7 @@ struct FeedPage: View {
             if !isTank && !(isActive && !historyHoldsTheEngine && liveStillGone) {
                 liveHoldingStill
             }
-            if isActive && !historyHoldsTheEngine {
+            if isActive && !historyHoldsTheEngine && sceneKnown {
                 // The web engine draws; nothing in it can be touched.
                 WebSceneView(
                     channelId: channelId,
@@ -525,7 +549,7 @@ struct FeedPage: View {
             // How the web engine last drew it, this visit — closer than any
             // native still, and what a sequence has instead of black.
             Image(uiImage: picture).resizable().scaledToFill().ignoresSafeArea()
-        } else if let spec = channel.spec, NativeSupport.isFaithful(channel.rawSpec) {
+        } else if let spec = live.spec, NativeSupport.isFaithful(live.rawSpec) {
             ScenePreviewView(spec: spec, fallbackSeed: channelId, live: false)
                 .ignoresSafeArea()
         } else {
@@ -537,8 +561,8 @@ struct FeedPage: View {
     /// the bare `{"id":"metaquarium"}`; the look lives in the scene's track
     /// (`classicParams`). A spec that inlines `params` still wins.
     private var tankParams: [String: String] {
-        var out = channel.classicParams
-        if case .object(let root)? = channel.rawSpec,
+        var out = live.classicParams
+        if case .object(let root)? = live.rawSpec,
            case .object(let params)? = root["params"] {
             for (key, value) in params {
                 if let string = value.string { out[key] = string }
@@ -549,7 +573,7 @@ struct FeedPage: View {
 
     /// The channel is playing a scene only the web engine can draw in full.
     private var isTank: Bool {
-        channel.classicSaverId.map(RecordedScene.webOnlySavers.contains) ?? false
+        live.classicSaverId.map(RecordedScene.webOnlySavers.contains) ?? false
     }
 
     /// Connecting, unreachable, sleeping — all native. A web error card inside
@@ -918,7 +942,7 @@ struct FeedPage: View {
     @ViewBuilder
     private func sceneFacts(for event: ChannelEvent?) -> some View {
         let recorded = currentStop.flatMap { app.scenes.scene(channelId: channelId, sceneId: $0.sceneId) }
-        let spec = recorded?.spec ?? (isLive ? channel.spec : nil)
+        let spec = recorded?.spec ?? (isLive ? live.spec : nil)
         // Resolved once and typed explicitly: left inline, this literal takes
         // the type checker past its time limit on CI's slower runners.
         let original: ChannelEvent? = event.flatMap { SceneCredit.original(for: $0, in: history) }

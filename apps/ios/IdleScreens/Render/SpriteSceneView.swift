@@ -25,6 +25,8 @@ struct SpriteSceneView: UIViewRepresentable {
     var clockOffset: TimeInterval = 0
     /// The scene's seed, which a `field` background hashes.
     var seed: Int = 0
+    /// The playhead's clock, when the channel steers it; nil = the scene's own clock.
+    var clock: SceneClock? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -74,6 +76,8 @@ struct SpriteSceneView: UIViewRepresentable {
         // this view only exists while the saver should be animating.
         view.isPaused = false
         view.scene?.isPaused = false
+        // The playhead moves the clock of the scene on screen, whether or not its data changed.
+        (view.scene as? CompiledSpriteScene)?.clock = clock
         if let scene = view.scene as? CompiledSpriteScene {
             if scene.matches(layers, background) { return }  // same scene data — keep animating
             // A recompile of the same channel (keyframes, a steer, a morph
@@ -83,6 +87,7 @@ struct SpriteSceneView: UIViewRepresentable {
         let scene = CompiledSpriteScene(layers: layers, background: background,
                                         transparentGround: transparentGround, seed: seed)
         scene.clockOffset = clockOffset
+        scene.clock = clock
         // A recompile of the same channel keeps the clock: restarting it would
         // snap every entity back to where it was at t=0.
         scene.startTime = (view.scene as? CompiledSpriteScene)?.startTime
@@ -115,6 +120,11 @@ final class CompiledSpriteScene: SKScene {
     private var textures: [String: SKTexture] = [:]
     fileprivate(set) var startTime: TimeInterval?
     fileprivate var clockOffset: TimeInterval = 0
+    /// The playhead's clock (phase 8b): when set, the scene's time is read from it
+    /// on the wall clock the server anchors to, not from SpriteKit's own.
+    fileprivate var clock: SceneClock?
+    /// The time last drawn while held, so a held frame is drawn once.
+    private var lastHeldT: TimeInterval?
     private var builtForSize: CGSize = .zero
 
     private let transparentGround: Bool
@@ -153,6 +163,7 @@ final class CompiledSpriteScene: SKScene {
         for d in driven { d.node.removeFromParent() }
         driven.removeAll(keepingCapacity: true)
         buildNodes()
+        lastHeldT = nil  // new nodes stand at their defaults until the next update places them
         return true
     }
 
@@ -176,6 +187,7 @@ final class CompiledSpriteScene: SKScene {
         groundNode = nil
         if !transparentGround { buildBackground() }
         buildNodes()
+        lastHeldT = nil  // new nodes stand at their defaults until the next update places them
         skLog.notice("built \(self.driven.count) nodes at \(self.size.width)x\(self.size.height) scene=\(ObjectIdentifier(self).debugDescription)")
     }
 
@@ -750,8 +762,14 @@ final class CompiledSpriteScene: SKScene {
             startTime = start
             skLog.notice("first tick scene=\(ObjectIdentifier(self).debugDescription)")
         }
-        let t = currentTime - start
+        let t = clock?.time(at: Date()) ?? (currentTime - start)
+        // The ground first, always: it is a no-op once drawn, and keeps asking
+        // for a field raster still sampling in the background.
         updateGround(t: t)
+        // Held by the playhead (rate 0), the nodes already stand where `t` puts
+        // them: skip the per-node work. A rebuild clears `lastHeldT`.
+        if let clock, clock.rate == 0, t == lastHeldT { return }
+        lastHeldT = (clock?.rate == 0) ? t : nil
 
         for k in driven.indices {
             let d = driven[k]

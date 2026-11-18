@@ -234,6 +234,10 @@ export function sequenceWantsFinish(seq: IdleSequence): boolean {
  * adds the timing terms.
  */
 export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): boolean {
+  // The types say both are sequences, but a host's spec arrives as data: a
+  // plain scene handed in here (idle-server's viewer did, stepping back from a
+  // sequence to a scene at the same seed) is a remount, not a throw.
+  if (!isSequenceShaped(prev) || !isSequenceShaped(next)) return false;
   if (prev.segments.length !== next.segments.length) return false;
   // seq.seed only reaches rendering directly through a sequence-level finish
   // (frameFinishSeed); otherwise segmentRenderSeed/bedRenderSeed below already
@@ -260,6 +264,18 @@ export function sequenceSwapCompatible(prev: IdleSequence, next: IdleSequence): 
     if (segmentRenderSeed(prev, i) !== segmentRenderSeed(next, i)) return false;
   }
   return true;
+}
+
+/**
+ * An `idle-sequence` envelope rather than a plain scene. It tells the two
+ * apart, which is the mix-up a host can make; it does not validate the
+ * segments inside, which `compileSequence` has already done for anything a
+ * host mounted.
+ */
+function isSequenceShaped(v: unknown): v is IdleSequence {
+  if (!v || typeof v !== 'object') return false;
+  const s = v as { format?: unknown; segments?: unknown };
+  return s.format === 'idle-sequence' && Array.isArray(s.segments);
 }
 
 /** A transition's shape with its defaults filled in, so `undefined` and `{ type: 'cut' }` compare equal. */

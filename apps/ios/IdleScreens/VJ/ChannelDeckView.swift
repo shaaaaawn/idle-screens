@@ -26,8 +26,8 @@ struct ChannelDeckView: View {
             // channel, keeping its id, viewers and paired screens.
             Section("mix in a scene") {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(app.channels.filter { $0.spec != nil && $0.id != credential.channelId }) { channel in
+                    LazyHStack(spacing: 10) {
+                        ForEach(app.channels.filter { MixSourcePreview.offered($0) && $0.id != credential.channelId }) { channel in
                             Button {
                                 run {
                                     try await app.adoptScene(
@@ -36,7 +36,7 @@ struct ChannelDeckView: View {
                                 }
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                    MixSourcePreview(channel: channel)
                                         .frame(width: 124, height: 70)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
                                         .overlay {
@@ -51,7 +51,9 @@ struct ChannelDeckView: View {
                                 }
                             }
                             .buttonStyle(.plain)
-                            .disabled(isSending)
+                            // Not until its scene is known: a classic saver was
+                            // never offered, and this can't tell yet.
+                            .disabled(isSending || !channel.detailLoaded)
                         }
                     }
                     .padding(.vertical, 4)
@@ -91,14 +93,13 @@ struct ChannelDeckView: View {
                 if !app.pairedScreens.isEmpty {
                     Button {
                         run {
-                            let delivered = await app.pushToAllScreens(channelId: credential.channelId)
+                            let delivered = await app.pushToCastScreens(channelId: credential.channelId)
                             if delivered == 0 {
                                 actionError = await app.pairPushError ?? "Couldn't reach your screens."
                             }
                         }
                     } label: {
-                        Label(app.pairedScreens.count > 1 ? "Play on all screens" : "Play on your screen",
-                              systemImage: "play.tv")
+                        Label("Play on \(app.castTargetsName)", systemImage: "play.tv")
                     }
                     .disabled(isSending)
                 }

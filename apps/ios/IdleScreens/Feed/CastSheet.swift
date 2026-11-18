@@ -125,7 +125,10 @@ struct CastSheet: View {
         .onAppear {
             what = sceneId == nil ? .live : .scene
             keepInSync = app.isSyncing
-            chosen = Set(app.isSyncing ? app.syncTargets : screens.map(\.deviceId))
+            // The screens you chose last time, not all of them: most sends go
+            // to the same TV, and re-unticking the others every time was the
+            // complaint (`AppState.castTargets`).
+            chosen = Set(app.isSyncing ? app.syncTargets : app.castTargets)
         }
     }
 
@@ -157,7 +160,10 @@ struct CastSheet: View {
     }
 
     private func send() {
-        let ids = Array(chosen)
+        // Keep the sheet's order (the paired list's), so the remembered
+        // choice reads back the same way.
+        let ids = screens.map(\.deviceId).filter(chosen.contains)
+        app.rememberCastScreens(ids)
         if keepInSync {
             // One send now to everyone chosen (Linux included), then the
             // followers track the feed from here.

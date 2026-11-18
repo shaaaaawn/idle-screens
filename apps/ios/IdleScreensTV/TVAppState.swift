@@ -30,6 +30,9 @@ final class TVAppState {
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
+    /// The scenes the slim listing leaves out, fetched per channel as posters
+    /// show (`wantDetail`) and merged into `channels` as they land.
+    @ObservationIgnored let details: ChannelDetails
     /// Channels this viewer hid (Report → Hide), filtered out of `channels`
     /// at every load. Injected so tests never touch the real list.
     let hidden: HiddenChannels
@@ -164,6 +167,9 @@ final class TVAppState {
         self.hidden = hidden
         self.keys = keys
         self.gallery = gallery
+        // The scenes fetched before, so the cached wall's posters are there
+        // on its first frame (each a channel's `/state` reduced to its spec).
+        self.details = ChannelDetails(gallery: gallery, cached: gallery.cachedDetails())
         self.mcp = mcp
         self.ws = ws
         self.pair = pair
@@ -181,6 +187,7 @@ final class TVAppState {
             UserDefaults.standard.set(minted, forKey: Self.deviceIdKey)
             self.deviceId = minted
         }
+        details.onArrive = { [weak self] batch in self?.mergeDetails(batch) }
     }
 
     convenience init() {
@@ -203,17 +210,23 @@ final class TVAppState {
     func loadGallery() async {
         isLoadingGallery = true
         defer { isLoadingGallery = false }
-        // Cache-first: paint the last known channel list instantly (inline
-        // specs make it fully renderable), then let the network refresh
-        // replace it. A cold boot shows real content in one frame.
+        // Cache-first: paint the last known channel list instantly (with the
+        // scenes fetched before, it is renderable offline), then let the
+        // network refresh replace it. A cold boot shows real content in one
+        // frame.
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
-            channels = hidden.visible(cached)
+            let visible = hidden.visible(cached)
+            // The first launch after the update reads the full list an
+            // earlier build cached, scenes inline: keep them.
+            details.absorb(visible)
+            channels = details.apply(to: visible)
         }
         if categories.isEmpty, let cached = await gallery.cachedCategories() {
             categories = cached
         }
         do {
-            channels = hidden.visible(try await gallery.fetchChannels())
+            channels = details.apply(to: hidden.visible(try await gallery.fetchChannels()))
+            details.refresh(channels)
             galleryError = nil
         } catch {
             // Keep showing cached content on refresh failure; only surface
@@ -267,6 +280,8 @@ final class TVAppState {
         selectedChannelId = channelId
         privateGate = nil
         sleeping = false
+        sleepBeganAt = nil
+        channelPause = ChannelPause()
         viewers = nil
         overlayText = nil
         currentSpecJSON = nil
@@ -295,6 +310,34 @@ final class TVAppState {
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
+        // The channels Up and Down land on next, so their first frame is
+        // instant too: the listing is slim, and a scene is fetched per channel.
+        for step in [-1, 1] {
+            if let id = Self.surfTarget(from: channelId, step: step, in: channels),
+               let row = channels.first(where: { $0.id == id }) {
+                details.want(row)
+            }
+        }
+    }
+
+    // MARK: Scenes for the slim listing
+
+    /// A poster showing `channel` is on screen: fetch its scene if the one
+    /// known is missing or older than the listing's row.
+    func wantDetail(_ channel: PublicChannel) {
+        details.want(channel)
+    }
+
+    /// The poster left the screen before its scene was asked for.
+    func unwantDetail(_ channelId: String) {
+        details.unwant(channelId)
+    }
+
+    /// Scenes that landed, into the rows that show them — one write for the
+    /// batch, since every write re-evaluates the whole wall.
+    func mergeDetails(_ batch: [String: ChannelDetail]) {
+        guard channels.contains(where: { batch[$0.id] != nil }) else { return }
+        channels = ChannelDetails.merge(batch, into: channels)
     }
 
     // MARK: Channel surfing
@@ -637,6 +680,9 @@ final class TVAppState {
         switch event {
         case .snapshot(let snapshot):
             sleeping = snapshot.sleeping ?? sleeping
+            // A screen that opens asleep mounts at the frozen clock: all its
+            // time until the wake is time asleep.
+            if !sleeping { sleepBeganAt = nil } else if sleepBeganAt == nil { sleepBeganAt = Date() }
             viewers = snapshot.viewers
             // The scene object carries the control track; resolvedSpec is the
             // bare saver ref. Harvest steered params BEFORE routing so a
@@ -647,6 +693,10 @@ final class TVAppState {
             liveClassicParams = Self.trackParams(from: snapshot.scene)
             if timeline == .live { classicParams = liveClassicParams }
             if let epoch = snapshot.epoch { channelEpochMs = epoch }
+            // The snapshot states the whole pause; absent fields = none.
+            channelPause = ChannelPause(pausedMs: snapshot.pausedMs,
+                                        sleptAt: (snapshot.sleeping ?? false) ? snapshot.sleptAt : nil,
+                                        playhead: snapshot.playhead)
             if let now = snapshot.now { serverSkew = Double(now) / 1000 - Date().timeIntervalSince1970 }
             // The web seeds a scene with the spec's seed, else the scene's, else 42.
             let sceneSeed: Int? = { if case .object(let o)? = snapshot.scene { return o["seed"]?.intValue } else { return nil } }()
@@ -661,7 +711,7 @@ final class TVAppState {
                 if timeline == .live, activeSequence != nil { applySegmentCue(track) }
             }
         case .reseed(let seed, let epoch):
-            if let epoch { channelEpochMs = epoch }
+            rebaseEpoch(epoch)
             // The saved live scene takes the new seed too, so returning from
             // history (or a reseed received while browsing it) keeps it.
             if let live = liveScene { liveScene = (live.json, seed ?? 42) }
@@ -672,8 +722,31 @@ final class TVAppState {
             steeredJSON = nil; steerShown = nil; currentSpecJSON = nil
             sceneRevision &+= 1
             render(shown, fallbackSeed: seed ?? 42)
-        case .scene(let spec, let seed, let transition, let epoch, let track):
-            if let epoch { channelEpochMs = epoch }
+        case .scene(let spec, let seed, let transition, let epoch, let track, let sceneSleeping, let sleptAt,
+                    let scenePausedMs, let scenePlayhead):
+            // A publish wakes the channel without a `wake` message; only a
+            // reseed's scene keeps it asleep, and says so (as the web reads it).
+            sleeping = sceneSleeping ?? false
+            if !sleeping {
+                sleepBeganAt = nil
+                // Awake, the clock no longer stands at a sleep, even when
+                // this scene carries no epoch to rebase on.
+                channelPause.sleptAt = nil
+            } else {
+                if sleepBeganAt == nil { sleepBeganAt = Date() }
+                // Asleep with no new epoch: the clock stands at the server's
+                // sleep start, as on `.sleep` (a new epoch is handled below).
+                if epoch == nil, channelPause.sleptAt == nil { channelPause.sleptAt = sleptAt }
+            }
+            if let epoch {
+                // A new scene starts its clock with no pause behind it.
+                channelEpochMs = epoch
+                channelPause = ChannelPause(sleptAt: sleeping ? (sleptAt ?? epoch) : nil)
+            }
+            // The program handed back after a scene window comes on its own clock
+            // (channel time, phase 3b): its time asleep and its playhead ride along.
+            if let scenePausedMs { channelPause.pausedMs = scenePausedMs }
+            if let scenePlayhead { channelPause.playhead = scenePlayhead }
             if let spec {
                 // A publish replaces the scene, and the steers made on the old one.
                 if timeline == .live {
@@ -696,10 +769,44 @@ final class TVAppState {
                 applySpec(mount, fallbackSeed: seed ?? 42)
                 if timeline == .live, track != nil { applyLiveTrack(track) }
             }
-        case .sleep:
+        case .clock(let epoch, let playhead, let pausedMs):
+            // The playhead moved (channel time, phase 8b): the same scene, its clock re-anchored.
+            guard epoch == nil || epoch == channelEpochMs else { break }
+            // Every clock frame carries a playhead (the server drops one only with a new
+            // epoch, which comes as a scene): one that fails to decode is ignored, not obeyed.
+            guard let playhead else { break }
+            channelPause.playhead = playhead
+            if let pausedMs { channelPause.pausedMs = pausedMs }
+            if timeline == .live { followPlayhead() }
+        case .sleep(let sleptAt):
+            // The shared clock stands at the sleep's start until the wake.
+            if !sleeping { sleepBeganAt = Date() }
             sleeping = true
-        case .wake:
+            if channelPause.sleptAt == nil { channelPause.sleptAt = sleptAt }
+            // Steered by a playhead, the frame holds through the sleep on the shared clock.
+            if channelPause.playhead != nil, timeline == .live { followPlayhead() }
+        case .wake(let pausedMs):
+            let wasSleeping = sleeping
+            let prevPausedMs = max(0, channelPause.pausedMs ?? 0)
             sleeping = false
+            channelPause.sleptAt = nil
+            if let pausedMs { channelPause.pausedMs = pausedMs }
+            // An open screen resumes where it paused, as the web's do — but
+            // only against a server that keeps the pause (`pausedMs` present
+            // and valid). An older one counts the sleep, so a TV opened after
+            // the wake would count it too: the open one must not hold back.
+            if channelPause.playhead != nil {
+                // Steered, the shared clock already left the sleep out: just follow it.
+                if timeline == .live { followPlayhead() }
+            } else if wasSleeping, let began = sleepBeganAt, let pausedMs, pausedMs >= 0 {
+                let local = Date().timeIntervalSince(began)
+                // The server's own pause delta is the authority; the device's
+                // receipt-to-receipt time only caps it when this sequence
+                // mounted partway through the sleep (or rebased under it).
+                let serverDelta = Double(pausedMs - prevPausedMs) / 1000
+                resumeSequence(after: serverDelta > 0 ? min(local, serverDelta) : local)
+            }
+            sleepBeganAt = nil
         case .overlay(let text, let ttl):
             overlayText = text
             let ttlMs = ttl ?? 4000
@@ -732,7 +839,9 @@ final class TVAppState {
             exitChannel()
         case .delta:
             break
-        case .track(let track, _):
+        case .track(let track, let epoch):
+            // A reseed sends this with the new epoch before its `seed`.
+            rebaseEpoch(epoch)
             applyLiveTrack(track)
         case .switchChannel(let channelId, let sceneId, let sealedKey):
             // Any switch push proves a paired phone is steering this TV —
@@ -987,6 +1096,54 @@ final class TVAppState {
     private(set) var channelEpochMs: Int?
     /// Server clock − device clock (s), from the snapshot's `now`.
     private var serverSkew: TimeInterval = 0
+    /// Time asleep, kept beside the epoch (idle-server channel-clock.ts): a
+    /// sleep keeps its place on the shared clock instead of moving the epoch.
+    private(set) var channelPause = ChannelPause()
+    /// When this screen saw the channel fall asleep (device clock).
+    private var sleepBeganAt: Date?
+
+    /// The pause fields beside the channel epoch. Missing = no pause.
+    struct ChannelPause: Equatable, Sendable {
+        /// Total time asleep since the epoch (ms).
+        var pausedMs: Int?
+        /// While asleep: when the sleep began (server ms).
+        var sleptAt: Int?
+        /// The playhead (channel time, phase 8b). A new epoch drops it, as `rebased` does.
+        var playhead: Playhead?
+
+        init(pausedMs: Int? = nil, sleptAt: Int? = nil, playhead: Playhead? = nil) {
+            self.pausedMs = pausedMs
+            self.sleptAt = sleptAt
+            self.playhead = playhead
+        }
+
+        /// The pause after a message that may carry a new epoch (the site's
+        /// `rebaseEpoch`): a new epoch has no pause behind it, and asleep its
+        /// clock stands frozen at the epoch itself. Same or no epoch: unchanged.
+        func rebased(from prevEpoch: Int?, to epoch: Int?, sleeping: Bool) -> ChannelPause {
+            guard let epoch, epoch != prevEpoch else { return self }
+            return ChannelPause(sleptAt: sleeping ? epoch : nil)
+        }
+    }
+
+    private func rebaseEpoch(_ epoch: Int?) {
+        channelPause = channelPause.rebased(from: channelEpochMs, to: epoch, sleeping: sleeping)
+        if let epoch { channelEpochMs = epoch }
+    }
+
+    /// After a wake, an epoch-synced sequence that played on behind the
+    /// sleeping card picks up where it paused: its clock moves on by the time
+    /// asleep, which is off the channel's shared clock.
+    private func resumeSequence(after asleep: TimeInterval) {
+        guard asleep > 0, let seq = activeSequence, seq.sync == "epoch",
+              let epoch = sequenceEpoch else { return }
+        let resumed = epoch.addingTimeInterval(asleep)
+        sequenceEpoch = resumed
+        if hasBed { bedMountedAt = bedMountedAt.addingTimeInterval(asleep) }
+        sequenceTask?.cancel()
+        applySegment(seq, at: Date().timeIntervalSince(resumed), fallbackSeed: sequenceFallbackSeed, advancing: false)
+        scheduleSequenceAdvance(fallbackSeed: sequenceFallbackSeed)
+    }
     /// True while the active sequence has a bed (even one with no layers —
     /// its ground alone still replaces every segment's background).
     private(set) var hasBed = false
@@ -1001,8 +1158,12 @@ final class TVAppState {
         sequenceFallbackSeed = fallbackSeed
         // `sync: 'epoch'` starts the clock where the channel's shared clock
         // is (every screen in the room on one segment); `mount` at 0.
-        let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date().addingTimeInterval(serverSkew))
+        let baseT = Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: Date().addingTimeInterval(serverSkew),
+                                       pause: channelPause)
         sequenceEpoch = Date().addingTimeInterval(-baseT)
+        // Mounted asleep, at the frozen clock: only the time from here to the
+        // wake is time this sequence must give back.
+        if sleeping { sleepBeganAt = Date() }
         if let bed = seq.bed {
             bedSeed = seq.bedSeed(fallback: fallbackSeed ?? 42)
             bedClockOffset = baseT
@@ -1014,22 +1175,87 @@ final class TVAppState {
         } else {
             clearBed()
         }
+        sceneClock = nil
+        bedClock = nil
         applySegment(seq, at: baseT, fallbackSeed: fallbackSeed, advancing: false)
         scheduleSequenceAdvance(fallbackSeed: fallbackSeed)
+        // Opened on a paused or slowed clock: follow it from the first frame.
+        if channelPause.playhead != nil { followPlayhead() }
     }
 
     /// Seconds already elapsed on a `sync: 'epoch'` sequence's shared clock
-    /// (the site's `sequenceBaseT`): `now − epoch`, wrapped into the lap when
-    /// it loops, never negative; 0 for `mount` or without an epoch.
-    nonisolated static func sequenceBaseT(_ seq: SequenceSubset, epochMs: Int?, now: Date) -> TimeInterval {
+    /// (the site's `sequenceBaseT`): `now − epoch − pausedMs`, standing at
+    /// `sleptAt` while asleep, wrapped into the lap when it loops, never
+    /// negative; 0 for `mount` or without an epoch. Time asleep is not on the
+    /// shared clock (idle-server channel-clock.ts), so a screen opened during
+    /// or after a sleep lands where the open ones paused and resumed.
+    nonisolated static func sequenceBaseT(_ seq: SequenceSubset, epochMs: Int?, now: Date,
+                                          pause: ChannelPause = ChannelPause()) -> TimeInterval {
         guard seq.sync == "epoch", let epochMs else { return 0 }
-        var elapsed = max(0, now.timeIntervalSince1970 - Double(epochMs) / 1000)
+        var elapsed = channelElapsedMs(epochMs: epochMs, nowMs: now.timeIntervalSince1970 * 1000, pause: pause) / 1000
         if seq.loop == true {
             var lap: TimeInterval = 0
             for seg in seq.segments { guard let d = seg.duration else { break }; lap += d / 1000 }
             if lap > 0 { elapsed = elapsed.truncatingRemainder(dividingBy: lap) }
         }
         return elapsed
+    }
+
+    /// Ms of channel time since the epoch, as the server reckons it (idle-server
+    /// `src/channel-clock.ts` `channelElapsed`, ported exactly and held to its
+    /// output by `ChannelClockParityTests`): wall time minus the time asleep,
+    /// standing at `sleptAt` while asleep, and from the playhead's anchor at its
+    /// rate once one is set.
+    nonisolated static func channelElapsedMs(epochMs: Int, nowMs: Double, pause: ChannelPause) -> Double {
+        let done = Double(max(0, pause.pausedMs ?? 0))
+        let current = pause.sleptAt.map { max(0, nowMs - Double($0)) } ?? 0
+        let pausedTotal = done + current
+        guard let p = pause.playhead else { return max(0, nowMs - Double(epochMs) - pausedTotal) }
+        let awake = max(0, nowMs - p.at - (pausedTotal - p.paused))
+        return max(0, p.t + p.rate * awake)
+    }
+
+    // MARK: The playhead (channel time, phase 8b)
+
+    /// The playhead's clocks for the renderers on screen: nil = their own
+    /// clocks from mount (no playhead, exactly as before).
+    private(set) var sceneClock: SceneClock?
+    private(set) var bedClock: SceneClock?
+
+    /// The rate the shared clock runs at now: 0 asleep or paused.
+    var playheadRate: Double { sleeping ? 0 : (channelPause.playhead?.rate ?? 1) }
+
+    /// Where the active sequence is on the shared clock now.
+    private func sharedSequenceT(_ seq: SequenceSubset, at now: Date = Date()) -> TimeInterval {
+        Self.sequenceBaseT(seq, epochMs: channelEpochMs, now: now.addingTimeInterval(serverSkew), pause: channelPause)
+    }
+
+    /// Put the sequence where the shared clock says and run its renderers at
+    /// the clock's rate: a seek lands on its segment, a pause holds the frame
+    /// (no segment advance, no keyframe or morph drivers), a rate scales the
+    /// renderers and the segment timing. Called when the playhead moves, and
+    /// on sleep and wake while one is set.
+    private func followPlayhead() {
+        guard channelPause.playhead != nil, let seq = activeSequence, seq.sync == "epoch",
+              channelEpochMs != nil else {
+            sceneClock = nil
+            bedClock = nil
+            return
+        }
+        let now = Date()
+        let T = sharedSequenceT(seq, at: now)
+        let rate = playheadRate
+        sequenceTask?.cancel()
+        applySegment(seq, at: T, fallbackSeed: sequenceFallbackSeed, advancing: false)
+        sceneClock = SceneClock(anchor: now, t: sceneClockOffset, rate: rate)
+        bedClock = hasBed ? SceneClock(anchor: now, t: T, rate: rate) : nil
+        if rate > 0 {
+            scheduleSequenceAdvance(fallbackSeed: sequenceFallbackSeed)
+        } else {
+            // Held: nothing on the segment's own wall-clock drivers moves either.
+            stopKeyframes()
+            stopMorph()
+        }
     }
 
     private func stopSequence() {
@@ -1043,6 +1269,9 @@ final class TVAppState {
         sequenceSegmentKey = nil
         sequenceCrossfade = 0
         sequenceWipe = nil
+        // The playhead's clocks belong to the sequence: the scene that replaces it runs on its own.
+        sceneClock = nil
+        bedClock = nil
         clearBed()
     }
 
@@ -1197,14 +1426,22 @@ final class TVAppState {
             while !Task.isCancelled {
                 guard let self, let seq = self.activeSequence,
                       let epoch = self.sequenceEpoch else { return }
-                let now = Date().timeIntervalSince(epoch)
+                // With a playhead the sequence runs on the shared clock, at its rate (phase 8b).
+                let steered = self.channelPause.playhead != nil && seq.sync == "epoch"
+                let rate = steered ? self.playheadRate : 1
+                guard rate > 0 else { return }
+                let now = steered ? self.sharedSequenceT(seq) : Date().timeIntervalSince(epoch)
                 // A durationless tail with no loop holds forever; an
                 // `advance: 'input'` hold waits for the clicker.
                 guard let wait = seq.nextBoundary(after: now, releasedBelow: self.sequenceReleasedBelow) else { return }
-                try? await Task.sleep(for: .seconds(wait + 0.02))
+                try? await Task.sleep(for: .seconds(wait / rate + 0.02))
                 guard !Task.isCancelled else { return }
-                self.applySegment(seq, at: Date().timeIntervalSince(epoch),
+                self.applySegment(seq, at: steered ? self.sharedSequenceT(seq) : Date().timeIntervalSince(epoch),
                                   fallbackSeed: fallbackSeed)
+                if steered {
+                    // The new segment's renderer starts at its own local time, on the shared clock's rate.
+                    self.sceneClock = SceneClock(anchor: Date(), t: self.sceneClockOffset, rate: rate)
+                }
             }
         }
     }
@@ -1253,6 +1490,7 @@ final class TVAppState {
         let start = seq.segmentStart(index)
         sequenceReleasedBelow = index
         sequenceEpoch = Date().addingTimeInterval(-start)
+        if sleeping { sleepBeganAt = Date() }
         sequenceTask?.cancel()
         // A cue back to 0 under loop is the jump a lap wrap makes: it plays
         // the last segment's transition, as the wrap does.

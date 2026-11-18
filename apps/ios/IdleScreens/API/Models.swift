@@ -2,7 +2,13 @@ import Foundation
 
 // MARK: - Gallery models (decoded leniently — all fields optional)
 
-/// A public channel from `GET /api/channels`.
+/// A public channel from `GET /api/channels?slim=1`, with its scene filled in
+/// from the channel's own `/state` once a tile needs it (`ChannelDetails`).
+///
+/// The same decoder reads three shapes: a slim listing row (no scene), a
+/// channel's `/state` (and the reduced copy of it kept on disk), and the full
+/// listing row that builds before this one fetched. `detailLoaded` says which
+/// half is known.
 struct PublicChannel: Decodable, Identifiable, Equatable {
     let channelId: String?
     let label: String?
@@ -50,6 +56,11 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
     /// every field the renderer doesn't read. Mixing a scene onto another
     /// channel must send the ORIGINAL — keep it verbatim.
     let rawSpec: JSONValue?
+    /// Whether the scene half (`spec`, `rawSpec`, `classicSaverId`,
+    /// `classicParams`) is known. The slim listing carries none of it, so a
+    /// row from it is false until its `/state` lands; nil `spec` then means
+    /// "not fetched yet", not "nothing to draw".
+    let detailLoaded: Bool
 
     var id: String { channelId ?? label ?? "unknown" }
     var displayLabel: String { label ?? channelId ?? "unknown" }
@@ -62,7 +73,37 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
                       categoryId: categoryId, categorySort: categorySort,
                       classicSaverId: classicSaverId, classicParams: classicParams,
                       createdAt: createdAt, lastEventAt: lastEventAt, saverLabel: saverLabel,
-                      lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: access)
+                      lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: access,
+                      detailLoaded: detailLoaded)
+    }
+
+    /// A row from the public listing, which never carries a private channel
+    /// (private forces unlisted). The full row said so (`access: "public"`);
+    /// the slim row leaves the key out, and nil reads as "unknown" where a
+    /// held key makes it matter (`AppState.needsAppToSend`), so it is filled
+    /// in here.
+    var asListed: PublicChannel {
+        guard access == nil else { return self }
+        return PublicChannel(channelId: channelId, label: label, tags: tags, viewers: viewers,
+                             sleeping: sleeping, spec: spec, rawSpec: rawSpec,
+                             categoryId: categoryId, categorySort: categorySort,
+                             classicSaverId: classicSaverId, classicParams: classicParams,
+                             createdAt: createdAt, lastEventAt: lastEventAt, saverLabel: saverLabel,
+                             lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: "public",
+                             detailLoaded: detailLoaded)
+    }
+
+    /// This row with its scene half from `detail` (a channel's `/state`).
+    /// Everything else — name, viewers, sleeping, the last steer — stays the
+    /// listing's, which is the fresher of the two.
+    func with(_ detail: ChannelDetail) -> PublicChannel {
+        PublicChannel(channelId: channelId, label: label, tags: tags, viewers: viewers,
+                      sleeping: sleeping, spec: detail.spec, rawSpec: detail.rawSpec,
+                      categoryId: categoryId, categorySort: categorySort,
+                      classicSaverId: detail.classicSaverId, classicParams: detail.classicParams,
+                      createdAt: createdAt, lastEventAt: lastEventAt, saverLabel: saverLabel,
+                      lastSteer: lastSteer, isProtected: isProtected, remixOf: remixOf, access: access,
+                      detailLoaded: true)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -112,7 +153,8 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
          createdAt: Int? = nil, lastEventAt: Int? = nil,
          saverLabel: String? = nil,
          lastSteer: Steer? = nil, isProtected: Bool? = nil,
-         remixOf: String? = nil, access: String? = nil) {
+         remixOf: String? = nil, access: String? = nil,
+         detailLoaded: Bool? = nil) {
         self.channelId = channelId
         self.label = label
         self.tags = tags
@@ -131,6 +173,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         self.isProtected = isProtected
         self.remixOf = remixOf
         self.access = access
+        // Built by hand (tests, a refused private key): a row that names a
+        // scene has one; one that names none is taken as not fetched.
+        self.detailLoaded = detailLoaded ?? (spec != nil || rawSpec != nil || classicSaverId != nil)
     }
 
     init(from decoder: Decoder) throws {
@@ -189,6 +234,9 @@ struct PublicChannel: Decodable, Identifiable, Equatable {
         // what the viewer is showing.
         rawSpec = (try? c.decodeIfPresent(JSONValue.self, forKey: .resolvedSpec))
             ?? scene?.rawSpec
+        // A slim row has neither key; `/state` and the full row always carry
+        // both (null on a channel with nothing published, which is known).
+        detailLoaded = c.contains(.scene) || c.contains(.resolvedSpec)
     }
 }
 

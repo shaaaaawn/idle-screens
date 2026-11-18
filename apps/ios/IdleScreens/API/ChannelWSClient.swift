@@ -88,6 +88,43 @@ struct ChannelSnapshot: Equatable, Sendable {
     var presets: [String]?
     /// The server's wall clock when it sent this (ms): the device's skew.
     var now: Int?
+    /// Total time asleep since `epoch` (ms): off the channel's shared clock.
+    var pausedMs: Int? = nil
+    /// While asleep, when the sleep began (server ms): the shared clock
+    /// stands there until the wake.
+    var sleptAt: Int? = nil
+    /// The playhead (channel time, phase 8b): the shared clock's anchor,
+    /// rate and position beside the epoch. Absent = rate 1 from the epoch.
+    var playhead: Playhead? = nil
+}
+
+/// The channel's playhead as the server sends it (idle-server
+/// `src/channel-clock.ts` `Playhead`): where the shared clock stood at `at`
+/// (`t`, ms of channel time), how fast it runs since (0 = paused, keeping its
+/// place), and the time asleep by `at` (ms). `clock.rate` and
+/// `clock.position` re-anchor it; nothing moves the epoch.
+struct Playhead: Equatable, Sendable {
+    var at: Double
+    var t: Double
+    var rate: Double
+    var paused: Double
+
+    init(at: Double, t: Double, rate: Double, paused: Double) {
+        self.at = at; self.t = t; self.rate = rate; self.paused = paused
+    }
+
+    /// Four finite numbers, or nothing: a malformed playhead is ignored, not trusted.
+    init?(_ value: JSONValue?) {
+        guard case .object(let o)? = value,
+              let at = o["at"]?.number, let t = o["t"]?.number,
+              let rate = o["rate"]?.number, let paused = o["paused"]?.number,
+              [at, t, rate, paused].allSatisfy(\.isFinite) else { return nil }
+        // The server keeps the rate in 0...4 (`clampRate`); never trust a frame to.
+        self.init(at: at, t: t, rate: min(Self.maxRate, max(0, rate)), paused: paused)
+    }
+
+    /// idle-server `channel-clock.ts` `MAX_RATE`.
+    static let maxRate = 4.0
 }
 
 enum ChannelWSEvent: Equatable, Sendable {
@@ -97,16 +134,28 @@ enum ChannelWSEvent: Equatable, Sendable {
     /// `epoch`: the publish time (ms) the channel's shared clock counts from.
     /// `track`: the scene's control track — kept steers, and a publish's own
     /// glide (`fromPublish`) that each screen plays from its mount.
+    /// `sleeping` / `sleptAt`: only a reseed sends a scene without waking the
+    /// channel, and says so (with where its clock stands). Absent = awake:
+    /// a publish shows the scene.
+    /// `pausedMs` / `playhead`: the program handed back after a scene window
+    /// (channel time, phase 3b) comes on its own clock, sleep left out.
     case scene(spec: JSONValue?, seed: Int?, transition: SceneTransition? = nil, epoch: Int? = nil,
-               track: JSONValue? = nil)
+               track: JSONValue? = nil, sleeping: Bool? = nil, sleptAt: Int? = nil,
+               pausedMs: Int? = nil, playhead: Playhead? = nil)
+    /// The playhead moved (channel time, phase 8b): the same scene, its
+    /// shared clock re-anchored. A clock for another epoch is stale.
+    case clock(epoch: Int?, playhead: Playhead?, pausedMs: Int?)
     /// The channel was reseeded (setSeed): a new arrangement and a new epoch.
     case reseed(seed: Int?, epoch: Int?)
     case delta(JSONValue?)
     /// The channel's whole control track after a steer (the server sends it
     /// beside every `delta` so screens converge instead of stacking steers).
     case track(JSONValue?, epoch: Int?)
-    case sleep
-    case wake
+    /// The channel paused. `sleptAt`: when (server ms), where its shared
+    /// clock stands until the wake.
+    case sleep(sleptAt: Int? = nil)
+    /// The channel resumed. `pausedMs`: the total time asleep since the epoch.
+    case wake(pausedMs: Int? = nil)
     case overlay(text: String?, ttl: Int?)
     /// A paired phone retargeted this screen: a channel, and optionally one
     /// stored scene of it to pin (`sceneId`; nil = live).
@@ -176,7 +225,8 @@ extension JSONValue {
     var intValue: Int? {
         switch self {
         case .int(let i): return i
-        case .double(let d): return Int(d)
+        // Bounds-checked: a huge or non-finite number in a frame is nil, never a trap.
+        case .double(let d): return Int(exactly: d.rounded(.towardZero))
         default: return nil
         }
     }
@@ -380,6 +430,12 @@ actor ChannelWSClient {
 
     // MARK: - Parsing
 
+    /// A server timestamp (ms); a negative one is broken and reads as missing.
+    static func serverTime(_ value: JSONValue?) -> Int? {
+        guard let ms = value?.intValue, ms >= 0 else { return nil }
+        return ms
+    }
+
     static func parse(_ text: String) -> ChannelWSEvent? {
         guard let data = text.data(using: .utf8),
               let message = try? JSONDecoder().decode([String: JSONValue].self, from: data),
@@ -396,7 +452,10 @@ actor ChannelWSClient {
                 sleeping: message["sleeping"]?.boolValue,
                 viewers: message["viewers"]?.intValue,
                 presets: message["presets"]?.stringArray,
-                now: message["now"]?.intValue
+                now: message["now"]?.intValue,
+                pausedMs: message["pausedMs"]?.intValue,
+                sleptAt: Self.serverTime(message["sleptAt"]),
+                playhead: Playhead(message["playhead"])
             ))
         case "scene":
             return .scene(
@@ -404,8 +463,15 @@ actor ChannelWSClient {
                 seed: message["seed"]?.intValue,
                 transition: SceneTransition(message["transition"]),
                 epoch: message["epoch"]?.intValue,
-                track: message["track"]
+                track: message["track"],
+                sleeping: message["sleeping"]?.boolValue,
+                sleptAt: Self.serverTime(message["sleptAt"]),
+                pausedMs: message["pausedMs"]?.intValue,
+                playhead: Playhead(message["playhead"])
             )
+        case "clock":
+            return .clock(epoch: message["epoch"]?.intValue, playhead: Playhead(message["playhead"]),
+                          pausedMs: message["pausedMs"]?.intValue)
         case "seed":
             return .reseed(seed: message["seed"]?.intValue, epoch: message["epoch"]?.intValue)
         case "delta":
@@ -414,9 +480,9 @@ actor ChannelWSClient {
         case "track":
             return .track(message["track"], epoch: message["epoch"]?.intValue)
         case "sleep":
-            return .sleep
+            return .sleep(sleptAt: Self.serverTime(message["sleptAt"]))
         case "wake":
-            return .wake
+            return .wake(pausedMs: message["pausedMs"]?.intValue)
         case "overlay":
             return .overlay(
                 text: message["text"]?.stringValue,

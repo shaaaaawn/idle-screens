@@ -219,8 +219,8 @@ final class ChannelWSClientTests: XCTestCase {
         var iterator = stream.makeAsyncIterator()
 
         session.send(#"{"type":"scene","spec":{"id":"warp"},"seed":42}"#)
-        session.send(#"{"type":"sleep"}"#)
-        session.send(#"{"type":"wake"}"#)
+        session.send(#"{"type":"sleep","sleptAt":4000}"#)
+        session.send(#"{"type":"wake","pausedMs":20000}"#)
         session.send(#"{"type":"overlay","text":"hello","ttl":4000}"#)
 
         let sceneEvent = try await iterator.next()
@@ -228,8 +228,8 @@ final class ChannelWSClientTests: XCTestCase {
         let wakeEvent = try await iterator.next()
         let overlayEvent = try await iterator.next()
         XCTAssertEqual(sceneEvent, .scene(spec: .object(["id": .string("warp")]), seed: 42))
-        XCTAssertEqual(sleepEvent, .sleep)
-        XCTAssertEqual(wakeEvent, .wake)
+        XCTAssertEqual(sleepEvent, .sleep(sleptAt: 4000))
+        XCTAssertEqual(wakeEvent, .wake(pausedMs: 20000))
         XCTAssertEqual(overlayEvent, .overlay(text: "hello", ttl: 4000))
     }
 
@@ -243,6 +243,6 @@ final class ChannelWSClientTests: XCTestCase {
         session.send(#"{"type":"wake"}"#)
 
         let event = try await iterator.next()
-        XCTAssertEqual(event, .wake)
+        XCTAssertEqual(event, .wake(pausedMs: nil), "an older server's bare wake still parses")
     }
 }
