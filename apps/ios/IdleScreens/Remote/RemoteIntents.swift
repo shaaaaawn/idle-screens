@@ -88,7 +88,7 @@ struct SendChannelIntent: AppIntent {
     @Parameter(title: "Channel", description: "Leave empty to move on to the next channel.")
     var channel: ChannelEntity?
 
-    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app.")
+    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app, or every paired screen if none is left.")
     var screen: ScreenEntity?
 
     init() {}
@@ -190,7 +190,7 @@ struct ScreensWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Screens"
     static let description = IntentDescription("Channels to put on your screens with one tap.")
 
-    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app.")
+    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app, or every paired screen if none is left.")
     var screen: ScreenEntity?
 
     init() {}

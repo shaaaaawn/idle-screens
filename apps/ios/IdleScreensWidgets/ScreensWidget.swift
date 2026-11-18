@@ -85,7 +85,7 @@ struct ScreensProvider: AppIntentTimelineProvider {
         request.timeoutInterval = 6
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse, http.statusCode == 200,
-              http.url?.path == url.path,
+              http.url?.absoluteString == url.absoluteString,
               let type = http.value(forHTTPHeaderField: "Content-Type"),
               type.hasPrefix("image/jpeg") || type.hasPrefix("image/png") || type.hasPrefix("image/webp")
         else { return nil }
