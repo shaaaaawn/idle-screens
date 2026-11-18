@@ -91,7 +91,6 @@ struct ScreensProvider: AppIntentTimelineProvider {
         else { return nil }
         return TileStill.downsampled(data, maxPixels: 400)
     }
-
 }
 
 // MARK: - Widget
