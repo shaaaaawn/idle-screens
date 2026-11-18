@@ -29,7 +29,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026111803"
+        CURRENT_PROJECT_VERSION: "2026111805"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -88,7 +88,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hermosalabs.idlescreens.widgets
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "2026111803"
+        CURRENT_PROJECT_VERSION: "2026111805"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -147,7 +147,7 @@ targets:
         # Date-based build number (YYYYMMDDnn): monotonic by construction, so a
         # later rebuild is always accepted without having to remember what the
         # last uploaded build was.
-        CURRENT_PROJECT_VERSION: "2026111803"
+        CURRENT_PROJECT_VERSION: "2026111805"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
         TARGETED_DEVICE_FAMILY: "3"
@@ -184,7 +184,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hermosalabs.idlescreens.topshelf
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "2026111803"
+        CURRENT_PROJECT_VERSION: "2026111805"
         # TVServices' content types aren't Sendable, so the async override
         # can't exist in Swift 6 language mode at all. This target is 60
         # standalone lines with no shared state — Swift 5 mode is honest.
@@ -205,6 +205,9 @@ targets:
         CFBundleDisplayName: idle screens
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # App Store validation (ITMS-90502) refuses an app-extension target's
+        # 64-bit binary without this; the old tv-app-extension type never asked.
+        UIRequiredDeviceCapabilities: [arm64]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.tv-top-shelf
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ContentProvider"
