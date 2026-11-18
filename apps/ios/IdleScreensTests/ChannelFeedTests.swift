@@ -241,3 +241,45 @@ final class FeedSelectionTests: XCTestCase {
         XCTAssertFalse(FeedSelection.fills(.zero))
     }
 }
+
+/// The "On now" rail under "Your channels": it must never show a card the row
+/// above already showed, which a key for the curated `default` channel made
+/// happen on every Channels tab open.
+final class ChannelFeedOnNowTests: XCTestCase {
+    private func channel(_ id: String, sleeping: Bool = false) -> PublicChannel {
+        PublicChannel(channelId: id, label: nil, tags: nil, viewers: nil,
+                      sleeping: sleeping, lastEventAt: nil, access: nil)
+    }
+
+    func testOwnedDefaultIsExcludedFromOnNow() {
+        let defaultChannel = channel("default")
+        let rail = ChannelFeed.onNow(lead: [defaultChannel], following: [],
+                                     watchedNow: [channel("math")], latest: [defaultChannel, channel("aurora")],
+                                     owned: ["default", "aurora"])
+        XCTAssertEqual(rail.map(\.id), ["math"])
+    }
+
+    func testLeadComesFirstWhenNotOwned() {
+        let rail = ChannelFeed.onNow(lead: [channel("default")], following: [channel("f")],
+                                     watchedNow: [channel("w")], latest: [channel("l")], owned: [])
+        XCTAssertEqual(rail.map(\.id), ["default", "f", "w", "l"])
+    }
+
+    func testEachIdAppearsOnce() {
+        let rail = ChannelFeed.onNow(lead: [channel("a")], following: [channel("a"), channel("b")],
+                                     watchedNow: [channel("b")], latest: [channel("c")], owned: [])
+        XCTAssertEqual(rail.map(\.id), ["a", "b", "c"])
+    }
+
+    func testSleepingChannelsAreDropped() {
+        let rail = ChannelFeed.onNow(lead: [], following: [], watchedNow: [channel("asleep", sleeping: true)],
+                                     latest: [channel("awake")], owned: [])
+        XCTAssertEqual(rail.map(\.id), ["awake"])
+    }
+
+    func testRailIsCappedAtLimit() {
+        let latest = (0..<20).map { channel("c\($0)") }
+        let rail = ChannelFeed.onNow(lead: [], following: [], watchedNow: [], latest: latest, owned: [], limit: 14)
+        XCTAssertEqual(rail.count, 14)
+    }
+}

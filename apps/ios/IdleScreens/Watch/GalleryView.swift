@@ -131,16 +131,13 @@ struct GalleryView: View {
         return owned.sorted { ($0.lastEventAt ?? 0) > ($1.lastEventAt ?? 0) }
     }
 
-    /// Never repeats a channel already in "Your channels" just above it:
-    /// with a key for `default` (the curated lead), the rail opened on the
-    /// very card the row above had just shown.
+    /// Never repeats a channel already in "Your channels" just above it (see
+    /// `ChannelFeed.onNow`).
     private var onNow: [PublicChannel] {
-        var seen = Set(yours.map(\.id))
-        let lead = [heroChannel].compactMap { $0 }
-        let latest = ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil }
-        return (lead + following + watchedNow + latest)
-            .filter { $0.sleeping != true && seen.insert($0.id).inserted }
-            .prefix(14).map { $0 }
+        ChannelFeed.onNow(lead: [heroChannel].compactMap { $0 }, following: following,
+                          watchedNow: watchedNow,
+                          latest: ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil },
+                          owned: Set(yours.map(\.id)))
     }
 
 
