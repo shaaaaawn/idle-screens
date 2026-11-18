@@ -438,6 +438,10 @@ struct ChannelPoster: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        // The listing is slim: the scene this draws is fetched as the poster
+        // shows, and lands in `channel` when it does.
+        .onAppear { app.wantDetail(channel) }
+        .onDisappear { app.unwantDetail(channel.id) }
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: TV.cardRadius))
     }

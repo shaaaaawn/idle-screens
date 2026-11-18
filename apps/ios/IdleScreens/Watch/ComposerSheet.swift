@@ -235,8 +235,8 @@ struct ComposerSheet: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.textPrimary)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(app.channels.filter { $0.spec != nil && $0.id != channelId }) { channel in
+                LazyHStack(spacing: 10) {
+                    ForEach(app.channels.filter { MixSourcePreview.offered($0) && $0.id != channelId }) { channel in
                         Button {
                             busy = true
                             Task {
@@ -247,7 +247,7 @@ struct ComposerSheet: View {
                             }
                         } label: {
                             VStack(alignment: .leading, spacing: 5) {
-                                ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                MixSourcePreview(channel: channel)
                                     .frame(width: 96, height: 128)
                                     .clipShape(RoundedRectangle(cornerRadius: 9))
                                     .overlay {
@@ -262,7 +262,9 @@ struct ComposerSheet: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .disabled(busy)
+                        // Not until its scene is known: a classic saver was
+                        // never offered, and this can't tell yet.
+                        .disabled(busy || !channel.detailLoaded)
                     }
                 }
             }

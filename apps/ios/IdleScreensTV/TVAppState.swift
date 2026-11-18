@@ -30,6 +30,9 @@ final class TVAppState {
     // MARK: Gallery
 
     var channels: [PublicChannel] = []
+    /// The scenes the slim listing leaves out, fetched per channel as posters
+    /// show (`wantDetail`) and merged into `channels` as they land.
+    @ObservationIgnored let details: ChannelDetails
     /// Channels this viewer hid (Report → Hide), filtered out of `channels`
     /// at every load. Injected so tests never touch the real list.
     let hidden: HiddenChannels
@@ -164,6 +167,9 @@ final class TVAppState {
         self.hidden = hidden
         self.keys = keys
         self.gallery = gallery
+        // The scenes fetched before, so the cached wall's posters are there
+        // on its first frame (each a channel's `/state` reduced to its spec).
+        self.details = ChannelDetails(gallery: gallery, cached: gallery.cachedDetails())
         self.mcp = mcp
         self.ws = ws
         self.pair = pair
@@ -181,6 +187,7 @@ final class TVAppState {
             UserDefaults.standard.set(minted, forKey: Self.deviceIdKey)
             self.deviceId = minted
         }
+        details.onArrive = { [weak self] batch in self?.mergeDetails(batch) }
     }
 
     convenience init() {
@@ -203,17 +210,22 @@ final class TVAppState {
     func loadGallery() async {
         isLoadingGallery = true
         defer { isLoadingGallery = false }
-        // Cache-first: paint the last known channel list instantly (inline
-        // specs make it fully renderable), then let the network refresh
-        // replace it. A cold boot shows real content in one frame.
+        // Cache-first: paint the last known channel list instantly (with the
+        // scenes fetched before, it is renderable offline), then let the
+        // network refresh replace it. A cold boot shows real content in one
+        // frame.
         if channels.isEmpty, let cached = await gallery.cachedChannels() {
-            channels = hidden.visible(cached)
+            let visible = hidden.visible(cached)
+            // The first launch after the update reads the full list an
+            // earlier build cached, scenes inline: keep them.
+            details.absorb(visible)
+            channels = details.apply(to: visible)
         }
         if categories.isEmpty, let cached = await gallery.cachedCategories() {
             categories = cached
         }
         do {
-            channels = hidden.visible(try await gallery.fetchChannels())
+            channels = details.apply(to: hidden.visible(try await gallery.fetchChannels()))
             galleryError = nil
         } catch {
             // Keep showing cached content on refresh failure; only surface
@@ -297,6 +309,34 @@ final class TVAppState {
             complexityCap = SceneComplexity.precap(for: compiledScene, renderClass: renderClass)
         }
         openSocket(channelId: channelId, watching: true)
+        // The channels Up and Down land on next, so their first frame is
+        // instant too: the listing is slim, and a scene is fetched per channel.
+        for step in [-1, 1] {
+            if let id = Self.surfTarget(from: channelId, step: step, in: channels),
+               let row = channels.first(where: { $0.id == id }) {
+                details.want(row)
+            }
+        }
+    }
+
+    // MARK: Scenes for the slim listing
+
+    /// A poster showing `channel` is on screen: fetch its scene if the one
+    /// known is missing or older than the listing's row.
+    func wantDetail(_ channel: PublicChannel) {
+        details.want(channel)
+    }
+
+    /// The poster left the screen before its scene was asked for.
+    func unwantDetail(_ channelId: String) {
+        details.unwant(channelId)
+    }
+
+    /// Scenes that landed, into the rows that show them — one write for the
+    /// batch, since every write re-evaluates the whole wall.
+    func mergeDetails(_ batch: [String: ChannelDetail]) {
+        guard channels.contains(where: { batch[$0.id] != nil }) else { return }
+        channels = channels.map { row in batch[row.id].map(row.with) ?? row }
     }
 
     // MARK: Channel surfing

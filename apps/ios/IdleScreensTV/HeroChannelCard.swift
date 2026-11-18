@@ -18,6 +18,9 @@ struct HeroChannelCard: View {
             .overlay(scrim)
             .overlay(alignment: .bottomLeading) { lockup }
             .clipShape(RoundedRectangle(cornerRadius: TV.heroRadius))
+            // The listing is slim: the scene is fetched as the hero shows.
+            .onAppear { app.wantDetail(channel) }
+            .onDisappear { app.unwantDetail(channel.id) }
     }
 
     @ViewBuilder private var artwork: some View {

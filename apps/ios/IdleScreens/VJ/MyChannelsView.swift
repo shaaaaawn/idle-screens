@@ -161,6 +161,9 @@ struct MyChannelsView: View {
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Its scene, if the wall lists it and the one known is stale.
+            .onAppear { if let channel { app.wantDetail(channel) } }
+            .onDisappear { app.unwantDetail(credential.channelId) }
             .overlay(alignment: .topLeading) {
                 if channel?.sleeping == true {
                     Label("asleep", systemImage: "moon.fill")
@@ -277,7 +280,7 @@ private struct NewChannelSheet: View {
                             .foregroundStyle(Color.textSecondary)
 
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
+                            LazyHStack(spacing: 10) {
                                 sourceTile(.blank, title: "Surprise me") {
                                     ZStack {
                                         LinearGradient(colors: [Color.appSurfaceRaised, Color.appBackground],
@@ -287,10 +290,13 @@ private struct NewChannelSheet: View {
                                             .foregroundStyle(Color.textSecondary)
                                     }
                                 }
-                                ForEach(app.channels.filter { $0.spec != nil }) { channel in
+                                ForEach(app.channels.filter(MixSourcePreview.offered)) { channel in
                                     sourceTile(.channel(channel.id), title: channel.displayLabel) {
-                                        ScenePreviewView(spec: channel.spec!, fallbackSeed: channel.id)
+                                        MixSourcePreview(channel: channel)
                                     }
+                                    // Not until its scene is known: a classic saver
+                                    // was never offered, and this can't tell yet.
+                                    .disabled(!channel.detailLoaded)
                                 }
                             }
                             .padding(.vertical, 2)
