@@ -163,6 +163,7 @@ final class CompiledSpriteScene: SKScene {
         for d in driven { d.node.removeFromParent() }
         driven.removeAll(keepingCapacity: true)
         buildNodes()
+        lastHeldT = nil  // new nodes stand at their defaults until the next update places them
         return true
     }
 
@@ -186,6 +187,7 @@ final class CompiledSpriteScene: SKScene {
         groundNode = nil
         if !transparentGround { buildBackground() }
         buildNodes()
+        lastHeldT = nil  // new nodes stand at their defaults until the next update places them
         skLog.notice("built \(self.driven.count) nodes at \(self.size.width)x\(self.size.height) scene=\(ObjectIdentifier(self).debugDescription)")
     }
 
@@ -761,10 +763,13 @@ final class CompiledSpriteScene: SKScene {
             skLog.notice("first tick scene=\(ObjectIdentifier(self).debugDescription)")
         }
         let t = clock?.time(at: Date()) ?? (currentTime - start)
-        // Held by the playhead (rate 0), the frame is already drawn: skip the work.
+        // The ground first, always: it is a no-op once drawn, and keeps asking
+        // for a field raster still sampling in the background.
+        updateGround(t: t)
+        // Held by the playhead (rate 0), the nodes already stand where `t` puts
+        // them: skip the per-node work. A rebuild clears `lastHeldT`.
         if let clock, clock.rate == 0, t == lastHeldT { return }
         lastHeldT = (clock?.rate == 0) ? t : nil
-        updateGround(t: t)
 
         for k in driven.indices {
             let d = driven[k]
