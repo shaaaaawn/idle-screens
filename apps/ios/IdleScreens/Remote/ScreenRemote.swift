@@ -39,10 +39,12 @@ struct ScreenRemote: Sendable {
         return (id, screen)
     }
 
-    /// Send `channel` to one screen, or every paired screen when `screenId`
-    /// is nil. Never throws: the outcome says what happened, for the widget.
+    /// Send `channel` to one screen, or — when `screenId` is nil — to the
+    /// screens you last chose in the app (`RemoteSnapshot.defaultTargets`).
+    /// Never throws: the outcome says what happened, for the widget.
     func send(_ channel: RemoteSnapshot.Channel, to screenId: String?, in snapshot: RemoteSnapshot) async -> SendOutcome {
-        let targets = snapshot.screens.filter { screenId == nil || $0.deviceId == screenId }
+        let ids = snapshot.targets(for: screenId)
+        let targets = snapshot.screens.filter { ids.contains($0.deviceId) }
         guard let base = URL(string: snapshot.baseURL) else {
             return SendOutcome(channelId: channel.id, channelLabel: channel.label, delivered: [],
                                asked: targets.count, unanswered: [], at: Date())

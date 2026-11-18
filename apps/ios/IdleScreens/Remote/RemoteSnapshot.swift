@@ -38,6 +38,10 @@ struct RemoteSnapshot: Codable, Equatable, Sendable {
     /// The last send from a widget or shortcut, for the widget to report.
     var lastSend: SendOutcome?
     var writtenAt: Date
+    /// The screens you last chose in the app's "Send to screens" — what a
+    /// widget, control or shortcut that names no screen sends to. nil in a
+    /// snapshot written before this existed.
+    var castScreens: [String]? = nil
 
     static let keychainKey = "remote.snapshot"
 
@@ -57,6 +61,23 @@ struct RemoteSnapshot: Codable, Equatable, Sendable {
     }
 
     func channel(_ id: String) -> Channel? { channels.first { $0.id == id } }
+
+    /// Where a send that names no screen goes: the screens chosen last in the
+    /// app, still paired; every paired screen when none of those is left.
+    var defaultTargets: [String] {
+        Self.targets(remembered: castScreens ?? [], paired: screens.map(\.deviceId))
+    }
+
+    /// The one rule the app (`AppState.castTargets`) and the extension share.
+    static func targets(remembered: [String], paired: [String]) -> [String] {
+        let kept = paired.filter(remembered.contains)
+        return kept.isEmpty ? paired : kept
+    }
+
+    /// The screens a send goes to: the named one, else `defaultTargets`.
+    func targets(for screenId: String?) -> [String] {
+        screenId.map { id in screens.contains { $0.deviceId == id } ? [id] : [] } ?? defaultTargets
+    }
 
     /// A channel's name: from the quick list, else from a screen showing it.
     func label(of id: String) -> String {

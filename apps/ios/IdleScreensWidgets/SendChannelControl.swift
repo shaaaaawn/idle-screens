@@ -28,7 +28,7 @@ struct SendControlConfiguration: ControlConfigurationIntent {
     @Parameter(title: "Channel", description: "Leave empty to move on to the next channel.")
     var channel: ChannelEntity?
 
-    @Parameter(title: "Screen", description: "Leave empty for every paired screen.")
+    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app.")
     var screen: ScreenEntity?
 
     init() {}

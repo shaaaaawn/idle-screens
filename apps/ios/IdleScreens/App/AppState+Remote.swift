@@ -39,10 +39,11 @@ extension AppState {
             },
             channels: remoteChannels(),
             lastSend: prior?.lastSend,
-            writtenAt: Date())
+            writtenAt: Date(),
+            castScreens: castTargets)
         // Unchanged apart from the stamp: leave the widgets alone.
         if let prior, prior.screens == snapshot.screens, prior.channels == snapshot.channels,
-           prior.baseURL == snapshot.baseURL { return }
+           prior.baseURL == snapshot.baseURL, prior.castScreens == snapshot.castScreens { return }
         snapshot.save()
         WidgetCenter.shared.reloadAllTimelines()
     }
@@ -81,7 +82,8 @@ extension AppState {
     func handleRemoteLink(_ url: URL) -> Bool {
         guard let link = ScreenRemote.parseAppLink(url) else { return false }
         Task {
-            let ids = link.screenId.map { [$0] } ?? pairedScreens.map(\.deviceId)
+            // No screen named (a widget set to none): the screens you chose last.
+            let ids = link.screenId.map { [$0] } ?? castTargets
             let started = Date()
             _ = await push(channelId: link.channelId, sceneId: nil, to: ids)
             var snapshot = RemoteSnapshot.load()

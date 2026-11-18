@@ -468,8 +468,7 @@ extension AppState {
     }
 
     nonisolated static func castTargets(remembered: [String], paired: [String]) -> [String] {
-        let kept = paired.filter(remembered.contains)
-        return kept.isEmpty ? paired : kept
+        RemoteSnapshot.targets(remembered: remembered, paired: paired)
     }
 
     /// Remember a choice of screens for the next send. An empty choice is not
@@ -477,6 +476,8 @@ extension AppState {
     func rememberCastScreens(_ deviceIds: [String]) {
         guard !deviceIds.isEmpty else { return }
         UserDefaults.standard.set(deviceIds, forKey: Self.castScreensKey)
+        // The widgets and Control Center send to the same screens.
+        refreshRemoteSnapshot()
     }
 
     /// What a one-tap "Play on …" button calls the screens it will light:
