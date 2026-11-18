@@ -27,7 +27,9 @@ final class TopShelfCatalogTests: XCTestCase {
 
     func testCapsAtTheCarouselsEight() {
         let many = (0..<20).map { channel("c\($0)", tags: ["featured"]) }
-        XCTAssertEqual(TopShelfCatalog.entries(from: many, baseURL: base).count, TopShelfCatalog.maxItems)
+        // Eight is the contract with the server (`PREVIEW_MAX_CHANNELS`), not just the constant.
+        XCTAssertEqual(TopShelfCatalog.maxItems, 8)
+        XCTAssertEqual(TopShelfCatalog.entries(from: many, baseURL: base).count, 8)
     }
 
     func testOnlyFeaturedChannelsAskForAClip() {
