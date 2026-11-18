@@ -192,6 +192,8 @@ targets:
         SWIFT_STRICT_CONCURRENCY: minimal
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: Z4P3N45225
+        # Embedded in IdleScreensTV.app: archive it there, never as its own product.
+        SKIP_INSTALL: YES
       configs:
         Release:
           CODE_SIGN_STYLE: Manual
