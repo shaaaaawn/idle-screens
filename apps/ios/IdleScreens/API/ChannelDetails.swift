@@ -118,9 +118,14 @@ final class ChannelDetails {
     private var queue: [String] = []
     private var running: Set<String> = []
     private var failedAt: [String: Date] = [:]
-    /// Wanted and not since let go: the tiles on screen, plus neighbours
-    /// fetched ahead of a swipe. What `refresh` re-asks for.
-    private var shown: Set<String> = []
+    /// Wanted and not since let go, counted per asker: a channel on screen
+    /// twice, or prefetched while a page shows it, stays until the last one
+    /// lets go. What `refresh` re-asks for.
+    private var shown: [String: Int] = [:]
+    /// Asked for while its read was already in flight, with the newest
+    /// listing time seen: the read that lands may be older than that, so it
+    /// is queued again once it has landed.
+    private var again: [String: Int] = [:]
     private var arrived: [String: ChannelDetail] = [:]
     private var flush: Task<Void, Never>?
     /// Every detail that landed in one beat, on the main actor.
@@ -149,8 +154,12 @@ final class ChannelDetails {
     /// known is current.
     func want(_ channel: PublicChannel) {
         let id = channel.id
-        shown.insert(id)
-        guard !isFresh(id, lastEventAt: channel.lastEventAt), !running.contains(id) else { return }
+        shown[id, default: 0] += 1
+        guard !isFresh(id, lastEventAt: channel.lastEventAt) else { return }
+        if running.contains(id) {
+            if let at = channel.lastEventAt { again[id] = max(again[id] ?? 0, at) }
+            return
+        }
         if let failed = failedAt[id], Date().timeIntervalSince(failed) < Self.retryAfter { return }
         queue.removeAll { $0 == id }
         queue.append(id)
@@ -159,7 +168,7 @@ final class ChannelDetails {
 
     /// The tile went off screen: a read that has not started is dropped.
     func unwant(_ id: String) {
-        shown.remove(id)
+        if let n = shown[id], n > 1 { shown[id] = n - 1 } else { shown[id] = nil }
         queue.removeAll { $0 == id }
     }
 
@@ -167,13 +176,25 @@ final class ChannelDetails {
     /// to ask, so the ones whose channel changed since their scene was read
     /// are asked for here; until it lands the old poster stays.
     func refresh(_ rows: [PublicChannel]) {
-        for row in rows where shown.contains(row.id) { want(row) }
+        for row in rows where shown[row.id] != nil {
+            // One ask per listing, so a failed read's backoff does not hold
+            // a tile on a poster the listing already says is old.
+            failedAt[row.id] = nil
+            let asks = shown[row.id] ?? 0
+            want(row)
+            // `want` counts as an asker; a refresh is not one.
+            shown[row.id] = asks
+        }
     }
 
     /// `rows` with the scenes that landed in `batch`. An older scene never
-    /// replaces one a row already shows (a read in flight while the listing
-    /// advanced); a row with no scene yet still takes it, since an old poster
-    /// beats none.
+    /// replaces one a row already shows: an arrival older than the listing's
+    /// `lastEventAt` is held back (a read in flight while the listing
+    /// advanced; `refresh` has asked again for the newer one). The row carries
+    /// the listing's time, not its scene's, so this can also hold back an
+    /// arrival newer than the scene shown but older than the listing — the
+    /// re-ask replaces it. A row with no scene yet takes anything, since an
+    /// old poster beats none.
     static func merge(_ batch: [String: ChannelDetail], into rows: [PublicChannel]) -> [PublicChannel] {
         rows.map { row in
             guard let detail = batch[row.id] else { return row }
@@ -233,8 +254,13 @@ final class ChannelDetails {
             failedAt[id] = nil
             arrived[id] = detail
             scheduleFlush()
+            if wasRunning, let at = again.removeValue(forKey: id), shown[id] != nil,
+               !isFresh(id, lastEventAt: at), !queue.contains(id) {
+                queue.append(id)
+            }
         } else {
             failedAt[id] = Date()
+            again[id] = nil
         }
         pump()
     }
