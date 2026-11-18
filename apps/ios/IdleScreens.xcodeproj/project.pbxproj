@@ -1763,7 +1763,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026111802;
+				CURRENT_PROJECT_VERSION = 2026111801;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1803,7 +1803,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreens/IdleScreens.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026111802;
+				CURRENT_PROJECT_VERSION = 2026111801;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreens/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1843,7 +1843,7 @@
 				CODE_SIGN_ENTITLEMENTS = IdleScreensWidgets/IdleScreensWidgets.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 2026111802;
+				CURRENT_PROJECT_VERSION = 2026111801;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1929,7 +1929,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = IdleScreensWidgets/IdleScreensWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2026111802;
+				CURRENT_PROJECT_VERSION = 2026111801;
 				DEVELOPMENT_TEAM = Z4P3N45225;
 				INFOPLIST_FILE = IdleScreensWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
