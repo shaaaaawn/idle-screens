@@ -1113,7 +1113,7 @@
 			);
 			productName = IdleScreensTVTopShelf;
 			productReference = 7822D79CA74B34F90F5AE612 /* IdleScreensTVTopShelf.appex */;
-			productType = "com.apple.product-type.tv-app-extension";
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
