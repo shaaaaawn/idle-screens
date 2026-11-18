@@ -28,6 +28,14 @@ final class CastTargetsTests: XCTestCase {
                        ["tv-living", "tv-bedroom"])
     }
 
+    func testPruningKeepsOnlyPairedScreens() {
+        XCTAssertEqual(AppState.prunedCastScreens(remembered: ["tv-gone", "mac-studio"], paired: paired), ["mac-studio"])
+    }
+
+    func testPruningToNothingLeavesNothingRemembered() {
+        XCTAssertEqual(AppState.prunedCastScreens(remembered: ["tv-gone"], paired: paired), [])
+    }
+
     func testNothingPairedIsNothing() {
         XCTAssertEqual(AppState.castTargets(remembered: ["tv-living"], paired: []), [])
     }

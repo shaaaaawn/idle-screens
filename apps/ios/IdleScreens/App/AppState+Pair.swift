@@ -168,7 +168,26 @@ extension AppState {
 
     func savePairedScreens() {
         UserDefaults.standard.set(try? JSONEncoder().encode(pairedScreens), forKey: Self.pairedScreensKey)
+        pruneRememberedCastScreens()
         refreshRemoteSnapshot()
+    }
+
+    /// Drop unpaired screens from the remembered send set, so re-pairing one
+    /// later doesn't tick it again by surprise. Removing the key when nothing
+    /// is left gives the "every screen" default, same as `castTargets`.
+    private func pruneRememberedCastScreens() {
+        let remembered = UserDefaults.standard.stringArray(forKey: Self.castScreensKey) ?? []
+        let kept = Self.prunedCastScreens(remembered: remembered, paired: pairedScreens.map(\.deviceId))
+        guard kept != remembered else { return }
+        if kept.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.castScreensKey)
+        } else {
+            UserDefaults.standard.set(kept, forKey: Self.castScreensKey)
+        }
+    }
+
+    nonisolated static func prunedCastScreens(remembered: [String], paired: [String]) -> [String] {
+        remembered.filter(paired.contains)
     }
 
     func token(forScreen deviceId: String) -> String? {
