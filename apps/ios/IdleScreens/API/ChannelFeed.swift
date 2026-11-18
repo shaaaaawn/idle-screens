@@ -27,6 +27,20 @@ enum ChannelFeed {
             }
     }
 
+    /// The Channels tab's "On now" rail: lead, followed, live, then latest, in
+    /// that order. Sleeping channels are dropped, each id appears once, and
+    /// `owned` (the channels already shown in "Your channels" just above) never
+    /// repeats. Without `owned`, a key for `default` put the rail's first card on
+    /// the very card the row above had just shown.
+    static func onNow(lead: [PublicChannel], following: [PublicChannel],
+                      watchedNow: [PublicChannel], latest: [PublicChannel],
+                      owned: Set<String>, limit: Int = 14) -> [PublicChannel] {
+        var seen = owned
+        return (lead + following + watchedNow + latest)
+            .filter { $0.sleeping != true && seen.insert($0.id).inserted }
+            .prefix(limit).map { $0 }
+    }
+
     /// One past scene you can swipe to.
     struct Stop: Identifiable, Equatable, Sendable {
         let sceneId: Int
