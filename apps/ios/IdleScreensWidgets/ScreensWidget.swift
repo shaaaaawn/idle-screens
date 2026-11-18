@@ -87,7 +87,7 @@ struct ScreensWidget: Widget {
                 .containerBackground(for: .widget) { WidgetPalette.ground }
         }
         .configurationDisplayName("Screens")
-        .description("Tap a channel to put it on your Apple TV, Mac or Linux screen.")
+        .description("Tap a channel to put it on your paired screens.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

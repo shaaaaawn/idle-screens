@@ -28,6 +28,7 @@
 		107D251FD96DBFE5EBB60E21 /* shapes-golden.json in Resources */ = {isa = PBXBuildFile; fileRef = E313F8B6BF9FA32F0FEA5403 /* shapes-golden.json */; };
 		10C23D5204DA666533C4BA39 /* SpriteSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E14B7DC8B4215FD925DF86 /* SpriteSceneView.swift */; };
 		13743AA338CEEE94C89F7238 /* ThumbStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F528250DFE95CB117C8E225 /* ThumbStreamView.swift */; };
+		1480C18C2E6D7EA6F3A0C166 /* AppIntentsMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C244BE04FA673FC5B53E4 /* AppIntentsMetadataTests.swift */; };
 		14B781DF3BD5E3350A3E747F /* NativeSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B5A0CBD688755360E23C34 /* NativeSceneView.swift */; };
 		14EBCFE042D04972421EAF69 /* CapabilityTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BA17267F4AC15D382EE4E0 /* CapabilityTier.swift */; };
 		15ACFB6F6AA99CD07B8DFD3E /* RemoteSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA10BA8D35C1E3236B1C8392 /* RemoteSnapshot.swift */; };
@@ -528,6 +529,7 @@
 		CD2D32E369A66677D9951C82 /* paths-golden.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "paths-golden.json"; sourceTree = "<group>"; };
 		CD323E6ABC5424303DBBB2FE /* WipeMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WipeMask.swift; sourceTree = "<group>"; };
 		CD98442884593D0B9B0053F5 /* AppState+Gallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Gallery.swift"; sourceTree = "<group>"; };
+		CE9C244BE04FA673FC5B53E4 /* AppIntentsMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentsMetadataTests.swift; sourceTree = "<group>"; };
 		D01560B0DAFCBEA6D4A92BC6 /* PathGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathGeometry.swift; sourceTree = "<group>"; };
 		D02DC91137B76ABEB83A645A /* BedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BedTests.swift; sourceTree = "<group>"; };
 		D364939AB0B6E9F8E87757A0 /* ScreenRemote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRemote.swift; sourceTree = "<group>"; };
@@ -640,6 +642,7 @@
 			isa = PBXGroup;
 			children = (
 				B900EB3E13FF0746F5991280 /* AgentHandoffTests.swift */,
+				CE9C244BE04FA673FC5B53E4 /* AppIntentsMetadataTests.swift */,
 				4C408BF670E35B5612FAB86D /* AppStateTests.swift */,
 				70175C445EA671BF081B79E0 /* ChannelBrowseTests.swift */,
 				4ECFB44253D0D0EC22D67E8B /* ChannelFeedTests.swift */,
@@ -1485,6 +1488,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				310C3F423842B69D02E78632 /* AgentHandoffTests.swift in Sources */,
+				1480C18C2E6D7EA6F3A0C166 /* AppIntentsMetadataTests.swift in Sources */,
 				E6A75BB3ACFAECBAEF42BB4D /* AppStateTests.swift in Sources */,
 				82590176900148628EE95BCB /* ChannelBrowseTests.swift in Sources */,
 				F0837C400D9439951003DB90 /* ChannelFeedTests.swift in Sources */,
