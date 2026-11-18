@@ -1,79 +1,69 @@
 import TVServices
 
-/// Dynamic Top Shelf: the featured shelf of live channels, refreshed every
-/// time the system asks. Selecting an item deep-links straight into that
-/// channel fullscreen (`idlescreens://channel/<id>`), so the TV goes from
-/// home screen to ambient art in one click.
+/// Dynamic Top Shelf: a full-screen carousel of live channels, featured first.
+/// While the app is focused on the home screen, each featured channel plays
+/// ten seconds of itself behind its title (`/c/<id>/preview.mp4`, rendered by
+/// the server), over its card as the still. Selecting one deep-links straight
+/// into that channel fullscreen (`idlescreens://channel/<id>`).
 ///
 /// Deliberately standalone: a Top Shelf extension has tight memory limits,
-/// so it reads the slim listing, decodes the five fields it needs and never
-/// imports the render stack.
+/// so it reads the slim listing, decodes the fields it needs and never
+/// imports the render stack. What it shows is decided in `TopShelfCatalog`.
 final class ContentProvider: TVTopShelfContentProvider {
-
-    private struct Channel: Decodable {
-        let id: String?
-        let label: String?
-        let tags: [String]?
-        let viewers: Int?
-        let sleeping: Bool?
-    }
 
     private static let baseURL = URL(string: "https://idlescreens.com")!
 
     override func loadTopShelfContent() async -> (any TVTopShelfContent)? {
         guard let channels = try? await fetchChannels() else { return nil }
+        let entries = TopShelfCatalog.entries(from: channels, baseURL: Self.baseURL)
+        guard !entries.isEmpty else { return nil }
+        let clips = await availableClips(entries)
 
-        // Featured channels first (editorial order), then the most watched.
-        let awake = channels.filter { $0.sleeping != true && $0.id != nil }
-        let featured = awake.filter { $0.tags?.contains("featured") == true }
-        let rest = awake.filter { $0.tags?.contains("featured") != true }
-            .sorted { ($0.viewers ?? 0) > ($1.viewers ?? 0) }
-        let picks = Array((featured + rest).prefix(8))
-        guard !picks.isEmpty else { return nil }
-
-        let items = picks.compactMap { channel -> TVTopShelfSectionedItem? in
-            guard let id = channel.id else { return nil }
-            let item = TVTopShelfSectionedItem(identifier: id)
-            item.title = channel.label ?? id
-            item.imageShape = .hdtv
-            item.setImageURL(Self.imageURL(for: id), for: [.screenScale1x, .screenScale2x])
-            if let link = URL(string: "idlescreens://channel/\(id)") {
-                item.displayAction = TVTopShelfAction(url: link)
-                item.playAction = TVTopShelfAction(url: link)
+        let items = entries.map { entry -> TVTopShelfCarouselItem in
+            let item = TVTopShelfCarouselItem(identifier: entry.id)
+            item.contextTitle = entry.context
+            item.title = entry.title
+            item.summary = entry.summary
+            item.genre = entry.genre
+            item.setImageURL(entry.imageURL, for: [.screenScale1x, .screenScale2x])
+            if clips.contains(entry.id) { item.previewVideoURL = entry.previewVideoURL }
+            if let watching = TopShelfCatalog.watchingText(entry.watching) {
+                item.namedAttributes = [TVTopShelfNamedAttribute(name: "Watching", values: [watching])]
             }
+            item.displayAction = TVTopShelfAction(url: entry.link)
+            item.playAction = TVTopShelfAction(url: entry.link)
             return item
         }
-
-        let section = TVTopShelfItemCollection(items: items)
-        section.title = "Live channels"
-        return TVTopShelfSectionedContent(sections: [section])
+        return TVTopShelfCarouselContent(style: .details, items: items)
     }
 
-    /// The channel's rendered card, `/c/<id>/og.jpg`: always a JPEG (a
-    /// channel without one redirects to the site's card). Not `/c/<id>/thumb`:
-    /// for a claimed channel, and for the demo channels until a viewer has
-    /// captured a frame, that is an SVG server render, which the Top Shelf
-    /// cannot draw. Those tiles spun forever (default, lobby and studio, the
-    /// first three featured, on 2026-11-18).
-    static func imageURL(for id: String) -> URL {
-        baseURL.appendingPathComponent("c").appendingPathComponent(id).appendingPathComponent("og.jpg")
+    /// Which featured channels have a clip right now: a HEAD that ends on the
+    /// MP4 (the route 302s to it, or 404s until the server has rendered one).
+    /// A channel without one shows its still alone, rather than a video
+    /// the system tries and fails to load. Asked in parallel, 4 s each.
+    private func availableClips(_ entries: [TopShelfCatalog.Entry]) async -> Set<String> {
+        await withTaskGroup(of: String?.self) { group in
+            for entry in entries {
+                guard let url = entry.previewVideoURL else { continue }
+                group.addTask {
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "HEAD"
+                    request.timeoutInterval = 4
+                    guard let (_, response) = try? await URLSession.shared.data(for: request),
+                          let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+                    return entry.id
+                }
+            }
+            var ids = Set<String>()
+            for await id in group { if let id { ids.insert(id) } }
+            return ids
+        }
     }
 
-    /// `GET /api/channels?slim=1`: every field above, without the scene specs
-    /// the full list carries for the app's live previews (~34 KB against
-    /// ~1.9 MB on 2026-11-17). The query goes through URLComponents because
-    /// `appendingPathComponent("api/channels?slim=1")` percent-encodes the `?`
-    /// into the path and asks for a channel list that doesn't exist.
-    private static var channelsURL: URL {
-        var parts = URLComponents(url: baseURL.appendingPathComponent("api/channels"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [URLQueryItem(name: "slim", value: "1")]
-        return parts.url!
-    }
-
-    private func fetchChannels() async throws -> [Channel] {
-        var request = URLRequest(url: Self.channelsURL)
+    private func fetchChannels() async throws -> [TopShelfCatalog.Channel] {
+        var request = URLRequest(url: TopShelfCatalog.channelsURL(baseURL: Self.baseURL))
         request.timeoutInterval = 10
         let (data, _) = try await URLSession.shared.data(for: request)
-        return try JSONDecoder().decode([Channel].self, from: data)
+        return try JSONDecoder().decode([TopShelfCatalog.Channel].self, from: data)
     }
 }

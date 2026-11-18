@@ -217,6 +217,8 @@ targets:
     platform: tvOS
     sources:
       - IdleScreensTVTests
+      # The Top Shelf's pure half (the extension itself can't host tests).
+      - path: IdleScreensTVTopShelf/TopShelfCatalog.swift
     dependencies:
       - target: IdleScreensTV
     settings:
