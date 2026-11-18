@@ -193,8 +193,27 @@ actor MCPClient {
     /// or when the tool reports `isError`. A `confirmation_required` answer is
     /// put to the person (via `confirmer`) and, on yes, repeated once with the
     /// server's token; on no it throws `.cancelled` and sends nothing more.
+    /// No caller can skip that question; the one exception has its own method,
+    /// `revokeTokenConfirmedInApp`.
     @discardableResult
     func callTool(_ name: String, arguments: [String: JSONValue] = [:], intent: String? = nil) async throws -> String {
+        try await call(name, arguments: arguments, intent: intent, approved: false)
+    }
+
+    /// `revokeToken` when the person already said yes to exactly this revoke,
+    /// in the app's own dialog that named it (unpairing a TV and revoking the
+    /// keys made for it). The server's question is then answered without
+    /// asking again. Only this tool, and only through this method, skips the
+    /// confirmer: a generic `approved` flag on `callTool` would let any caller
+    /// run any confirm-verb unasked.
+    func revokeTokenConfirmedInApp(channelId: String, token: String, id: String, intent: String) async throws {
+        try await call("revokeToken", arguments: [
+            "channelId": .string(channelId), "token": .string(token), "id": .string(id),
+        ], intent: intent, approved: true)
+    }
+
+    @discardableResult
+    private func call(_ name: String, arguments: [String: JSONValue], intent: String?, approved: Bool) async throws -> String {
         let args = attributed(name, arguments, intent: intent)
         let first = try await send(name, args)
         guard first.isError else { return first.text }
@@ -202,11 +221,13 @@ actor MCPClient {
         guard failure.code == "confirmation_required", let state = first.envelope?.requestState, !state.isEmpty else {
             throw MCPError.tool(failure)
         }
-        // No way to ask (e.g. a background path): surface the server's question
-        // as the error, never a silent no-op.
-        guard let confirmer else { throw MCPError.tool(failure) }
-        guard await confirmer(MCPConfirmationRequest(tool: name, message: failure.message)) else {
-            throw MCPError.cancelled(tool: name)
+        if !approved {
+            // No way to ask (e.g. a background path): surface the server's
+            // question as the error, never a silent no-op.
+            guard let confirmer else { throw MCPError.tool(failure) }
+            guard await confirmer(MCPConfirmationRequest(tool: name, message: failure.message)) else {
+                throw MCPError.cancelled(tool: name)
+            }
         }
         var confirmed = args
         confirmed["confirm"] = .string(state)
