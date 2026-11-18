@@ -48,12 +48,16 @@ final class ChannelCatalogTests: XCTestCase {
 
   // MARK: - The slim listing
 
-  /// The menu reads the slim list: `?slim=1` as a query, not `%3F` in the
-  /// path (which `appendingPathComponent` would make of it — a 404).
-  func testFetchesTheSlimListing() throws {
-    let base = try XCTUnwrap(URL(string: "https://idlescreens.com"))
-    let url = try XCTUnwrap(ServerEndpoint.url("/api/channels", query: ChannelCatalog.listQuery, base: base))
-    XCTAssertEqual(url.absoluteString, "https://idlescreens.com/api/channels?slim=1")
+  /// The URL `refresh` fetches is the slim list: `?slim=1` as a query, not
+  /// `%3F` in the path (which `appendingPathComponent` would make of it — a
+  /// 404), on whatever server the app points at.
+  func testRefreshFetchesTheSlimListing() throws {
+    let prod = try XCTUnwrap(URL(string: "https://idlescreens.com"))
+    XCTAssertEqual(ChannelCatalog.listURL(base: prod)?.absoluteString,
+                   "https://idlescreens.com/api/channels?slim=1")
+    let local = try XCTUnwrap(URL(string: "http://localhost:8787"))
+    XCTAssertEqual(ChannelCatalog.listURL(base: local)?.absoluteString,
+                   "http://localhost:8787/api/channels?slim=1")
   }
 
   /// Three rows verbatim from prod `GET /api/channels?slim=1` (2026-11-16):

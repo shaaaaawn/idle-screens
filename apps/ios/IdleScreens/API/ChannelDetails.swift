@@ -118,6 +118,9 @@ final class ChannelDetails {
     private var queue: [String] = []
     private var running: Set<String> = []
     private var failedAt: [String: Date] = [:]
+    /// Wanted and not since let go: the tiles on screen, plus neighbours
+    /// fetched ahead of a swipe. What `refresh` re-asks for.
+    private var shown: Set<String> = []
     private var arrived: [String: ChannelDetail] = [:]
     private var flush: Task<Void, Never>?
     /// Every detail that landed in one beat, on the main actor.
@@ -146,6 +149,7 @@ final class ChannelDetails {
     /// known is current.
     func want(_ channel: PublicChannel) {
         let id = channel.id
+        shown.insert(id)
         guard !isFresh(id, lastEventAt: channel.lastEventAt), !running.contains(id) else { return }
         if let failed = failedAt[id], Date().timeIntervalSince(failed) < Self.retryAfter { return }
         queue.removeAll { $0 == id }
@@ -153,9 +157,29 @@ final class ChannelDetails {
         pump()
     }
 
-    /// The tile went off screen before its read started.
+    /// The tile went off screen: a read that has not started is dropped.
     func unwant(_ id: String) {
+        shown.remove(id)
         queue.removeAll { $0 == id }
+    }
+
+    /// A fresh listing landed. A tile already on screen will not appear again
+    /// to ask, so the ones whose channel changed since their scene was read
+    /// are asked for here; until it lands the old poster stays.
+    func refresh(_ rows: [PublicChannel]) {
+        for row in rows where shown.contains(row.id) { want(row) }
+    }
+
+    /// `rows` with the scenes that landed in `batch`. An older scene never
+    /// replaces one a row already shows (a read in flight while the listing
+    /// advanced); a row with no scene yet still takes it, since an old poster
+    /// beats none.
+    static func merge(_ batch: [String: ChannelDetail], into rows: [PublicChannel]) -> [PublicChannel] {
+        rows.map { row in
+            guard let detail = batch[row.id] else { return row }
+            if row.detailLoaded, let at = row.lastEventAt, let have = detail.lastEventAt, have < at { return row }
+            return row.with(detail)
+        }
     }
 
     /// Learn the scene half of rows decoded whole (a channel's `/state`, the
