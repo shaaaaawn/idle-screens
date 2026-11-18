@@ -42,8 +42,13 @@ enum ChannelCatalog {
     return Array(picked.prefix(limit))
   }
 
-  /// `?slim=1` on the listing route.
-  static let listQuery = [URLQueryItem(name: "slim", value: "1")]
+  /// What `refresh` fetches: the slim list, every field `Entry` reads without
+  /// each channel's scene — 34 KB on prod (2026-11-16) where the full list was
+  /// ~2 MB. `?slim=1` goes in as a query: `appendingPathComponent` would encode
+  /// the `?` into the path and ask for a route that does not exist.
+  static func listURL(base: URL = ServerEndpoint.base) -> URL? {
+    ServerEndpoint.url("/api/channels", query: [URLQueryItem(name: "slim", value: "1")], base: base)
+  }
 
   private static let cacheKey = "channelCatalog"
   private static let cacheOriginKey = "channelCatalogOrigin"
@@ -72,9 +77,7 @@ enum ChannelCatalog {
   /// changed*, so the caller can rebuild the menu without churning it on every
   /// open. Failures are silent: the menu keeps whatever it had.
   static func refresh(completion: @escaping () -> Void) {
-    // The slim list: every field `Entry` reads, without each channel's scene.
-    // 34 KB on prod (2026-11-16), where the full list was ~2 MB.
-    guard let url = ServerEndpoint.url("/api/channels", query: listQuery) else { return }
+    guard let url = listURL() else { return }
     let origin = ServerEndpoint.base.absoluteString
     URLSession.shared.dataTask(with: url) { data, response, _ in
       guard let data,

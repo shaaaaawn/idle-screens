@@ -226,6 +226,7 @@ final class TVAppState {
         }
         do {
             channels = details.apply(to: hidden.visible(try await gallery.fetchChannels()))
+            details.refresh(channels)
             galleryError = nil
         } catch {
             // Keep showing cached content on refresh failure; only surface
@@ -336,7 +337,7 @@ final class TVAppState {
     /// batch, since every write re-evaluates the whole wall.
     func mergeDetails(_ batch: [String: ChannelDetail]) {
         guard channels.contains(where: { batch[$0.id] != nil }) else { return }
-        channels = channels.map { row in batch[row.id].map(row.with) ?? row }
+        channels = ChannelDetails.merge(batch, into: channels)
     }
 
     // MARK: Channel surfing

@@ -788,11 +788,14 @@ struct MixSourcePreview: View {
     @Environment(AppState.self) private var app
     let channel: PublicChannel
 
-    /// Who can be offered: a schema scene, or one whose scene is not known
-    /// yet. A classic saver has nothing to preview: it is dropped
-    /// as soon as its scene loads (a slim row cannot say before then).
+    /// Who can be offered: a schema scene, or a listed channel whose scene
+    /// is not known yet. A classic saver has nothing to preview: it is
+    /// dropped as soon as its scene loads (a slim row cannot say before then).
+    /// A private row on the wall was read whole with its key, so one with no
+    /// scene known is a refused key's placeholder — its scene never loads, and
+    /// it would sit in the picker as a dead tile.
     static func offered(_ channel: PublicChannel) -> Bool {
-        channel.spec != nil || !channel.detailLoaded
+        channel.spec != nil || (!channel.detailLoaded && channel.access != "private")
     }
 
     var body: some View {

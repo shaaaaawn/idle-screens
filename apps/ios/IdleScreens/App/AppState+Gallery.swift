@@ -35,6 +35,7 @@ extension AppState {
                     && keyring.contains(row.id)
             }
             channels = fresh + added
+            details.refresh(channels)
             if let fresh = await shelves { categories = fresh }
             galleryError = nil
             galleryLoadedAt = Date()
@@ -111,14 +112,7 @@ extension AppState {
     /// batch.
     func mergeDetails(_ batch: [String: ChannelDetail]) {
         guard channels.contains(where: { batch[$0.id] != nil }) else { return }
-        // An older scene never replaces one the row already shows: a response
-        // that was in flight when the listing advanced is dropped there (a row
-        // with no scene yet still takes it — an old poster beats none).
-        channels = channels.map { row in
-            guard let detail = batch[row.id] else { return row }
-            if row.detailLoaded, let at = row.lastEventAt, let have = detail.lastEventAt, have < at { return row }
-            return row.with(detail)
-        }
+        channels = ChannelDetails.merge(batch, into: channels)
     }
 
     /// Take a channel off this device's wall, now and on every reload.

@@ -382,6 +382,147 @@ final class ChannelDetailsTests: XCTestCase {
     }
 }
 
+/// What happens around a refresh: re-asking for what is on screen, and
+/// which arrivals a row takes.
+@MainActor
+final class ChannelDetailsRefreshTests: XCTestCase {
+    private var baseURL: URL!
+
+    override func setUp() {
+        super.setUp()
+        baseURL = URL(string: "https://refresh-\(UUID().uuidString.prefix(8).lowercased()).test")!
+    }
+
+    override func tearDown() {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("channel-details-v1-\(baseURL.host!)"))
+        super.tearDown()
+    }
+
+    private func fixture(_ name: String) throws -> Data {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json"))
+        return try Data(contentsOf: url)
+    }
+
+    private func row(_ id: String, at: Int?, loaded: Bool = false) -> PublicChannel {
+        PublicChannel(channelId: id, label: id, tags: nil, viewers: nil, lastEventAt: at, detailLoaded: loaded)
+    }
+
+    private func detail(at: Int?) throws -> ChannelDetail {
+        let lobby = try JSONDecoder().decode(PublicChannel.self, from: fixture("state-lobby-2026-11-16"))
+        return ChannelDetail(spec: lobby.spec, rawSpec: lobby.rawSpec, classicSaverId: nil,
+                             classicParams: [:], lastEventAt: at)
+    }
+
+    /// A listing that says an on-screen channel changed re-asks for its
+    /// scene — the tile will not appear again to ask. One off screen waits
+    /// until it shows.
+    func testARefreshReasksForAStaleSceneStillOnScreen() async throws {
+        let transport = MockTransport()
+        let lobbyState = try fixture("state-lobby-2026-11-16")
+        transport.handler = { _ in (lobbyState, 200) }
+        let details = ChannelDetails(gallery: GalleryClient(baseURL: baseURL, transport: transport),
+                                     cached: ["lobby": try detail(at: 100), "studio": try detail(at: 100)])
+        details.want(row("lobby", at: 100))
+        details.want(row("studio", at: 100))
+        details.unwant("studio")
+        XCTAssertEqual(transport.requests.count, 0, "both fresh: nothing to read")
+
+        details.refresh([row("lobby", at: 200), row("studio", at: 200), row("never-shown", at: 200)])
+        for _ in 0..<200 where transport.requests.count < 1 { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(transport.requests.map { $0.url?.path }, ["/c/lobby/state"])
+    }
+
+    /// The listing moved on while the tile's read was in flight: that read
+    /// lands older than the listing, so the scene is asked for again — once.
+    func testARefreshDuringAReadAsksAgainOnceItLands() async throws {
+        let transport = MockTransport()
+        let lobbyState = try fixture("state-lobby-2026-11-16")
+        transport.handler = { _ in (lobbyState, 200) }
+        let readAt = try XCTUnwrap(try JSONDecoder().decode(PublicChannel.self, from: lobbyState).lastEventAt)
+        let details = ChannelDetails(gallery: GalleryClient(baseURL: baseURL, transport: transport))
+        details.want(row("lobby", at: readAt))
+        details.refresh([row("lobby", at: readAt + 1)])
+        for _ in 0..<300 where transport.requests.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(transport.requests.count, 2, "re-asked after the in-flight read, and not again")
+    }
+
+    /// A channel on screen twice (the tvOS hero and its grid tile) stays
+    /// refreshed until both let go; a refresh is not an asker itself.
+    func testAChannelShownTwiceStaysRefreshedUntilBothLetGo() async throws {
+        let transport = MockTransport()
+        let lobbyState = try fixture("state-lobby-2026-11-16")
+        transport.handler = { _ in (lobbyState, 200) }
+        let readAt = try XCTUnwrap(try JSONDecoder().decode(PublicChannel.self, from: lobbyState).lastEventAt)
+        let details = ChannelDetails(gallery: GalleryClient(baseURL: baseURL, transport: transport),
+                                     cached: ["lobby": try detail(at: 100)])
+        details.want(row("lobby", at: 100))
+        details.want(row("lobby", at: 100))
+        details.unwant("lobby")
+        details.refresh([row("lobby", at: 200)])
+        for _ in 0..<300 where !details.isFresh("lobby", lastEventAt: readAt) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(transport.requests.count, 1, "one asker left: refreshed")
+
+        details.unwant("lobby")
+        details.refresh([row("lobby", at: readAt + 1)])
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(transport.requests.count, 1, "both let go: the refresh did not hold it")
+    }
+
+    /// A failed read waits out its backoff on redraws, but a listing that
+    /// says the channel changed asks again at once.
+    func testARefreshSkipsTheFailureBackoff() async throws {
+        let transport = MockTransport()
+        let lobbyState = try fixture("state-lobby-2026-11-16")
+        transport.handler = { [unowned transport] _ in
+            transport.requests.count == 1 ? (Data("oops".utf8), 500) : (lobbyState, 200)
+        }
+        let details = ChannelDetails(gallery: GalleryClient(baseURL: baseURL, transport: transport))
+        details.want(row("lobby", at: 100))
+        try await Task.sleep(for: .milliseconds(150))
+        details.want(row("lobby", at: 100))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(transport.requests.count, 1, "a redraw waits out the backoff")
+
+        details.refresh([row("lobby", at: 200)])
+        for _ in 0..<300 where transport.requests.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    /// A read that was in flight while the listing advanced does not paint
+    /// an older scene over the one a row shows; a row with none still takes it.
+    func testAnOlderArrivalNeverReplacesTheSceneARowShows() throws {
+        let shown = row("a", at: 200).with(try detail(at: 200))
+        let bare = row("b", at: 200)
+        let older = try detail(at: 150)
+        let merged = ChannelDetails.merge(["a": older, "b": older], into: [shown, bare])
+        XCTAssertEqual(merged[0], shown, "kept the newer scene")
+        XCTAssertTrue(merged[1].detailLoaded, "an old poster beats none")
+        XCTAssertEqual(merged[1].spec, older.spec)
+        let newer = try detail(at: 250)
+        XCTAssertEqual(ChannelDetails.merge(["a": newer], into: [shown])[0].spec, newer.spec)
+    }
+
+    /// The mix pickers offer schema scenes and listed channels not read yet;
+    /// never a classic saver once known, and never a refused key's
+    /// placeholder, whose scene can never load.
+    func testTheMixPickersOfferOnlyWhatCanBeMixed() throws {
+        XCTAssertTrue(MixSourcePreview.offered(row("slim", at: 1).asListed), "not read yet: offered")
+        XCTAssertTrue(MixSourcePreview.offered(row("scene", at: 1).with(try detail(at: 1))))
+        let tank = row("tank", at: 1).with(ChannelDetail(spec: nil, rawSpec: .object(["id": .string("metaquarium")]),
+                                                         classicSaverId: "metaquarium", classicParams: [:],
+                                                         lastEventAt: 1))
+        XCTAssertFalse(MixSourcePreview.offered(tank), "a classic saver has nothing to preview")
+        let refused = PublicChannel(channelId: "secret", label: "Secret", tags: nil, viewers: nil, access: "private")
+        XCTAssertFalse(refused.detailLoaded)
+        XCTAssertFalse(MixSourcePreview.offered(refused), "a refused key's placeholder never loads")
+    }
+}
+
 /// The app: the wall fills in as scenes land, and a mix republishes the
 /// source's scene as `/state` has it at the tap.
 @MainActor
