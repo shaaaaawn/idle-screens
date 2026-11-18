@@ -98,7 +98,9 @@ struct GalleryView: View {
             YourChannelsRail(channels: yours, cardWidth: gridCardWidth)
         }
         if !onNow.isEmpty {
-            OnNowRail(channels: onNow)
+            // Untitled at the top of the page; under "Your channels" it needs
+            // a name, or it reads as more of yours.
+            OnNowRail(channels: onNow, title: yours.isEmpty ? nil : "On now")
         }
         // Four of each category at once, two by two: you can compare them
         // without dragging a strip sideways, and "All N" opens the rest.
@@ -129,8 +131,11 @@ struct GalleryView: View {
         return owned.sorted { ($0.lastEventAt ?? 0) > ($1.lastEventAt ?? 0) }
     }
 
+    /// Never repeats a channel already in "Your channels" just above it:
+    /// with a key for `default` (the curated lead), the rail opened on the
+    /// very card the row above had just shown.
     private var onNow: [PublicChannel] {
-        var seen = Set<String>()
+        var seen = Set(yours.map(\.id))
         let lead = [heroChannel].compactMap { $0 }
         let latest = ChannelFeed.latestFirst(app.channels) { app.token(for: $0.id) != nil }
         return (lead + following + watchedNow + latest)
@@ -281,6 +286,7 @@ struct GalleryView: View {
 private struct OnNowRail: View {
     @Environment(\.deviceScale) private var scale
     let channels: [PublicChannel]
+    var title: String? = nil
     @Environment(AppState.self) private var app
     /// Kept after the reason dialog closes: the "hide it too?" alert that
     /// follows still needs to know which channel it is about.
@@ -289,18 +295,27 @@ private struct OnNowRail: View {
 
     var body: some View {
         let target = reportTarget
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 10) {
-                ForEach(channels) { channel in
-                    NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true,
-                                          onRefresh: { await app.loadGallery() })) {
-                        tile(channel)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu { CardMenu(channel: channel) { reportTarget = channel; showReport = true } }
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            if let title {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                    .padding(.horizontal, DeviceScale.margin(scale))
+                    .accessibilityAddTraits(.isHeader)
             }
-            .padding(.horizontal, DeviceScale.margin(scale))
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(channels) { channel in
+                        NavigationLink(destination: ChannelFeedView(channels: channels, start: channel.id, showsBack: true,
+                                              onRefresh: { await app.loadGallery() })) {
+                            tile(channel)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { CardMenu(channel: channel) { reportTarget = channel; showReport = true } }
+                    }
+                }
+                .padding(.horizontal, DeviceScale.margin(scale))
+            }
         }
         .reportChannelFlow(isPresented: $showReport,
                            channelLabel: target?.displayLabel ?? "",
