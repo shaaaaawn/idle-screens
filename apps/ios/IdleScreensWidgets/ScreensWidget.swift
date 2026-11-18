@@ -8,10 +8,11 @@ import WidgetKit
 struct ScreensEntry: TimelineEntry {
     let date: Date
     let snapshot: RemoteSnapshot?
-    /// The screen this widget steers; nil = every paired screen.
+    /// The screen this widget steers; nil = the screens you last chose in
+    /// the app (`RemoteSnapshot.defaultTargets`).
     let screen: ScreenEntity?
-    /// Live thumbs by channel id (JPEG posters only; a server drawing is SVG,
-    /// which a widget can't show, so those tiles draw their own art).
+    /// A still of each channel by id: its rendered link card, else a raster
+    /// thumb. A tile with neither draws its own art.
     let thumbs: [String: UIImage]
     /// The last send's line, while it is fresh.
     let status: SendOutcome?
@@ -54,25 +55,41 @@ struct ScreensProvider: AppIntentTimelineProvider {
         return ScreensEntry(date: now, snapshot: snapshot, screen: configuration.screen, thumbs: thumbs, status: status)
     }
 
-    /// Fetch each channel's poster, downsampled for a tile. Misses are fine.
+    /// A still for each tile. Misses are fine — the tile draws its own art.
+    ///
+    /// First choice is the channel's link card (`/c/<id>/og.jpg`): a real
+    /// render of the scene as a JPEG, which nearly every channel has (56 of 57
+    /// listed on 2026-11-18). `/c/<id>/thumb` alone left most tiles on drawn
+    /// art, because for a schema channel it is an SVG a widget can't show.
     static func thumbs(for ids: [String], base: String?) async -> [String: UIImage] {
         guard let base, let root = URL(string: base) else { return [:] }
         return await withTaskGroup(of: (String, UIImage?).self) { group in
             for id in ids {
                 group.addTask {
-                    var request = URLRequest(url: root.appendingPathComponent("c").appendingPathComponent(id).appendingPathComponent("thumb"))
-                    request.timeoutInterval = 6
-                    guard let (data, response) = try? await URLSession.shared.data(for: request),
-                          let type = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
-                          type.hasPrefix("image/jpeg") || type.hasPrefix("image/png") || type.hasPrefix("image/webp"),
-                          let image = UIImage(data: data) else { return (id, nil) }
-                    return (id, image.preparingThumbnail(of: CGSize(width: 320, height: 180)) ?? image)
+                    let channel = root.appendingPathComponent("c").appendingPathComponent(id)
+                    if let card = await still(channel.appendingPathComponent("og.jpg")) { return (id, card) }
+                    return (id, await still(channel.appendingPathComponent("thumb")))
                 }
             }
             var out: [String: UIImage] = [:]
             for await (id, image) in group { if let image { out[id] = image } }
             return out
         }
+    }
+
+    /// One raster image at `url`, decoded straight to tile size. A redirect
+    /// (a channel with no card is sent to the site's card) or anything that
+    /// isn't JPEG/PNG/WebP is a miss.
+    static func still(_ url: URL) async -> UIImage? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 6
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.url?.absoluteString == url.absoluteString,
+              let type = http.value(forHTTPHeaderField: "Content-Type"),
+              type.hasPrefix("image/jpeg") || type.hasPrefix("image/png") || type.hasPrefix("image/webp")
+        else { return nil }
+        return TileStill.downsampled(data, maxPixels: 400)
     }
 }
 
@@ -117,10 +134,12 @@ struct ScreensWidgetView: View {
     let entry: ScreensEntry
     @Environment(\.widgetFamily) private var family
 
+    /// The screens a tap here lights: the one this widget was set to, else
+    /// the ones you last chose in the app.
     private var screens: [RemoteSnapshot.Screen] {
-        let all = entry.snapshot?.screens ?? []
-        guard let id = entry.screen?.id else { return all }
-        return all.filter { $0.deviceId == id }
+        guard let snapshot = entry.snapshot else { return [] }
+        let ids = snapshot.targets(for: entry.screen?.id)
+        return snapshot.screens.filter { ids.contains($0.deviceId) }
     }
 
     private var channels: [RemoteSnapshot.Channel] {

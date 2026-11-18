@@ -60,6 +60,44 @@ final class ScreenRemoteTests: XCTestCase {
         XCTAssertEqual(outcome.message, "Couldn't reach your screens")
     }
 
+    func testNoScreenNamedGoesToTheScreensChosenInTheApp() async {
+        let transport = LockedTransport()
+        transport.handler = { _ in (Data(#"{"ok":true,"delivered":1}"#.utf8), 200) }
+        let remote = ScreenRemote(transport: transport) { ["tv-1": "isp_tv", "mac-2": "isp_mac"][$0] }
+        var snap = snapshot()
+        snap.castScreens = ["mac-2"]
+        let outcome = await remote.send(.init(id: "koi", label: "Koi pond", isPrivate: false), to: nil, in: snap)
+        XCTAssertEqual(outcome.delivered, ["mac-2"], "the widget follows the app's choice, not every screen")
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
+    func testDefaultTargets() {
+        var snap = snapshot()
+        XCTAssertEqual(snap.defaultTargets, ["tv-1", "mac-2"], "a snapshot from before the choice existed: every screen")
+        snap.castScreens = ["mac-2"]
+        XCTAssertEqual(snap.defaultTargets, ["mac-2"])
+        snap.castScreens = ["gone-9"]
+        XCTAssertEqual(snap.defaultTargets, ["tv-1", "mac-2"], "only unpaired screens remembered: every screen")
+        XCTAssertEqual(snap.targets(for: "tv-1"), ["tv-1"], "a widget set to one screen keeps it")
+        XCTAssertEqual(snap.targets(for: "gone-9"), [], "a widget set to an unpaired screen sends nowhere")
+    }
+
+    func testOlderSnapshotsStillDecode() throws {
+        let old = #"{"baseURL":"https://example.com","screens":[],"channels":[],"writtenAt":0}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        let snap = try decoder.decode(RemoteSnapshot.self, from: Data(old.utf8))
+        XCTAssertNil(snap.castScreens)
+    }
+
+    func testNextFollowsTheChosenScreen() {
+        var snap = snapshot()
+        snap.screens[1].channelId = "koi"
+        snap.castScreens = ["mac-2"]
+        XCTAssertEqual(SendChannelIntent.next(in: snap, screen: nil)?.id, "aurora",
+                       "after what the chosen screen (koi) shows, wrapping")
+    }
+
     // MARK: Snapshot
 
     func testASendMovesTheScreensThatTookIt() {

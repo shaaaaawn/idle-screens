@@ -88,7 +88,7 @@ struct SendChannelIntent: AppIntent {
     @Parameter(title: "Channel", description: "Leave empty to move on to the next channel.")
     var channel: ChannelEntity?
 
-    @Parameter(title: "Screen", description: "Leave empty for every paired screen.")
+    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app, or every paired screen if none is left.")
     var screen: ScreenEntity?
 
     init() {}
@@ -135,7 +135,8 @@ struct SendChannelIntent: AppIntent {
     static func next(in snapshot: RemoteSnapshot, screen: String?) -> RemoteSnapshot.Channel? {
         let list = snapshot.quickChannels.filter { !$0.isPrivate }
         guard !list.isEmpty else { return nil }
-        let showing = snapshot.screens.first { screen == nil || $0.deviceId == screen }?.channelId
+        let targets = snapshot.targets(for: screen)
+        let showing = snapshot.screens.first { targets.contains($0.deviceId) }?.channelId
         guard let showing, let at = list.firstIndex(where: { $0.id == showing }) else { return list[0] }
         return list[(at + 1) % list.count]
     }
@@ -189,7 +190,7 @@ struct ScreensWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Screens"
     static let description = IntentDescription("Channels to put on your screens with one tap.")
 
-    @Parameter(title: "Screen", description: "Leave empty to send to every paired screen.")
+    @Parameter(title: "Screen", description: "Leave empty for the screens you last chose in the app, or every paired screen if none is left.")
     var screen: ScreenEntity?
 
     init() {}
