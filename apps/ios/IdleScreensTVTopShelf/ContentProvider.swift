@@ -36,11 +36,7 @@ final class ContentProvider: TVTopShelfContentProvider {
             let item = TVTopShelfSectionedItem(identifier: id)
             item.title = channel.label ?? id
             item.imageShape = .hdtv
-            let thumb = Self.baseURL
-                .appendingPathComponent("c")
-                .appendingPathComponent(id)
-                .appendingPathComponent("thumb")
-            item.setImageURL(thumb, for: [.screenScale1x, .screenScale2x])
+            item.setImageURL(Self.imageURL(for: id), for: [.screenScale1x, .screenScale2x])
             if let link = URL(string: "idlescreens://channel/\(id)") {
                 item.displayAction = TVTopShelfAction(url: link)
                 item.playAction = TVTopShelfAction(url: link)
@@ -51,6 +47,16 @@ final class ContentProvider: TVTopShelfContentProvider {
         let section = TVTopShelfItemCollection(items: items)
         section.title = "Live channels"
         return TVTopShelfSectionedContent(sections: [section])
+    }
+
+    /// The channel's rendered card, `/c/<id>/og.jpg`: always a JPEG (a
+    /// channel without one redirects to the site's card). Not `/c/<id>/thumb`:
+    /// for a claimed channel, and for the demo channels until a viewer has
+    /// captured a frame, that is an SVG server render, which the Top Shelf
+    /// cannot draw. Those tiles spun forever (default, lobby and studio, the
+    /// first three featured, on 2026-11-18).
+    static func imageURL(for id: String) -> URL {
+        baseURL.appendingPathComponent("c").appendingPathComponent(id).appendingPathComponent("og.jpg")
     }
 
     /// `GET /api/channels?slim=1`: every field above, without the scene specs

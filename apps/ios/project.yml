@@ -176,7 +176,7 @@ targets:
               - idlescreens
 
   IdleScreensTVTopShelf:
-    type: tv-app-extension
+    type: app-extension
     platform: tvOS
     sources:
       - IdleScreensTVTopShelf
