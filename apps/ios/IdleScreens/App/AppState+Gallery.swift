@@ -75,8 +75,9 @@ extension AppState {
             case .privateRow(let row): rows.append(row); keyringPublicIds.remove(id)
             // Unlisted but public: the widget can send it without the app.
             case .isPublic: keyringPublicIds.insert(id)
-            // A failed read says nothing; what was learned before stands.
-            case .unknown: break
+            // A failed read can't vouch for it any more: back through the
+            // app, in case it has gone private since.
+            case .unknown: keyringPublicIds.remove(id)
             }
         }
         // Hidden, or taken off the keyring, while the reads were in flight:

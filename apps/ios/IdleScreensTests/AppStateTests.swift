@@ -307,5 +307,11 @@ final class KeyringRowsTests: XCTestCase {
         let after = Dictionary(uniqueKeysWithValues: app.remoteChannels().map { ($0.id, $0.isPrivate) })
         XCTAssertEqual(after["mine-open"], false)
         XCTAssertEqual(after["mine-down"], true)
+
+        // Its next read fails: the old "public" no longer vouches for it.
+        transport.handler = { _ in (Data(), 503) }
+        _ = await app.keyringPrivateChannels(missingFrom: [])
+        let failed = Dictionary(uniqueKeysWithValues: app.remoteChannels().map { ($0.id, $0.isPrivate) })
+        XCTAssertEqual(failed["mine-open"], true, "a failed read fails closed")
     }
 }
