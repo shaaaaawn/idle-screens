@@ -58,15 +58,26 @@ extension AppState {
         let wanted = credentials.filter { !known.contains($0.channelId) && !hidden.isHidden($0.channelId) }
         guard !wanted.isEmpty else { return [] }
         let gallery = self.gallery
-        let rows = await withTaskGroup(of: PublicChannel?.self) { group in
+        let reads = await withTaskGroup(of: (String, GalleryClient.KeyringRead).self) { group in
             for credential in wanted {
                 group.addTask {
-                    await gallery.fetchPrivateChannel(channelId: credential.channelId, label: credential.label)
+                    (credential.channelId,
+                     await gallery.readKeyringChannel(channelId: credential.channelId, label: credential.label))
                 }
             }
-            var rows: [PublicChannel] = []
-            for await row in group { if let row { rows.append(row) } }
-            return rows
+            var reads: [(String, GalleryClient.KeyringRead)] = []
+            for await read in group { reads.append(read) }
+            return reads
+        }
+        var rows: [PublicChannel] = []
+        for (id, read) in reads {
+            switch read {
+            case .privateRow(let row): rows.append(row); keyringPublicIds.remove(id)
+            // Unlisted but public: the widget can send it without the app.
+            case .isPublic: keyringPublicIds.insert(id)
+            // A failed read says nothing; what was learned before stands.
+            case .unknown: break
+            }
         }
         // Hidden, or taken off the keyring, while the reads were in flight:
         // still out.

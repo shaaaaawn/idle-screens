@@ -57,8 +57,11 @@ extension AppState {
             guard !seen.contains(id), !hidden.isHidden(id) else { return }
             seen.insert(id)
             let row = channels.first { $0.id == id }
+            // An unlisted channel of yours is not on the wall, but its own
+            // read said public: the widget sends it without the app.
+            let access = row?.access ?? (keyringPublicIds.contains(id) ? "public" : nil)
             out.append(.init(id: id, label: row?.label ?? label ?? id,
-                             isPrivate: Self.needsAppToSend(access: row?.access, holdsKey: token(for: id) != nil)))
+                             isPrivate: Self.needsAppToSend(access: access, holdsKey: token(for: id) != nil)))
         }
         for id in follows.followed.sorted() { add(id, nil) }
         for credential in credentials { add(credential.channelId, credential.label) }
