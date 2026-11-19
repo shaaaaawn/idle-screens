@@ -96,9 +96,14 @@ extension AppState {
     func addKeyringPrivateChannels(staleAfter: TimeInterval = 0) async {
         if staleAfter > 0, let at = keyringRowsAddedAt, Date().timeIntervalSince(at) < staleAfter { return }
         keyringRowsAddedAt = Date()
+        let publicBefore = keyringPublicIds
         let extra = await keyringPrivateChannels(missingFrom: channels)
         let known = Set(channels.map(\.id))
         channels += extra.filter { !known.contains($0.id) }
+        // The wall load's success path refreshes the snapshot itself; this one
+        // (listing failed, or a Watch appearance) must, or a tile's send/open
+        // choice waits for the app to leave the foreground.
+        if keyringPublicIds != publicBefore { refreshRemoteSnapshot() }
     }
 
     /// A tile showing `channel` is on screen: fetch its scene if the one
