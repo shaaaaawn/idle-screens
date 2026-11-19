@@ -58,15 +58,27 @@ extension AppState {
         let wanted = credentials.filter { !known.contains($0.channelId) && !hidden.isHidden($0.channelId) }
         guard !wanted.isEmpty else { return [] }
         let gallery = self.gallery
-        let rows = await withTaskGroup(of: PublicChannel?.self) { group in
+        let reads = await withTaskGroup(of: (String, GalleryClient.KeyringRead).self) { group in
             for credential in wanted {
                 group.addTask {
-                    await gallery.fetchPrivateChannel(channelId: credential.channelId, label: credential.label)
+                    (credential.channelId,
+                     await gallery.readKeyringChannel(channelId: credential.channelId, label: credential.label))
                 }
             }
-            var rows: [PublicChannel] = []
-            for await row in group { if let row { rows.append(row) } }
-            return rows
+            var reads: [(String, GalleryClient.KeyringRead)] = []
+            for await read in group { reads.append(read) }
+            return reads
+        }
+        var rows: [PublicChannel] = []
+        for (id, read) in reads {
+            switch read {
+            case .privateRow(let row): rows.append(row); keyringPublicIds.remove(id)
+            // Unlisted but public: the widget can send it without the app.
+            case .isPublic: keyringPublicIds.insert(id)
+            // A failed read can't vouch for it any more: back through the
+            // app, in case it has gone private since.
+            case .unknown: keyringPublicIds.remove(id)
+            }
         }
         // Hidden, or taken off the keyring, while the reads were in flight:
         // still out.
@@ -84,9 +96,14 @@ extension AppState {
     func addKeyringPrivateChannels(staleAfter: TimeInterval = 0) async {
         if staleAfter > 0, let at = keyringRowsAddedAt, Date().timeIntervalSince(at) < staleAfter { return }
         keyringRowsAddedAt = Date()
+        let publicBefore = keyringPublicIds
         let extra = await keyringPrivateChannels(missingFrom: channels)
         let known = Set(channels.map(\.id))
         channels += extra.filter { !known.contains($0.id) }
+        // The wall load's success path refreshes the snapshot itself; this one
+        // (listing failed, or a Watch appearance) must, or a tile's send/open
+        // choice waits for the app to leave the foreground.
+        if keyringPublicIds != publicBefore { refreshRemoteSnapshot() }
     }
 
     /// A tile showing `channel` is on screen: fetch its scene if the one

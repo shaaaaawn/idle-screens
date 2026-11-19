@@ -59,6 +59,10 @@ final class AppState {
     @ObservationIgnored var screenKeyMints: [String: Task<String, Error>] = [:]
     /// When the keyring's private channels were last added to a cached wall.
     @ObservationIgnored var keyringRowsAddedAt: Date?
+    /// Keyring channels the listing leaves out (unlisted) whose own `/state`
+    /// says they are public. Without it the widget took every one of them for
+    /// private and made its tile open the app instead of sending.
+    @ObservationIgnored var keyringPublicIds: Set<String> = []
     /// Failure claiming a pair code. Separate from `pairPushError` so a failed
     /// push doesn't surface as a stale error inside "Add a screen".
     var pairClaimError: String?

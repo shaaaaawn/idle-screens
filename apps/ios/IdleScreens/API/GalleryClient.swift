@@ -265,24 +265,41 @@ actor GalleryClient {
     /// name under `meta.label` (the keyring's is the fallback). nil for a public
     /// channel: those reach the wall through the listing or not at all.
     func fetchPrivateChannel(channelId: String, label: String) async -> PublicChannel? {
+        if case .privateRow(let row) = await readKeyringChannel(channelId: channelId, label: label) { return row }
+        return nil
+    }
+
+    /// What a keyring channel's own `/state` says about it.
+    enum KeyringRead: Sendable {
+        /// Private: its row, for the wall.
+        case privateRow(PublicChannel)
+        /// Public, though the listing left it out (unlisted).
+        case isPublic
+        /// The read failed or said nothing either way.
+        case unknown
+    }
+
+    /// `fetchPrivateChannel`, keeping the answer for a public channel too:
+    /// the widget sends a public one itself, and needs the app for a private one.
+    func readKeyringChannel(channelId: String, label: String) async -> KeyringRead {
         let url = baseURL.appendingPathComponent("c").appendingPathComponent(channelId)
             .appendingPathComponent("state")
-        guard let (data, http) = try? await channelRead(url, channelId: channelId) else { return nil }
+        guard let (data, http) = try? await channelRead(url, channelId: channelId) else { return .unknown }
         // The key was sent and refused (revoked or rotated): keep the row, so
         // opening it reaches the gate's "Add a new key" instead of the
         // channel quietly leaving the wall.
         // Only a key that was actually sent: a malformed one never is.
         if http.statusCode == 403, Self.isPrivateRefusal(data),
            let held = key(channelId), ChannelTokenFormat.isWellFormedToken(held) {
-            return PublicChannel(channelId: channelId, label: label, tags: nil, viewers: nil, access: "private")
+            return .privateRow(PublicChannel(channelId: channelId, label: label, tags: nil, viewers: nil, access: "private"))
         }
         guard (200...299).contains(http.statusCode),
-              let row = try? JSONDecoder().decode(PublicChannel.self, from: data),
-              row.access == "private" else { return nil }
+              let row = try? JSONDecoder().decode(PublicChannel.self, from: data) else { return .unknown }
+        guard row.access == "private" else { return row.access == "public" ? .isPublic : .unknown }
         // `/state` names the channel under `meta.label`; the keyring's own
         // name (often just the id) is the fallback.
         let named = (try? JSONDecoder().decode(StateMeta.self, from: data))?.meta?.label
-        return row.withIdentity(channelId: channelId, label: named ?? label)
+        return .privateRow(row.withIdentity(channelId: channelId, label: named ?? label))
     }
 
     private struct StateMeta: Decodable {

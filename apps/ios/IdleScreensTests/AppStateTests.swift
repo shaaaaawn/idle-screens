@@ -276,4 +276,42 @@ final class KeyringRowsTests: XCTestCase {
         let rows = await read.value
         XCTAssertTrue(rows.isEmpty)
     }
+
+    /// An unlisted channel you hold a key for is off the wall. Its own read
+    /// says public, so the widget's tile sends it instead of opening the app;
+    /// one whose read failed still goes through the app, in case it is private.
+    func testAnUnlistedPublicChannelOfYoursIsSentByTheWidget() async {
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let transport = MockTransport()
+        transport.handler = { request in
+            request.url!.path.contains("/c/mine-open/")
+                ? (Data(#"{"channelId":"mine-open","access":"public"}"#.utf8), 200)
+                : (Data(), 503)
+        }
+        let store = CredentialStore(userDefaults: defaults)
+        store.save([ChannelCredential(channelId: "mine-open", label: "Open", createdAt: Date(), role: .owner),
+                    ChannelCredential(channelId: "mine-down", label: "Down", createdAt: Date(), role: .owner)])
+        _ = store.setToken("isk_" + String(repeating: "a", count: 40), for: "mine-open")
+        _ = store.setToken("isk_" + String(repeating: "b", count: 40), for: "mine-down")
+        defer { store.removeToken(for: "mine-open"); store.removeToken(for: "mine-down") }
+        let app = AppState(mcp: MCPClient(baseURL: baseURL, transport: transport),
+                           gallery: GalleryClient(baseURL: baseURL, transport: transport),
+                           store: store)
+
+        let before = Dictionary(uniqueKeysWithValues: app.remoteChannels().map { ($0.id, $0.isPrivate) })
+        XCTAssertEqual(before["mine-open"], true, "unknown and keyed: it may be private")
+
+        let rows = await app.keyringPrivateChannels(missingFrom: [])
+        XCTAssertTrue(rows.isEmpty, "a public channel is not added to the wall as a private row")
+        let after = Dictionary(uniqueKeysWithValues: app.remoteChannels().map { ($0.id, $0.isPrivate) })
+        XCTAssertEqual(after["mine-open"], false)
+        XCTAssertEqual(after["mine-down"], true)
+
+        // Its next read fails: the old "public" no longer vouches for it.
+        transport.handler = { _ in (Data(), 503) }
+        _ = await app.keyringPrivateChannels(missingFrom: [])
+        let failed = Dictionary(uniqueKeysWithValues: app.remoteChannels().map { ($0.id, $0.isPrivate) })
+        XCTAssertEqual(failed["mine-open"], true, "a failed read fails closed")
+    }
 }

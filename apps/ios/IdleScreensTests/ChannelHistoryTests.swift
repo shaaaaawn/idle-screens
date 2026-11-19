@@ -171,4 +171,24 @@ final class ChannelReadTests: XCTestCase {
         let malformed = await client(bad, key: "isk_bad\n").fetchPrivateChannel(channelId: "secret", label: "Secret")
         XCTAssertNil(malformed)
     }
+
+    /// An unlisted channel of yours reads as public, so the widget can send
+    /// it itself; a failed read says nothing either way.
+    func testAKeyringReadTellsPublicFromUnknown() async {
+        let open = MockTransport()
+        open.handler = { _ in (Data(#"{"channelId":"mine","access":"public"}"#.utf8), 200) }
+        guard case .isPublic = await client(open, key: key).readKeyringChannel(channelId: "mine", label: "Mine") else {
+            return XCTFail("an unlisted public channel reads as public")
+        }
+        let down = MockTransport()
+        down.handler = { _ in (Data(), 503) }
+        guard case .unknown = await client(down, key: key).readKeyringChannel(channelId: "mine", label: "Mine") else {
+            return XCTFail("a failed read is unknown, not public")
+        }
+        let quiet = MockTransport()
+        quiet.handler = { _ in (Data(#"{"channelId":"mine"}"#.utf8), 200) }
+        guard case .unknown = await client(quiet, key: key).readKeyringChannel(channelId: "mine", label: "Mine") else {
+            return XCTFail("no access field is unknown, not public")
+        }
+    }
 }
