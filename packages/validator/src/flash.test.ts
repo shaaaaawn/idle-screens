@@ -69,6 +69,60 @@ describe('analyzeFlashes — general flash (WCAG 2.3.1)', () => {
     expect(r.passes).toBe(true);
   });
 
+  // Audit 2026-11-18 #3: the first move was measured from the first sample only,
+  // so a strobe whose first frame sat between its two levels read as 0 flashes.
+  it('catches a strobe whose first sample sits mid-swing (10 Hz, 0.21 <-> 0.39, starting at 0.30)', () => {
+    const wave = square(10, 0.39, 0.21);
+    const r = analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.3 : wave(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(10);
+    expect(r.passes).toBe(false);
+    // The same wave starting on a peak: the two must agree.
+    expect(analyzeFlashes(makeSamples(64, wave)).general.worstTileFlashesPerSecond).toBe(10);
+  });
+
+  it('catches a mid-swing strobe whose first move is a rise (low phase first)', () => {
+    // The case above opens on the high phase, so its first transition is a fall
+    // from the highest level seen. Opening on the low phase takes the other
+    // branch: a rise measured from the lowest level seen (0.21), not from 0.30.
+    const wave = square(10, 0.21, 0.39);
+    const r = analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.3 : wave(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(10);
+    expect(r.passes).toBe(false);
+  });
+
+  it('a mid-swing start on the approximate red channel is caught too', () => {
+    // Same bug, same function: the red channel (swing 0.20) anchored on its first sample.
+    const red = square(10, 0.7, 0.4);
+    const r = analyzeFlashes(makeSamples(64, () => 0.5, (f) => (f === 0 ? 0.55 : red(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(0);
+    expect(r.red.worstTileFlashesPerSecond).toBe(10);
+    expect(r.red.fails).toBe(true);
+  });
+
+  it('mid-swing start still respects the area and dark guards', () => {
+    // Darker level 0.85: never a flash, wherever it starts.
+    const bright = square(10, 1.0, 0.85);
+    expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.92 : bright(f)))).passes).toBe(true);
+    // A localized mid-swing strobe: 15/64 tiles (< 25%) is exempt, 16/64 (= 25%) fails.
+    const strobe = square(10, 0.39, 0.21);
+    const localized = (count: number) => (f: number, tile: number) =>
+      tile < count ? (f === 0 ? 0.3 : strobe(f)) : 0.5;
+    const below = analyzeFlashes(makeSamples(64, localized(15)));
+    expect(below.general.worstTileFlashesPerSecond).toBe(10);
+    expect(below.passes).toBe(true);
+    expect(analyzeFlashes(makeSamples(64, localized(16))).general.fails).toBe(true);
+    // Swing 0.08 around a 0.5 start: below threshold either way.
+    const small = square(10, 0.54, 0.46);
+    expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.5 : small(f)))).general.worstTileFlashesPerSecond).toBe(0);
+  });
+
+  it('a slow drift then a reversal counts the same as before (one rise, one fall)', () => {
+    // 0.5 -> 0.62 (a rise of 0.12), then -> 0.45 (a fall of 0.17): two transitions, one flash.
+    const series = [0.5, 0.56, 0.62, 0.45];
+    const r = analyzeFlashes(series.map((v, i) => ({ t: i * 100, lum: [v] })));
+    expect(r.general.worstTileFlashesPerSecond).toBe(1);
+  });
+
   it('a swing below 0.10 does NOT count', () => {
     const r = analyzeFlashes(makeSamples(64, square(10, 0.5, 0.45)));
     expect(r.general.worstTileFlashesPerSecond).toBe(0);
