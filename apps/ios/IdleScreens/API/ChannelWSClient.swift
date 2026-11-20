@@ -254,18 +254,53 @@ extension JSONValue {
 
 // MARK: - Client
 
+/// How long to wait before reopening a channel socket: 1 s doubling to a
+/// 30 s cap, each wait jittered between half and all of its step ("equal
+/// jitter"), so a fleet that lost the server together does not come back in
+/// step, and no retry is immediate.
+///
+/// The ladder starts over only when a connection has delivered a frame.
+/// `WebSocketConnecting.open` builds the task and does no I/O, so resetting
+/// after it (as this did until 2026-11) held every retry at 1 s: through an
+/// outage every screen retried about once a second, forever (audit
+/// 2026-11-18 #11).
+struct ReconnectBackoff: Equatable, Sendable {
+    static let floor: Double = 1
+    static let cap: Double = 30
+    /// The current rung, seconds: a wait falls in `step / 2 ... step`.
+    private(set) var step: Double = floor
+
+    /// The wait before the next attempt, then the ladder climbs a rung.
+    /// `unit` (0...1) picks the point in the rung; random by default.
+    mutating func next(unit: Double = .random(in: 0...1)) -> Double {
+        let wait = step * (0.5 + 0.5 * min(max(unit, 0), 1))
+        step = min(step * 2, Self.cap)
+        return wait
+    }
+
+    /// The server spoke: this connection was real, so start over.
+    mutating func reset() { step = Self.floor }
+}
+
 /// Live channel feed over `wss://<base>/c/:channelId/ws`.
-/// Delivers typed events; reconnects with exponential backoff (1s → 30s cap).
+/// Delivers typed events; reconnects on a jittered backoff (`ReconnectBackoff`,
+/// 1 s → 30 s) that resets only once a connection has delivered a frame.
 actor ChannelWSClient {
     /// `nonisolated` so the reconnect loop — which runs in the stream's
     /// non-isolated build closure — can reach it without hopping the actor.
     /// Safe because it is a `let` of a `Sendable` type.
     private nonisolated let connector: any WebSocketConnecting
+    /// How the reconnect loop waits out a backoff (seconds). A test swaps in
+    /// one that records the wait, so the ladder can be read without being
+    /// slept through. `nonisolated` for the same reason as `connector`.
+    private nonisolated let pause: @Sendable (Double) async -> Void
     private var session: (any WebSocketSession)?
     private var receiveTask: Task<Void, Never>?
 
-    init(connector: any WebSocketConnecting = URLSessionWebSocketConnector()) {
+    init(connector: any WebSocketConnecting = URLSessionWebSocketConnector(),
+         pause: @escaping @Sendable (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.connector = connector
+        self.pause = pause
     }
 
     static func webSocketURL(baseURL: URL, channelId: String, deviceId: String? = nil) -> URL {
@@ -301,7 +336,7 @@ actor ChannelWSClient {
         // used" rather than anything about the actual body.
         return AsyncThrowingStream<ChannelWSEvent, Error> { continuation in
             let task = Task { [self] in
-                var backoff: UInt64 = 1
+                var backoff = ReconnectBackoff()
                 while !Task.isCancelled {
                     var handshake = Handshake()
                     var opened: (any WebSocketSession)?
@@ -312,8 +347,10 @@ actor ChannelWSClient {
                         // method; this closure itself is @Sendable and cannot
                         // assign to `self.session` directly.
                         adopt(session: session)
-                        backoff = 1
                         for try await text in session.incoming {
+                            // A frame is the server talking: only now is this
+                            // connection known to be real (`open` did no I/O).
+                            backoff.reset()
                             guard var event = Self.parse(text) else { continue }
                             if case .authRequired = event {
                                 // Answer from the key this device holds, if any.
@@ -347,8 +384,7 @@ actor ChannelWSClient {
                     case .retry:
                         break
                     }
-                    try? await Task.sleep(for: .seconds(backoff))
-                    backoff = min(backoff * 2, 30)
+                    await pause(backoff.next())
                 }
                 continuation.finish()
             }

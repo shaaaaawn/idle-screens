@@ -55,6 +55,35 @@ final class PathDrawingTests: XCTestCase {
         XCTAssertEqual(f.points.count, 3)
     }
 
+    /// Audit 2026-11-18 #6: the validator accepts an arc radius near 1e13, where
+    /// `1 - tolerance / r` is exactly 1, acos 0 and the segment count +inf —
+    /// and `Int(+inf)` trapped every iPhone and Apple TV that decoded the
+    /// scene. shapes.ts clamps to 96 first. (The `1e400` and overflow cases
+    /// are goldens above: their result is exact.) The points here are
+    /// differences of numbers near 1e13, an ulp ≈ 2e-3, so libm and V8 need
+    /// not agree to the last place: assert the shape, not the digits.
+    func testAHugeArcRadiusClampsInsteadOfTrapping() {
+        for d in ["M0 0 A1e13 1e13 0 0 1 0.5 0 L0.5 0.5 Z",
+                  "M0 0 A2e13 2e13 0 0 1 0.5 0 L0.5 0.5 Z"] {
+            let f = PathGeometry.flatten(d)
+            XCTAssertNil(f.error, d)
+            XCTAssertGreaterThanOrEqual(f.points.count, 3, d)
+            XCTAssertLessThanOrEqual(f.points.count, 8, d)
+            for p in f.points {
+                XCTAssertLessThanOrEqual(abs(p.0), 1.0001, d)
+                XCTAssertLessThanOrEqual(abs(p.1), 1.0001, d)
+            }
+        }
+    }
+
+    func testSegmentCountsClampBeforeConverting() {
+        XCTAssertEqual(PathGeometry.segmentCount(.infinity, cap: 96), 96)
+        XCTAssertEqual(PathGeometry.segmentCount(1e300, cap: 64), 64)
+        XCTAssertEqual(PathGeometry.segmentCount(.nan, cap: 96), 0, "TS draws no segment for NaN")
+        XCTAssertEqual(PathGeometry.segmentCount(0.2, cap: 96), 2)
+        XCTAssertEqual(PathGeometry.segmentCount(7.1, cap: 96), 8)
+    }
+
     // MARK: - Decoding
 
     private func layers(_ sprite: String, extra: String = "") throws -> [CompiledLayer] {

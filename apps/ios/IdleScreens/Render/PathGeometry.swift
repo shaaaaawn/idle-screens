@@ -99,9 +99,32 @@ enum PathGeometry {
         return out
     }
 
+    // MARK: - JS number semantics
+    //
+    // Swift's `max`/`min` drop a NaN (`max(0, .nan)` is 0) where `Math.max`
+    // / `Math.min` return NaN, and `Int(_:)` traps on NaN, ±infinity or
+    // anything past Int.max where JS just carries the value on. A path the
+    // validator accepts can reach either: an arc radius near 1e13 (`acos(1)`
+    // is 0, so its segment count is +inf) or a `1e400` token (infinity, so
+    // NaN downstream) — and the trap took the whole app down (audit
+    // 2026-11-18 #6). The flattener uses these wherever shapes.ts uses
+    // `Math.max` / `Math.min`, so a degenerate number lands where it lands
+    // in TS.
+
+    static func jsMax(_ a: Double, _ b: Double) -> Double { a.isNaN || b.isNaN ? .nan : max(a, b) }
+    static func jsMin(_ a: Double, _ b: Double) -> Double { a.isNaN || b.isNaN ? .nan : min(a, b) }
+
+    /// shapes.ts's `Math.max(2, Math.min(cap, Math.ceil(raw)))`, clamped while
+    /// still a Double so the conversion cannot trap: +inf is `cap`. NaN is 0
+    /// segments — in TS `k <= NaN` never runs the loop, so the curve adds no
+    /// point and the pen stays where it was.
+    static func segmentCount(_ raw: Double, cap: Int) -> Int {
+        let n = jsMax(2, jsMin(Double(cap), ceil(raw)))
+        return n.isNaN ? 0 : Int(n)
+    }
+
     private static func segmentsFor(chord: Double, curvature: Double) -> Int {
-        let n = Int(ceil(sqrt(max(curvature, chord * 0.05) / (4 * tolerance))))
-        return max(2, min(64, n))
+        segmentCount(sqrt(jsMax(curvature, chord * 0.05) / (4 * tolerance)), cap: 64)
     }
 
     static func parseAndFlatten(_ d: String) throws -> (rings: [[Pt]], lines: [Line]) {
@@ -141,7 +164,7 @@ enum PathGeometry {
             let dev = hypot(x1 - cx, y1 - cy) + hypot(x2 - x1, y2 - y1) + hypot(x - x2, y - y2) - hypot(x - cx, y - cy)
             let n = segmentsFor(chord: hypot(x - cx, y - cy), curvature: dev * 4)
             let x0 = cx, y0 = cy
-            for k in 1...n {
+            for k in stride(from: 1, through: n, by: 1) { // n is 0 when TS draws nothing
                 let t = Double(k) / Double(n), u = 1 - t
                 push(u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x,
                      u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y)
@@ -152,7 +175,7 @@ enum PathGeometry {
             let dev = hypot(x1 - cx, y1 - cy) + hypot(x - x1, y - y1) - hypot(x - cx, y - cy)
             let n = segmentsFor(chord: hypot(x - cx, y - cy), curvature: dev * 4)
             let x0 = cx, y0 = cy
-            for k in 1...n {
+            for k in stride(from: 1, through: n, by: 1) { // n is 0 when TS draws nothing
                 let t = Double(k) / Double(n), u = 1 - t
                 push(u * u * x0 + 2 * u * t * x1 + t * t * x, u * u * y0 + 2 * u * t * y1 + t * t * y)
             }
@@ -170,7 +193,7 @@ enum PathGeometry {
             if lam > 1 { rx *= sqrt(lam); ry *= sqrt(lam) }
             let num2 = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p
             let den = rx * rx * y1p * y1p + ry * ry * x1p * x1p
-            var co = sqrt(max(0, num2 / den))
+            var co = sqrt(jsMax(0, num2 / den))
             if large == sweep { co = -co }
             let cxp = (co * rx * y1p) / ry, cyp = (-co * ry * x1p) / rx
             let ccx = cp * cxp - sp * cyp + (x0 + x) / 2, ccy = sp * cxp + cp * cyp + (y0 + y) / 2
@@ -179,9 +202,11 @@ enum PathGeometry {
             var dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry)
             if sweep == 0 && dt > 0 { dt -= 2 * .pi }
             if sweep != 0 && dt < 0 { dt += 2 * .pi }
-            let r = max(rx, ry)
-            let n = max(2, min(96, Int(ceil(abs(dt) / (2 * acos(max(0, 1 - tolerance / r)))))))
-            for k in 1...n {
+            let r = jsMax(rx, ry)
+            // A radius past ~4.5e12 makes `1 - tolerance / r` exactly 1, so acos is 0
+            // and this is +inf: 96 segments, as in TS. A non-finite token makes it NaN: none.
+            let n = segmentCount(abs(dt) / (2 * acos(jsMax(0, 1 - tolerance / r))), cap: 96)
+            for k in stride(from: 1, through: n, by: 1) { // n is 0 when TS draws nothing
                 let t = t1 + (dt * Double(k)) / Double(n)
                 let ex = rx * cos(t), ey = ry * sin(t)
                 push(cp * ex - sp * ey + ccx, sp * ex + cp * ey + ccy)

@@ -524,7 +524,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   - **Budget.** A path flattens to at most 4096 points; a scene's path
     outlines total at most 16384 (flattened points, strokes included, ×
     `count`). Curves cost points; straight segments and gentle curves are
-    nearly free (flattening drops points within 0.0005 of the line).
+    nearly free (flattening drops points within 0.0005 of the line). Every
+    number in a path must be finite and within ±1000000 — an arc with a
+    radius that large is a straight line already (write `L`).
   - **Steering and morphs.** Part colours, gradient stops, stroke widths
     and opacities glide like any paint. Two paths with the **same commands**
     (same letters, same count of numbers — draw both from one template)

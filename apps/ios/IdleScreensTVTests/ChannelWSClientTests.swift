@@ -245,4 +245,104 @@ final class ChannelWSClientTests: XCTestCase {
         let event = try await iterator.next()
         XCTAssertEqual(event, .wake(pausedMs: nil), "an older server's bare wake still parses")
     }
+
+    // MARK: Reconnect backoff (audit 2026-11-18 #11)
+
+    /// Rungs of the ladder, seconds: each wait falls in `rung / 2 ... rung`.
+    private static let rungs: [Double] = [1, 2, 4, 8, 16, 30, 30, 30]
+
+    private func assertOnRungs(_ waits: [Double], _ rungs: [Double],
+                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(waits.count, rungs.count, "waits \(waits)", file: file, line: line)
+        for (i, (wait, rung)) in zip(waits, rungs).enumerated() {
+            XCTAssertGreaterThanOrEqual(wait, rung / 2, "wait \(i): \(waits)", file: file, line: line)
+            XCTAssertLessThanOrEqual(wait, rung, "wait \(i): \(waits)", file: file, line: line)
+        }
+    }
+
+    /// Runs a client against `connector` until it has asked to wait `count`
+    /// times, recording each wait instead of sleeping it; then stops it.
+    private func reconnectWaits(_ connector: DroppingWSConnector, count: Int) async throws -> [Double] {
+        let log = WaitLog()
+        let client = ChannelWSClient(connector: connector, pause: { seconds in
+            // Past the waits under test, park (cancellable) rather than spin.
+            if log.record(seconds) >= count { try? await Task.sleep(for: .seconds(3600)) }
+        })
+        let stream = await client.events(baseURL: baseURL, channelId: "test-chan")
+        let consumer = Task { for try await _ in stream {} }
+        defer { consumer.cancel() }
+        let deadline = Date().addingTimeInterval(20)
+        while log.waits.count < count, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return Array(log.waits.prefix(count))
+    }
+
+    func testBackoffClimbsWithJitterAndCaps() {
+        var low = ReconnectBackoff(), high = ReconnectBackoff()
+        XCTAssertEqual(Self.rungs.map { _ in low.next(unit: 0) }, [0.5, 1, 2, 4, 8, 15, 15, 15])
+        XCTAssertEqual(Self.rungs.map { _ in high.next(unit: 1) }, Self.rungs)
+        high.reset()
+        XCTAssertEqual(high.next(unit: 1), 1, "a reset starts the ladder over")
+        var odd = ReconnectBackoff()
+        XCTAssertEqual(odd.next(unit: 7), 1, "a unit outside 0...1 is clamped")
+    }
+
+    /// The outage case: every socket fails before the server says a word.
+    /// `open` only builds the task, so it is no sign the server is back: the
+    /// waits must climb to the cap, not stay at one second.
+    func testAnOutageClimbsTheLadderInsteadOfRetryingEverySecond() async throws {
+        let connector = DroppingWSConnector(speaking: [])
+        let waits = try await reconnectWaits(connector, count: Self.rungs.count)
+        assertOnRungs(waits, Self.rungs)
+        XCTAssertGreaterThanOrEqual(connector.opened, Self.rungs.count)
+    }
+
+    /// A connection that delivered a frame was real: the ladder starts over.
+    func testAFrameFromTheServerResetsTheLadder() async throws {
+        // Sockets 1-3 fail silently; socket 4 delivers one frame, then drops.
+        let connector = DroppingWSConnector(speaking: [4])
+        let waits = try await reconnectWaits(connector, count: 5)
+        assertOnRungs(waits, [1, 2, 4, 1, 2])
+    }
+}
+
+/// Records each reconnect wait the client asks for.
+final class WaitLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _waits: [Double] = []
+    var waits: [Double] { lock.withLock { _waits } }
+    /// Returns how many waits there have been, this one included.
+    func record(_ seconds: Double) -> Int { lock.withLock { _waits.append(seconds); return _waits.count } }
+}
+
+/// A server that drops every socket at once: `incoming` throws immediately,
+/// after one frame on the sockets (1-based) listed in `speaking`.
+final class DroppingWSConnector: WebSocketConnecting, @unchecked Sendable {
+    let speaking: Set<Int>
+    private let lock = NSLock()
+    private var _opened = 0
+    var opened: Int { lock.withLock { _opened } }
+
+    init(speaking: Set<Int>) { self.speaking = speaking }
+
+    func open(_ url: URL) async throws -> any WebSocketSession {
+        let n = lock.withLock { _opened += 1; return _opened }
+        return DroppingWSSession(frame: speaking.contains(n) ? #"{"type":"wake"}"# : nil)
+    }
+}
+
+final class DroppingWSSession: WebSocketSession, @unchecked Sendable {
+    let incoming: AsyncThrowingStream<String, Error>
+
+    init(frame: String?) {
+        incoming = AsyncThrowingStream { continuation in
+            if let frame { continuation.yield(frame) }
+            continuation.finish(throwing: URLError(.networkConnectionLost))
+        }
+    }
+
+    func write(_ text: String) async throws {}
+    func closeCode() async -> Int? { nil }
+    func cancel() async {}
 }

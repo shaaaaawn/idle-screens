@@ -318,3 +318,58 @@ describe('a number after Z', () => {
     expect(flattenPath('M0 0 L1 0 L1 1 Z M2 2 L3 2 L3 3 Z').error).toBeUndefined();
   });
 });
+
+// Audit 2026-11-18 #6: a non-finite or enormous number in a path made shapes.ts
+// clamp or silently drop a curve, so the path passed, while the iPhone and
+// Apple TV flatteners converted the same segment count to an Int and crashed
+// on every screen that loaded the scene. The validator refuses the numbers,
+// which protects the builds already installed.
+describe('path numbers', () => {
+  const crashers = [
+    'M0 0 A1e13 1e13 0 0 1 0.5 0 L0.5 0.5 Z', // radius past ~9e12: acos(1) = 0, count +Infinity
+    'M0 0 A1e400 1 0 0 1 0.5 0 L0.5 0.5 L0 0.5 Z', // Infinity: count NaN, the arc vanishes
+    'M0 0 A1 1 1e400 0 1 0.5 0 L0.5 0.5 L0 0.5 Z', // rotation
+    'M0 0 A1 1 0 0 1 1e400 0 L0.5 0.5 L0 0.5 Z', // endpoint
+    'M0 0 C1e400 0 0 0 1e400 0 L0.5 0.5 L0 0.5 Z', // a curve's count, not only an arc's
+    'M0 0 Q1e400 0 1e400 0 L0.5 0.5 L0 0.5 Z',
+    'M0 0 a1 1 0 011e400 0 L0.5 0.5 L0 0.5 Z', // flags written without separators
+  ];
+
+  it('refuses a number past ±1e6 or not finite, where it once passed', () => {
+    for (const d of crashers) {
+      const r = validateSpec(spec(d));
+      expect(r.valid, d).toBe(false);
+      expect(r.errors.map((e) => e.message).join(' '), d).toMatch(/every number in a path must be finite and within ±1000000/);
+    }
+  });
+
+  it('refuses one in a part, and in a path a timeline key sets', () => {
+    const parts = spec('M0 0 L0.5 0 L0.5 0.5 Z');
+    const sprite = parts.layers[0]!.sprite as Record<string, unknown>;
+    delete sprite.path;
+    sprite.parts = [{ path: 'M0 0 L0.5 0 L0.5 0.5 Z', color: '#ffffff' }, { path: crashers[0], color: '#ffffff' }];
+    expect(validateSpec(parts).errors.map((e) => `${e.path} ${e.message}`).join(' ')).toMatch(/parts\[1\]\.path has the number 1e13/);
+    // Same commands, so the key glides number by number into the radius.
+    const flat = 'M0 0 A1 1 0 0 1 0.5 0 L0.5 0.5 L0 0.5 Z';
+    const keyed = spec(flat) as ReturnType<typeof spec> & { timeline?: unknown };
+    (keyed.layers[0] as Record<string, unknown>).key = 'mark';
+    keyed.timeline = { keys: [{ t: 2000, path: 'mark.sprite.path', value: flat.replace('A1 1', 'A1e13 1e13'), dur: 500 }] };
+    const r = validateSpec(keyed);
+    expect(r.valid).toBe(false);
+    expect(r.errors.map((e) => e.message).join(' ')).toMatch(/every number in a path must be finite/);
+    keyed.timeline = { keys: [{ t: 2000, path: 'mark.sprite.path', value: flat.replace('A1 1', 'A2 2'), dur: 500 }] };
+    expect(validateSpec(keyed).errors).toEqual([]);
+  });
+
+  it('keeps every path that draws: big flat arcs, tiny exponents, control points off the box', () => {
+    for (const d of [
+      'M0 0 A1e6 1e6 0 0 1 0.5 0 L0.5 0.5 Z',
+      'M -0.6 3.6739403974420595e-17 L 0 1e-17 L 0 0.5 Z',
+      'M -0.5 0 C -0.5 -0.9 0.5 -0.9 0.5 0 Z',
+      'M -0.9 0 C -0.9 -1.3 0.9 -1.3 0.9 0 Z', // control points past the box, curve inside
+      'M -1 0 A 1 1 0 1 1 1 0 A 1 1 0 1 1 -1 0 Z',
+    ]) {
+      expect(validateSpec(spec(d)).errors, d).toEqual([]);
+    }
+  });
+});
