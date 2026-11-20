@@ -10,6 +10,12 @@ struct PairView: View {
     @Environment(TVAppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var paired = false
+    /// Where focus sits: the screen itself, or the error card's "Try again".
+    /// Moved explicitly whenever the button comes or goes, so a retry (button
+    /// vanishes) or a failed retry (button returns) never leaves focus to the
+    /// engine's guess — which could be the tab bar, where Back leaves the app.
+    @FocusState private var focus: PairFocus?
+    private enum PairFocus: Hashable { case screen, retry }
 
     var body: some View {
         ZStack {
@@ -87,6 +93,7 @@ struct PairView: View {
                         Button("Try again") {
                             Task { await app.requestPairCode() }
                         }
+                        .focused($focus, equals: .retry)
                     }
                 }
                 .frame(width: 560)
@@ -100,6 +107,8 @@ struct PairView: View {
         // the modifier reaches descendants, and "Try again" needs its lift.
         .focusable(!showsRetry)
         .focusEffectDisabled(!showsRetry)
+        .focused($focus, equals: .screen)
+        .onChange(of: showsRetry, initial: true) { focus = showsRetry ? .retry : .screen }
         .task { await app.requestPairCode() }
         .onChange(of: app.phonePushAt) {
             guard !paired else { return }
