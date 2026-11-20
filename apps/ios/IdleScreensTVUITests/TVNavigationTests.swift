@@ -14,13 +14,34 @@ final class TVNavigationTests: XCTestCase {
         return el.exists ? el.label : nil
     }
 
+    /// Launch on the Channels wall and wait for the gallery to take focus.
+    /// `-tv.resume_on_launch NO` lands in UserDefaults' argument domain, so a
+    /// saved "Start where I left off" can't reopen the last channel instead.
+    private func launchOnWall() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-tv.resume_on_launch", "NO"]
+        app.launch()
+        // The tab bar can hold focus before the gallery arrives; wait until
+        // focus is on the wall itself (the hero) rather than a fixed sleep.
+        // Polled on the test's own thread, not via an NSPredicate block, which
+        // XCTWaiter may evaluate off the main actor that XCUIElement lives on.
+        let hasFocus = NSPredicate(format: "hasFocus == true")
+        func onWall() -> Bool {
+            app.descendants(matching: .any).matching(hasFocus).firstMatch.exists
+                && !app.tabBars.descendants(matching: .any).matching(hasFocus).firstMatch.exists
+        }
+        let deadline = Date().addingTimeInterval(30)
+        while !onWall(), Date() < deadline { usleep(500_000) }
+        XCTAssertTrue(onWall(), "focus never reached the wall — gallery didn't load")
+        sleep(1)                                   // let the hero settle
+        return app
+    }
+
     /// Down walks the whole wall. Each shelf was its own lazy grid, so the
     /// first shelf below the fold had built no cards and focus stopped on the
     /// last row of Featured — three presses in, every press after it ignored.
     func testDownKeepsScrollingPastTheFirstShelf() {
-        let app = XCUIApplication()
-        app.launch()
-        sleep(8)                                   // gallery load + first paint
+        let app = launchOnWall()
         var seen: [String] = []
         for _ in 0..<10 {
             XCUIRemote.shared.press(.down)
@@ -34,9 +55,7 @@ final class TVNavigationTests: XCTestCase {
     /// had nothing to focus, so focus fell to the tab bar and Back left the
     /// app.
     func testBackFromPairingReturnsToSettings() {
-        let app = XCUIApplication()
-        app.launch()
-        sleep(8)
+        let app = launchOnWall()
         let remote = XCUIRemote.shared
         remote.press(.up); usleep(900_000)          // tab bar
         remote.press(.right); usleep(700_000)       // Search

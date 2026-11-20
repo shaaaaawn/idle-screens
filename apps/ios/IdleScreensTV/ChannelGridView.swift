@@ -16,8 +16,11 @@ struct ChannelGridView: View {
     /// Cards per row on the home wall.
     static let columnCount = 3
 
-    /// One row of a shelf, identified by its first channel so a row keeps its
-    /// identity (and its focus) when the listing refreshes around it.
+    /// One row of a shelf, identified by its first channel rather than its
+    /// position, so a refresh that leaves a shelf's order alone keeps every row
+    /// (and the focused card) in place. A refresh that shifts channels between
+    /// rows rebuilds the rows it touched, and a focused card in one of them
+    /// loses focus — the cost of one lazy stack of rows (see the body).
     struct Row: Identifiable {
         let index: Int
         let channels: [PublicChannel]

@@ -96,8 +96,10 @@ struct PairView: View {
         // Something on this screen must hold focus. With none (the code is
         // showing, so no button), focus fell back to the tab bar, and the
         // remote's Back left the app instead of returning to Settings.
+        // The effect is disabled only while the screen itself holds focus:
+        // the modifier reaches descendants, and "Try again" needs its lift.
         .focusable(!showsRetry)
-        .focusEffectDisabled()
+        .focusEffectDisabled(!showsRetry)
         .task { await app.requestPairCode() }
         .onChange(of: app.phonePushAt) {
             guard !paired else { return }
