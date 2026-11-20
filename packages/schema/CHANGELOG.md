@@ -1,5 +1,14 @@
 # @idle-screens/schema
 
+## 3.18.3
+
+### Patch Changes
+
+- 75d92b6: Flash safety: `analyzeFlashes` no longer misses a strobe whose first frame sits between its two levels. Before the first transition it measured every move from the first sample alone, so a 10 Hz 0.21 ↔ 0.39 square wave starting at 0.30 never moved a full 0.10 from it and read as 0 flashes (passing); starting on a peak it read 10. The first move is now measured from the lowest and highest levels seen so far. `timelineFlashReport` (the publish-time timeline check) anchors each chunk of frames on its own first sample, so it inherits the fix.
+- 1085518: The validator refuses a path whose numbers are not finite or exceed ±1000000 (`every number in a path must be finite and within ±1000000`). An arc radius past ~9e12, or a `1e400` token anywhere in an arc or curve, made `flattenPath` clamp or silently drop the curve, so the path passed; the iPhone and Apple TV apps' flattener converted the same segment count to an integer and crashed on every screen that loaded the scene. The apps are fixed too, but only new builds get that fix: refusing the numbers here protects the builds already installed. Nothing that draws needs such a number (a drawing lives in the -1..1 box; an arc that flat is a straight line), and `flattenPath`'s own output is unchanged.
+- Updated dependencies [75d92b6]
+  - @idle-screens/validator@0.1.4
+
 ## 3.18.2
 
 ### Patch Changes
