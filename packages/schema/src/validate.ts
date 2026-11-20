@@ -2,7 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 import { scalarWanted } from './validate-hints';
 import { nearest } from './nearest';
 
@@ -1764,19 +1764,49 @@ const NO_LINE = 'must draw at least one line (2+ points)';
  */
 let keyedPathDepth = 0;
 
+/**
+ * The largest magnitude any number in a path may have. A drawing lives in
+ * the -1..1 box, so nothing it draws needs more; past it are only numbers
+ * that break a flattener. An arc radius beyond ~9e12 makes
+ * `acos(1 - tolerance / r)` exactly 0, so the segment count is +Infinity,
+ * and a `1e400` token is Infinity outright, so the count is NaN. shapes.ts
+ * then clamps the curve or silently drops it, and the path still passed —
+ * but the iPhone and Apple TV flatteners before 2026-11 converted that count
+ * to an Int and crashed on every screen that loaded the scene (audit
+ * 2026-11-18 #6). Refusing the numbers here protects the builds already
+ * installed. 1e6 leaves arcs huge enough to read as straight lines.
+ */
+const MAX_PATH_NUMBER = 1e6;
+/**
+ * Every number token in `d`, read with shapes.ts's own tokenizer. Known
+ * limitation: arc flags written without separators ("a1 1 0 011 1") stay one
+ * token here, where the flattener splits them, so a packed run with 7+ digits
+ * before the point (`a1 1 0 1000000.5 0`) is refused although it draws. No
+ * minifier writes that; refusing is the safe side for the installed apps.
+ */
+function pathNumberProblem(d: string): string | null {
+  for (const t of d.match(PATH_TOKENS) ?? []) {
+    if (t.length === 1 && /[a-zA-Z]/.test(t)) continue;
+    if (!(Math.abs(Number(t)) <= MAX_PATH_NUMBER)) {
+      return `has the number ${t.length > 24 ? `${t.slice(0, 24)}…` : t}; every number in a path must be finite and within ±${MAX_PATH_NUMBER} (the drawing lives in the -1..1 box — an arc that flat is a straight line, L)`;
+    }
+  }
+  return null;
+}
+
 function pathGeometryProblem(d: string, rule: PathFillRule, filled: boolean): string | null {
   const key = `${rule}|${filled ? 1 : 0}|${d}`;
   const hit = pathVerdicts.get(key);
   if (hit !== undefined) return hit;
   const flat = flattenPath(d, rule);
   const inBox = ([x, y]: readonly number[]): boolean => Math.abs(x!) <= 1.0001 && Math.abs(y!) <= 1.0001;
-  const problem = flat.error ? `not a usable path: ${flat.error}`
+  const problem = pathNumberProblem(d) ?? (flat.error ? `not a usable path: ${flat.error}`
     : flat.points.length > MAX_PATH_POINTS ? `flattens to ${flat.points.length} points; at most ${MAX_PATH_POINTS}`
     // Bounds first: a keyed path may collapse (NO_AREA/NO_LINE are waived), but its stroke must still stay in the box.
     : !flat.points.every(inBox) || !flat.lines.every((l) => l.points.every(inBox)) ? 'must stay inside the -1..1 unit box (curves included)'
     : filled && flat.points.length < 3 ? NO_AREA
     : !filled && flat.lines.length === 0 ? NO_LINE
-    : null;
+    : null);
   if (pathVerdicts.size >= 1024 || pathVerdictBytes + key.length > 2_000_000) {
     pathVerdicts.clear();
     pathVerdictBytes = 0;

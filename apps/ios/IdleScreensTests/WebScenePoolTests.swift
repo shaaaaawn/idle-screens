@@ -120,8 +120,9 @@ final class WebScenePoolTests: XCTestCase {
     func testHandOverTakesThePageOnScreenOutOfItsView() {
         // Its own pool: the test host's feed has a live page on screen in the shared one.
         let pool = WebScenePool()
+        // A page this coordinator built itself: it is its own host with nothing
+        // assigned, as `WebSceneView.attach` leaves it.
         let coordinator = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
-        coordinator.host = coordinator
         let container = SceneHostView()
         container.coordinator = coordinator
         let webView = WKWebView(frame: .zero)
@@ -134,6 +135,59 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertNil(container.webView)
         XCTAssertNil(webView.superview)
         XCTAssertNil(pool.handOver(forChannel: "lobby"), "handed over once")
+    }
+
+    /// Audit 2026-11-18 #22: a coordinator that built its own page stored
+    /// itself as its host and was never freed — nor was its page's state.
+    /// It is its own host now without holding itself.
+    func testASelfHostedCoordinatorIsFreedWithItsView() {
+        weak var gone: WebSceneView.Coordinator?
+        do {
+            let coordinator = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
+            XCTAssertTrue(coordinator.host === coordinator)
+            coordinator.host = coordinator  // stores nothing
+            XCTAssertTrue(coordinator.host === coordinator)
+            gone = coordinator
+        }
+        XCTAssertNil(gone, "a coordinator hosting its own page does not retain itself")
+    }
+
+    /// Another view's coordinator, assigned as `attach` does after `take` /
+    /// `handOver`, is held: the showing view is then its only owner.
+    func testAnAdoptedHostIsHeldUntilTheViewGoes() {
+        weak var gone: WebSceneView.Coordinator?
+        let viewer = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
+        do {
+            let host = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
+            viewer.host = host
+            gone = host
+        }
+        XCTAssertNotNil(gone)
+        XCTAssertTrue(viewer.host === gone)
+        viewer.host = nil
+        XCTAssertNil(gone)
+        XCTAssertTrue(viewer.host === viewer, "with nothing adopted it hosts itself again")
+    }
+
+    /// A self-hosted page parked on dismantle keeps its coordinator alive in
+    /// the pool's entry (the web view's delegates are weak), and the next view
+    /// to `take` it gets that same host back.
+    func testAParkedSelfHostedPageKeepsItsHost() {
+        let key = WebScenePool.Key(channelId: "studio", sceneId: nil, keyed: false)
+        weak var parked: WebSceneView.Coordinator?
+        do {
+            let coordinator = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})
+            coordinator.poolKey = key
+            let container = SceneHostView()
+            container.coordinator = coordinator
+            container.show(WKWebView(frame: .zero))
+            WebSceneView.dismantleUIView(container, coordinator: coordinator)
+            parked = coordinator
+        }
+        XCTAssertNotNil(parked, "the pool entry owns a parked page's host")
+        let taken = WebScenePool.shared.take(key)
+        XCTAssertNotNil(taken)
+        XCTAssertTrue(taken?.1 === parked)
     }
 
     /// A pooled page is replayed to its next view: the host remembers.

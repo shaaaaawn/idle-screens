@@ -153,7 +153,8 @@ struct WebSceneView: UIViewRepresentable {
             return webView
         }
         SwipeTiming.mark("web view created")
-        coordinator.host = coordinator
+        // A page it builds itself: the coordinator is its own host (`host`
+        // answers `self` with nothing adopted — never a stored self-reference).
         let webView = Self.build(channelId: channelId, token: token, baseURL: baseURL,
                                  sceneId: sceneId, delegate: coordinator)
         if poolable { coordinator.startSnapshots(of: webView, channelId: channelId, sceneId: sceneId) }
@@ -458,8 +459,23 @@ struct WebSceneView: UIViewRepresentable {
         var loaded: (String, Int) = ("", -1)
         /// Set on a host whose page is being shown by another view.
         weak var sink: Coordinator?
-        /// The host delegate of the web view this coordinator's view shows.
-        var host: Coordinator?
+        /// The host delegate of the web view this coordinator's view shows:
+        /// the coordinator of a page taken from the pool or from another view,
+        /// or this one for a page it built itself. Never nil.
+        ///
+        /// Only another coordinator is stored. Storing `self` here retained
+        /// every page a view ever built — its callbacks, its last frame and up
+        /// to 64 held ones — for good, since nothing cleared it (audit
+        /// 2026-11-18 #22); assigning `self` now stores nothing. A pooled page
+        /// built this way is still owned: its pool `Entry` holds its host.
+        var host: Coordinator? {
+            get { adoptedHost ?? self }
+            set { adoptedHost = newValue === self ? nil : newValue }
+        }
+        /// Strong: once `WebScenePool.take` removed a page's pool entry, or
+        /// `handOver` took it from the view on screen, this is its host's only owner (the web view's navigation
+        /// delegate and script handler are weak).
+        private var adoptedHost: Coordinator?
         var poolKey: WebScenePool.Key?
         private(set) var lastFrame: String?
         /// The live channel socket's close code, kept for a pooled page's
