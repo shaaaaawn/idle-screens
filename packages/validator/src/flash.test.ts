@@ -103,6 +103,14 @@ describe('analyzeFlashes — general flash (WCAG 2.3.1)', () => {
     // Darker level 0.85: never a flash, wherever it starts.
     const bright = square(10, 1.0, 0.85);
     expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.92 : bright(f)))).passes).toBe(true);
+    // A localized mid-swing strobe: 15/64 tiles (< 25%) is exempt, 16/64 (= 25%) fails.
+    const strobe = square(10, 0.39, 0.21);
+    const localized = (count: number) => (f: number, tile: number) =>
+      tile < count ? (f === 0 ? 0.3 : strobe(f)) : 0.5;
+    const below = analyzeFlashes(makeSamples(64, localized(15)));
+    expect(below.general.worstTileFlashesPerSecond).toBe(10);
+    expect(below.passes).toBe(true);
+    expect(analyzeFlashes(makeSamples(64, localized(16))).general.fails).toBe(true);
     // Swing 0.08 around a 0.5 start: below threshold either way.
     const small = square(10, 0.54, 0.46);
     expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.5 : small(f)))).general.worstTileFlashesPerSecond).toBe(0);
