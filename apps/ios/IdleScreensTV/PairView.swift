@@ -93,6 +93,11 @@ struct PairView: View {
             }
             .padding(.horizontal, 120)
         }
+        // Something on this screen must hold focus. With none (the code is
+        // showing, so no button), focus fell back to the tab bar, and the
+        // remote's Back left the app instead of returning to Settings.
+        .focusable(!showsRetry)
+        .focusEffectDisabled()
         .task { await app.requestPairCode() }
         .onChange(of: app.phonePushAt) {
             guard !paired else { return }
@@ -103,6 +108,12 @@ struct PairView: View {
                 dismiss()
             }
         }
+    }
+
+    /// The error card's "Try again" is this screen's one button; it takes
+    /// focus itself, so the screen does not compete with it.
+    private var showsRetry: Bool {
+        !paired && app.pairCode == nil && !app.isRequestingPairCode && app.pairError != nil
     }
 
     /// Render the pairing URL as a QR code — CoreImage only, no dependencies.

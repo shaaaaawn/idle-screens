@@ -249,6 +249,7 @@
 		DB9AE0502F9463925BC3AAEB /* ChannelClockParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564FEDDA0FA27FE637318839 /* ChannelClockParityTests.swift */; };
 		DCD1BEC449A2A8D13CB856CC /* AquariumField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E10925C4120BAB0BA07888 /* AquariumField.swift */; };
 		DD03C6F087E55B9994741FB3 /* HomeSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71EDB676A59798A0FAB07300 /* HomeSections.swift */; };
+		DD16B0BC82CA3521A09C5584 /* TVNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D58C250B338E3626BE3B7D /* TVNavigationTests.swift */; };
 		DD33017D9AEC18DC79CA1EB0 /* ScreenRemoteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A0612F045B28081CEFE78BD /* ScreenRemoteTests.swift */; };
 		DD7E18BA8F4C363872657B86 /* WebSceneRetargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BB1411138F04EDA172DF5D8 /* WebSceneRetargetTests.swift */; };
 		DF8A7035A12B4E95BFF21BD8 /* PreviewBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EA16DECCBE319A1BBDEC0E /* PreviewBudget.swift */; };
@@ -569,6 +570,7 @@
 		EA0BCADF9C61254DBB05CA24 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EBAB7DCA91062949D7367A04 /* HeroChannelCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroChannelCard.swift; sourceTree = "<group>"; };
 		EC0792A7AF508D892DF54811 /* TVDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVDesign.swift; sourceTree = "<group>"; };
+		F1D58C250B338E3626BE3B7D /* TVNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVNavigationTests.swift; sourceTree = "<group>"; };
 		F31931A195A09174E367D3B4 /* FocusSwipeProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSwipeProbe.swift; sourceTree = "<group>"; };
 		F6339510B5B7C996B622F160 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		F6976A77CDDDFDB5E0727780 /* ContentReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentReport.swift; sourceTree = "<group>"; };
@@ -919,6 +921,7 @@
 			isa = PBXGroup;
 			children = (
 				F31931A195A09174E367D3B4 /* FocusSwipeProbe.swift */,
+				F1D58C250B338E3626BE3B7D /* TVNavigationTests.swift */,
 			);
 			path = IdleScreensTVUITests;
 			sourceTree = "<group>";
@@ -1249,6 +1252,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B73FB9487311048D335EC935 /* FocusSwipeProbe.swift in Sources */,
+				DD16B0BC82CA3521A09C5584 /* TVNavigationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

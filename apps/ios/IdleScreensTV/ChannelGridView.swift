@@ -13,7 +13,22 @@ struct ChannelGridView: View {
     /// leaves the hero — not on every swipe through the shelves.
     @FocusState private var heroFocused: Bool
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: TV.columnGap), count: 3)
+    /// Cards per row on the home wall.
+    static let columnCount = 3
+
+    /// One row of a shelf, identified by its first channel so a row keeps its
+    /// identity (and its focus) when the listing refreshes around it.
+    struct Row: Identifiable {
+        let index: Int
+        let channels: [PublicChannel]
+        var id: String { channels.first?.id ?? "row-\(index)" }
+    }
+
+    static func rows(of channels: [PublicChannel], columns: Int = columnCount) -> [Row] {
+        stride(from: 0, to: channels.count, by: columns).enumerated().map { index, start in
+            Row(index: index, channels: Array(channels[start..<min(start + columns, channels.count)]))
+        }
+    }
 
     /// The home screen's running order, shared with the web gallery.
     /// See HomeSections — the grouping and sort rules live there so the two
@@ -53,7 +68,13 @@ struct ChannelGridView: View {
 
                 GeometryReader { geo in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: TV.sectionGap) {
+                        // One lazy stack whose children are single rows, not a
+                        // lazy grid per shelf: a shelf wholly below the fold
+                        // had built no cards, so Down found nothing to move to
+                        // and the wall stopped scrolling after the first shelf.
+                        // A row is small enough that the next one is built
+                        // before it is needed.
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             if app.channels.isEmpty, !app.isLoadingGallery {
                                 ContentUnavailableView(
                                     "No channels",
@@ -76,11 +97,13 @@ struct ChannelGridView: View {
                                 }
 
                                 ForEach(layout.sections) { section in
-                                    ChannelSection(title: section.title,
-                                                   subtitle: section.subtitle) {
-                                        CardGrid(channels: section.channels, columns: columns,
-                                                 focusReport: focus,
-                                                 hiddenTags: section.ownedTags)
+                                    ShelfHeader(title: section.title, subtitle: section.subtitle)
+                                        .padding(.top, TV.sectionGap)
+                                        .padding(.bottom, TV.headerGap)
+                                    ForEach(Self.rows(of: section.channels)) { row in
+                                        CardRow(channels: row.channels, focusReport: focus,
+                                                hiddenTags: section.ownedTags)
+                                            .padding(.top, row.index == 0 ? 0 : TV.rowGap)
                                     }
                                 }
                             }
@@ -216,31 +239,28 @@ private struct FocusBackdrop: View {
 
 // MARK: - Sections
 
-private struct ChannelSection<Content: View>: View {
+private struct ShelfHeader: View {
     let title: String
     var subtitle: String? = nil
-    @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TV.headerGap) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.tvShelfTitle)
-                    .foregroundStyle(Color.textPrimary)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.tvSubtitle)
-                        .foregroundStyle(Color.textSecondary)
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.tvShelfTitle)
+                .foregroundStyle(Color.textPrimary)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.tvSubtitle)
+                    .foregroundStyle(Color.textSecondary)
             }
-            content
         }
     }
 }
 
-private struct CardGrid: View {
+/// One row of up to three cards, each a third of the width — a short last
+/// row keeps its cards the same size as the rows above.
+private struct CardRow: View {
     let channels: [PublicChannel]
-    let columns: [GridItem]
     /// Where the focused card reports itself, to drive the grid's billboard.
     var focusReport: FocusReport?
     /// Tags the surrounding shelf already says out loud — a "featured" chip
@@ -248,11 +268,15 @@ private struct CardGrid: View {
     var hiddenTags: Set<String> = []
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: TV.rowGap) {
+        HStack(alignment: .top, spacing: TV.columnGap) {
             ForEach(channels) { channel in
                 ChannelCard(channel: channel,
                             focusReport: focusReport,
                             hiddenTags: hiddenTags)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(channels.count..<ChannelGridView.columnCount, id: \.self) { _ in
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
             }
         }
     }
