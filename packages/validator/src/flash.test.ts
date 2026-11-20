@@ -80,6 +80,25 @@ describe('analyzeFlashes — general flash (WCAG 2.3.1)', () => {
     expect(analyzeFlashes(makeSamples(64, wave)).general.worstTileFlashesPerSecond).toBe(10);
   });
 
+  it('catches a mid-swing strobe whose first move is a rise (low phase first)', () => {
+    // The case above opens on the high phase, so its first transition is a fall
+    // from the highest level seen. Opening on the low phase takes the other
+    // branch: a rise measured from the lowest level seen (0.21), not from 0.30.
+    const wave = square(10, 0.21, 0.39);
+    const r = analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.3 : wave(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(10);
+    expect(r.passes).toBe(false);
+  });
+
+  it('a mid-swing start on the approximate red channel is caught too', () => {
+    // Same bug, same function: the red channel (swing 0.20) anchored on its first sample.
+    const red = square(10, 0.7, 0.4);
+    const r = analyzeFlashes(makeSamples(64, () => 0.5, (f) => (f === 0 ? 0.55 : red(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(0);
+    expect(r.red.worstTileFlashesPerSecond).toBe(10);
+    expect(r.red.fails).toBe(true);
+  });
+
   it('mid-swing start still respects the area and dark guards', () => {
     // Darker level 0.85: never a flash, wherever it starts.
     const bright = square(10, 1.0, 0.85);

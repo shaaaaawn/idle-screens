@@ -64,7 +64,7 @@ export interface FlashReport {
 function transitionTimes(series: number[], times: number[], swing: number, darkMax: number): number[] {
   const out: number[] = [];
   let dir = 0; // 0 = no direction yet, +1 rising, -1 falling
-  let extreme = series[0]; // last registered peak/valley
+  let extreme = series[0]; // last registered peak/valley (read only once dir != 0)
   // Before the first transition there is no direction to measure from, so the
   // first move is measured from the lowest and the highest level seen so far,
   // not from the first sample alone. Anchored on series[0], a strobe whose
