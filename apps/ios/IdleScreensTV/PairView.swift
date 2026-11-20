@@ -10,6 +10,12 @@ struct PairView: View {
     @Environment(TVAppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var paired = false
+    /// Where focus sits: the screen itself, or the error card's "Try again".
+    /// Moved explicitly whenever the button comes or goes, so a retry (button
+    /// vanishes) or a failed retry (button returns) never leaves focus to the
+    /// engine's guess — which could be the tab bar, where Back leaves the app.
+    @FocusState private var focus: PairFocus?
+    private enum PairFocus: Hashable { case screen, retry }
 
     var body: some View {
         ZStack {
@@ -87,12 +93,22 @@ struct PairView: View {
                         Button("Try again") {
                             Task { await app.requestPairCode() }
                         }
+                        .focused($focus, equals: .retry)
                     }
                 }
                 .frame(width: 560)
             }
             .padding(.horizontal, 120)
         }
+        // Something on this screen must hold focus. With none (the code is
+        // showing, so no button), focus fell back to the tab bar, and the
+        // remote's Back left the app instead of returning to Settings.
+        // The effect is disabled only while the screen itself holds focus:
+        // the modifier reaches descendants, and "Try again" needs its lift.
+        .focusable(!showsRetry)
+        .focusEffectDisabled(!showsRetry)
+        .focused($focus, equals: .screen)
+        .onChange(of: showsRetry, initial: true) { focus = showsRetry ? .retry : .screen }
         .task { await app.requestPairCode() }
         .onChange(of: app.phonePushAt) {
             guard !paired else { return }
@@ -103,6 +119,12 @@ struct PairView: View {
                 dismiss()
             }
         }
+    }
+
+    /// The error card's "Try again" is this screen's one button; it takes
+    /// focus itself, so the screen does not compete with it.
+    private var showsRetry: Bool {
+        !paired && app.pairCode == nil && !app.isRequestingPairCode && app.pairError != nil
     }
 
     /// Render the pairing URL as a QR code — CoreImage only, no dependencies.

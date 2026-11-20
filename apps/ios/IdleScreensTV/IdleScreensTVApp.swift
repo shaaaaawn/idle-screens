@@ -168,16 +168,30 @@ private struct MainTabView: View {
 
     enum Tab: Hashable { case channels, search, settings }
 
+    /// A tab's label with its symbol in one flat colour. `tv` is drawn in
+    /// layers, and when the selected tab took focus its screen stayed white —
+    /// a white icon on the white focus pill. Monochrome makes every layer
+    /// follow the label's colour, as the other tabs' symbols already did.
+    static func label(_ title: String, _ symbol: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: symbol)
+                .environment(\.symbolVariants, .none)
+                .symbolRenderingMode(.monochrome)
+        }
+    }
+
     var body: some View {
         TabView(selection: $selection) {
             ChannelGridView()
-                .tabItem { Label("Channels", systemImage: "tv") }
+                .tabItem { Self.label("Channels", "tv") }
                 .tag(Tab.channels)
             SearchView()
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tabItem { Self.label("Search", "magnifyingglass") }
                 .tag(Tab.search)
             SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tabItem { Self.label("Settings", "gearshape") }
                 .tag(Tab.settings)
         }
         // A paired phone can push a channel while another tab is up — jump to
