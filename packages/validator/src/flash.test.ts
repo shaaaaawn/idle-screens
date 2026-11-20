@@ -69,6 +69,33 @@ describe('analyzeFlashes — general flash (WCAG 2.3.1)', () => {
     expect(r.passes).toBe(true);
   });
 
+  // Audit 2026-11-18 #3: the first move was measured from the first sample only,
+  // so a strobe whose first frame sat between its two levels read as 0 flashes.
+  it('catches a strobe whose first sample sits mid-swing (10 Hz, 0.21 <-> 0.39, starting at 0.30)', () => {
+    const wave = square(10, 0.39, 0.21);
+    const r = analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.3 : wave(f))));
+    expect(r.general.worstTileFlashesPerSecond).toBe(10);
+    expect(r.passes).toBe(false);
+    // The same wave starting on a peak: the two must agree.
+    expect(analyzeFlashes(makeSamples(64, wave)).general.worstTileFlashesPerSecond).toBe(10);
+  });
+
+  it('mid-swing start still respects the area and dark guards', () => {
+    // Darker level 0.85: never a flash, wherever it starts.
+    const bright = square(10, 1.0, 0.85);
+    expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.92 : bright(f)))).passes).toBe(true);
+    // Swing 0.08 around a 0.5 start: below threshold either way.
+    const small = square(10, 0.54, 0.46);
+    expect(analyzeFlashes(makeSamples(64, (f) => (f === 0 ? 0.5 : small(f)))).general.worstTileFlashesPerSecond).toBe(0);
+  });
+
+  it('a slow drift then a reversal counts the same as before (one rise, one fall)', () => {
+    // 0.5 -> 0.62 (a rise of 0.12), then -> 0.45 (a fall of 0.17): two transitions, one flash.
+    const series = [0.5, 0.56, 0.62, 0.45];
+    const r = analyzeFlashes(series.map((v, i) => ({ t: i * 100, lum: [v] })));
+    expect(r.general.worstTileFlashesPerSecond).toBe(1);
+  });
+
   it('a swing below 0.10 does NOT count', () => {
     const r = analyzeFlashes(makeSamples(64, square(10, 0.5, 0.45)));
     expect(r.general.worstTileFlashesPerSecond).toBe(0);

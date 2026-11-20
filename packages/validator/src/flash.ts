@@ -65,16 +65,31 @@ function transitionTimes(series: number[], times: number[], swing: number, darkM
   const out: number[] = [];
   let dir = 0; // 0 = no direction yet, +1 rising, -1 falling
   let extreme = series[0]; // last registered peak/valley
+  // Before the first transition there is no direction to measure from, so the
+  // first move is measured from the lowest and the highest level seen so far,
+  // not from the first sample alone. Anchored on series[0], a strobe whose
+  // first sample sat between its two levels (0.30 in a 0.21 <-> 0.39 square
+  // wave) never moved a full swing from it, and a 10 Hz strobe read as 0
+  // flashes (audit 2026-11-18, #3). Every later move is measured from the
+  // last registered peak or valley, as before.
+  let lo = series[0];
+  let hi = series[0];
   for (let i = 1; i < series.length; i++) {
     const l = series[i];
     if (dir === 0) {
-      const d = l - extreme;
-      if (Math.abs(d) >= swing && Math.min(l, extreme) < darkMax) {
-        dir = d > 0 ? 1 : -1;
+      if (l - lo >= swing && lo < darkMax) {
+        dir = 1; // risen a full swing from the lowest level so far (the darker one)
         out.push(times[i]);
         extreme = l;
+      } else if (hi - l >= swing && l < darkMax) {
+        dir = -1; // fallen a full swing from the highest level so far
+        out.push(times[i]);
+        extreme = l;
+      } else {
+        // still searching for the first move
+        if (l < lo) lo = l;
+        if (l > hi) hi = l;
       }
-      // else: still searching for the first move; `extreme` stays the anchor
     } else if ((l - extreme) * dir >= 0) {
       // still moving in the current direction (or flat): extend the extreme
       extreme = l;
