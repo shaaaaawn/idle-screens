@@ -8,7 +8,9 @@ import XCTest
 ///     -only-testing:IdleScreensTVUITests/TVNavigationTests
 final class TVNavigationTests: XCTestCase {
     private func focusedLabel(_ app: XCUIApplication) -> String? {
-        let el = app.descendants(matching: .any).element(matching: NSPredicate(format: "hasFocus == true"))
+        // firstMatch, not element(matching:): a focused cell and its button can
+        // both report hasFocus, and resolving an ambiguous query fails the test.
+        let el = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         return el.exists ? el.label : nil
     }
 
