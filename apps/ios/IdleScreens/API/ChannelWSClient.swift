@@ -260,8 +260,8 @@ extension JSONValue {
 /// step, and no retry is immediate.
 ///
 /// The ladder starts over only when a connection has delivered a frame.
-/// `WebSocketConnecting.open` builds the task and does no I/O, so resetting
-/// after it (as this did until 2026-11) held every retry at 1 s: through an
+/// `WebSocketConnecting.open` starts the handshake but returns before the
+/// server has answered, so resetting after it (as this did until 2026-11) held every retry at 1 s: through an
 /// outage every screen retried about once a second, forever (audit
 /// 2026-11-18 #11).
 struct ReconnectBackoff: Equatable, Sendable {
@@ -349,7 +349,7 @@ actor ChannelWSClient {
                         adopt(session: session)
                         for try await text in session.incoming {
                             // A frame is the server talking: only now is this
-                            // connection known to be real (`open` did no I/O).
+                            // connection known to be real (`open` returned before the server answered).
                             backoff.reset()
                             guard var event = Self.parse(text) else { continue }
                             if case .authRequired = event {

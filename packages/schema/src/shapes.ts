@@ -778,8 +778,11 @@ function segmentsFor(chord: number, curvature: number): number {
   return Math.max(2, Math.min(64, n));
 }
 
+/** The path tokenizer: a command letter, or a number. validate.ts reads a path's numbers with it too, so it checks exactly what this parses. */
+export const PATH_TOKENS = /[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+
 function parseAndFlatten(d: string): { rings: Pt[][]; lines: Array<{ points: Pt[]; closed: boolean }> } {
-  const tokens = d.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) ?? [];
+  const tokens = d.match(PATH_TOKENS) ?? [];
   let i = 0;
   const num = (): number => {
     const t = tokens[i++];

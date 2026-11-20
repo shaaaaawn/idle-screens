@@ -152,8 +152,8 @@ final class WebScenePoolTests: XCTestCase {
         XCTAssertNil(gone, "a coordinator hosting its own page does not retain itself")
     }
 
-    /// Another view's coordinator is held: after `take`, the showing view is
-    /// the only owner of its page's host.
+    /// Another view's coordinator, assigned as `attach` does after `take` /
+    /// `handOver`, is held: the showing view is then its only owner.
     func testAnAdoptedHostIsHeldUntilTheViewGoes() {
         weak var gone: WebSceneView.Coordinator?
         let viewer = WebSceneView.Coordinator(channelId: "studio", baseURL: base, onFrame: { _ in }, onFailure: {})

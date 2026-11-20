@@ -55,7 +55,8 @@ final class PathDrawingTests: XCTestCase {
         XCTAssertEqual(f.points.count, 3)
     }
 
-    /// Audit 2026-11-18 #6: the validator accepts an arc radius near 1e13, where
+    /// Audit 2026-11-18 #6: the validator accepted (until 2026-11; scenes stored
+    /// before that may still carry one) an arc radius near 1e13, where
     /// `1 - tolerance / r` is exactly 1, acos 0 and the segment count +inf —
     /// and `Int(+inf)` trapped every iPhone and Apple TV that decoded the
     /// scene. shapes.ts clamps to 96 first. (The `1e400` and overflow cases

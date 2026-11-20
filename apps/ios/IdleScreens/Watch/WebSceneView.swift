@@ -472,8 +472,8 @@ struct WebSceneView: UIViewRepresentable {
             get { adoptedHost ?? self }
             set { adoptedHost = newValue === self ? nil : newValue }
         }
-        /// Strong: once `WebScenePool.take` / `handOver` removed a page's pool
-        /// entry, this is its host's only owner (the web view's navigation
+        /// Strong: once `WebScenePool.take` removed a page's pool entry, or
+        /// `handOver` took it from the view on screen, this is its host's only owner (the web view's navigation
         /// delegate and script handler are weak).
         private var adoptedHost: Coordinator?
         var poolKey: WebScenePool.Key?

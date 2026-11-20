@@ -2,7 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
+import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 import { scalarWanted } from './validate-hints';
 import { nearest } from './nearest';
 
@@ -1777,9 +1777,13 @@ let keyedPathDepth = 0;
  * installed. 1e6 leaves arcs huge enough to read as straight lines.
  */
 const MAX_PATH_NUMBER = 1e6;
-/** shapes.ts `parseAndFlatten`'s tokenizer, so the numbers checked are the numbers it reads. */
-const PATH_TOKENS = /[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
-
+/**
+ * Every number token in `d`, read with shapes.ts's own tokenizer. Known
+ * limitation: arc flags written without separators ("a1 1 0 011 1") stay one
+ * token here, where the flattener splits them, so a packed run with 7+ digits
+ * before the point (`a1 1 0 1000000.5 0`) is refused although it draws. No
+ * minifier writes that; refusing is the safe side for the installed apps.
+ */
 function pathNumberProblem(d: string): string | null {
   for (const t of d.match(PATH_TOKENS) ?? []) {
     if (t.length === 1 && /[a-zA-Z]/.test(t)) continue;

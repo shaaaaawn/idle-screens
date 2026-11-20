@@ -4,6 +4,7 @@ import { spriteLuma } from './luma';
 import { luminanceGrid } from './perceive';
 import { lerpPathD, lerpSpec, steerablePaths } from './steer';
 import { validateSpecPaths } from './validate';
+import type { SaverSpec } from './types';
 import { Ajv } from 'ajv';
 import jsonSchema from '../saver-spec.schema.json';
 import { validateSpec } from './validate';
@@ -359,6 +360,15 @@ describe('path numbers', () => {
     expect(r.errors.map((e) => e.message).join(' ')).toMatch(/every number in a path must be finite/);
     keyed.timeline = { keys: [{ t: 2000, path: 'mark.sprite.path', value: flat.replace('A1 1', 'A2 2'), dur: 500 }] };
     expect(validateSpec(keyed).errors).toEqual([]);
+  });
+
+  it('refuses one a steer sets, keyed or not (the check idle-server re-runs on setParam / setTrack)', () => {
+    const flat = 'M0 0 A1 1 0 0 1 0.5 0 L0.5 0.5 L0 0.5 Z';
+    const steered = (d: string) => spec(d) as unknown as SaverSpec;
+    for (const keyed of [false, true]) {
+      expect(validateSpecPaths(steered(flat), ['layers.0.sprite.path'], keyed)).toBe(true);
+      for (const d of crashers) expect(validateSpecPaths(steered(d), ['layers.0.sprite.path'], keyed), d).toBe(false);
+    }
   });
 
   it('keeps every path that draws: big flat arcs, tiny exponents, control points off the box', () => {

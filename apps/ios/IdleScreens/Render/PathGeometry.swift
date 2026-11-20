@@ -203,7 +203,7 @@ enum PathGeometry {
             if sweep == 0 && dt > 0 { dt -= 2 * .pi }
             if sweep != 0 && dt < 0 { dt += 2 * .pi }
             let r = jsMax(rx, ry)
-            // A radius past ~4.5e12 makes `1 - tolerance / r` exactly 1, so acos is 0
+            // A radius past ~9e12 (tolerance · 2^54) makes `1 - tolerance / r` exactly 1, so acos is 0
             // and this is +inf: 96 segments, as in TS. A non-finite token makes it NaN: none.
             let n = segmentCount(abs(dt) / (2 * acos(jsMax(0, 1 - tolerance / r))), cap: 96)
             for k in stride(from: 1, through: n, by: 1) { // n is 0 when TS draws nothing
