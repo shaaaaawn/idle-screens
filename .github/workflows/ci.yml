@@ -6,15 +6,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'apps/ios/**'
-      - 'apps/linux/**'
-      - 'docs/**'
-      - 'README.md'
-      - 'AGENTS.md'
-      - 'CREDITS.md'
-      - 'THREAT-MODEL.md'
-      - 'packages/*/CHANGELOG.md'
+    # No `paths-ignore` here on purpose: a workflow that never starts leaves a
+    # required `build` check pending forever. The `changes` job below decides
+    # instead, and a job skipped by `if:` reports as passing.
   workflow_call:
     inputs:
       skip_e2e:
@@ -31,11 +25,41 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap gate (~10s): does this PR touch anything the JS build/test/e2e covers?
+  # PRs that only touch native apps (their own CI), docs or changelogs skip
+  # `build`. Non-PR runs (workflow_call from release.yml) always build.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          # The PR merge commit plus its parents: HEAD^1 is the base tip, so
+          # HEAD^1..HEAD is exactly what this PR changes.
+          fetch-depth: 2
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          relevant=$(printf '%s\n' "$changed" | grep -Ev '^(apps/ios/|apps/linux/|docs/|README\.md$|AGENTS\.md$|CREDITS\.md$|THREAT-MODEL\.md$|packages/[^/]+/CHANGELOG\.md$)' | grep -v '^$' || true)
+          # Fail safe: an empty diff (unexpected) still builds.
+          if [ -z "$changed" ] || [ -n "$relevant" ]; then code=true; else code=false; fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   build:
-    # Skip mechanical changeset version-bump PRs (release.yml auto-merges them).
-    # Same-repo only: a fork can name its branch changeset-release/main, so the
-    # branch name alone must not be enough to skip this job.
-    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository }}
+    needs: changes
+    # Skip PRs with no JS-relevant changes, and mechanical changeset version-bump
+    # PRs (release.yml auto-merges them). Same-repo only for the latter: a fork
+    # can name its branch changeset-release/main, so the branch name alone must
+    # not be enough to skip this job.
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
