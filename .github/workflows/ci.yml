@@ -47,7 +47,7 @@ jobs:
           if [ "$EVENT" != pull_request ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          changed=$(git diff --name-only HEAD^1 HEAD)
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
           relevant=$(printf '%s\n' "$changed" | grep -Ev '^(apps/ios/|apps/linux/|docs/|README\.md$|AGENTS\.md$|CREDITS\.md$|THREAT-MODEL\.md$|packages/[^/]+/CHANGELOG\.md$)' | grep -v '^$' || true)
           # Fail safe: an empty diff (unexpected) still builds.
           if [ -z "$changed" ] || [ -n "$relevant" ]; then code=true; else code=false; fi
@@ -59,7 +59,9 @@ jobs:
     # PRs (release.yml auto-merges them). Same-repo only for the latter: a fork
     # can name its branch changeset-release/main, so the branch name alone must
     # not be enough to skip this job.
-    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    # If `changes` itself fails, build anyway: a skipped `build` would count as
+    # passing for required checks and let an unbuilt PR merge.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') && (github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
