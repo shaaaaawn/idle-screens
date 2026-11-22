@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: apple-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
       run:
         working-directory: apps/ios
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Ship builds come from Xcode 27 (the tvOS/iOS 27 SDKs: the @State
       # macro, Dynamic Type everywhere, the glass opt-out ignored), and from

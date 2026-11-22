@@ -20,22 +20,24 @@ on:
       - '.github/workflows/mac-ci.yml'
   pull_request:
     branches: [main]
+    # Workspace package bundling for apps/mac/web is verified on Linux in ci.yml
+    # on every PR, so PRs only need a macos-26 runner when apps/mac/ itself
+    # changes. push: main above still exercises the full Swift + universal build
+    # whenever a workspace dependency changes.
     paths:
       - 'apps/mac/**'
-      - 'packages/core/**'
-      - 'packages/capabilities/**'
-      - 'packages/saver-metaquarium/**'
-      - 'packages/savers-classic/**'
-      - 'packages/schema/**'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
       - '.github/workflows/mac-ci.yml'
+
+concurrency:
+  group: mac-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   build:
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' }}
     name: Build & test (macOS)
     runs-on: macos-26
     timeout-minutes: 30
@@ -67,11 +69,12 @@ jobs:
         working-directory: apps/mac
         run: swift test
 
-      # Guard the release path from CI, not from a tag. A universal build is
-      # what mac-release.yml ships, and it fails differently from a host build
-      # (different output path, different link step) — so exercise it here
-      # rather than discovering it during a release.
+      # Guard the release path on main merges, not on every PR push. A universal
+      # build is what mac-release.yml ships, and it fails differently from a host
+      # build (different output path, different link step) — running it on push
+      # to main catches regressions before a tag without doubling PR runner time.
       - name: Universal release build (what the DMG ships)
+        if: ${{ github.event_name == 'push' }}
         working-directory: apps/mac
         run: |
           swift build -c release --arch arm64 --arch x86_64

@@ -1,10 +1,20 @@
 name: CI
 
+# `push: main` is deliberately NOT a trigger. release.yml calls this workflow via
+# `workflow_call` (with skip_e2e: true) on push to main, so product merges are
+# gated without running CI twice on the same commit (PRs already ran full E2E).
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'apps/ios/**'
+      - 'apps/linux/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'CREDITS.md'
+      - 'THREAT-MODEL.md'
+      - 'packages/*/CHANGELOG.md'
   workflow_call:
     inputs:
       skip_e2e:
@@ -12,11 +22,18 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded PR runs; never cancel workflow_call from release.yml.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   build:
+    # Skip mechanical changeset version-bump PRs (release.yml auto-merges them).
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,12 +50,20 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test:coverage
-      # Browsers live in ~/.cache/ms-playwright. Cache them by Playwright version
-      # so we skip the ~150–400MB Chromium download on hit. OS libs are NOT in
-      # that cache — always run install-deps on hit (apt, usually seconds).
-      # Official guidance: caching is optional; measured install here is ~25s cold.
-      # There is no usable "built-in Playwright" on ubuntu-latest; the closest
-      # built-in is system Google Chrome via channel:'chrome' (see playwright.config).
+      # Verify the Mac app's web bundle still compiles against the workspace
+      # packages on Linux (~3s) so mac-ci.yml doesn't have to burn a macos-26
+      # runner on every JS-only PR.
+      - name: Build mac web bundle (workspace integration check)
+        working-directory: apps/mac/web
+        run: node build.mjs
+      # Browsers live in ~/.cache/ms-playwright. Key on the resolved Playwright
+      # version (not pnpm-lock.yaml) so unrelated dependency bumps don't miss
+      # cache, re-download ~300 MB Chromium, or pile up orphan caches toward the
+      # 10 GB repo limit. OS libs are NOT in that cache — always run install-deps.
+      - name: Read Playwright version
+        if: ${{ inputs.skip_e2e != true }}
+        id: playwright-ver
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         # inputs.skip_e2e is only set on workflow_call; push/PR leave it empty → run e2e.
         if: ${{ inputs.skip_e2e != true }}
@@ -46,7 +71,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}-chromium
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-ver.outputs.version }}-chromium
       - name: Install Playwright Chromium + OS deps
         if: ${{ inputs.skip_e2e != true && steps.playwright-cache.outputs.cache-hit != 'true' }}
         run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
