@@ -33,7 +33,9 @@ permissions:
 jobs:
   build:
     # Skip mechanical changeset version-bump PRs (release.yml auto-merges them).
-    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' }}
+    # Same-repo only: a fork can name its branch changeset-release/main, so the
+    # branch name alone must not be enough to skip this job.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -63,7 +65,10 @@ jobs:
       - name: Read Playwright version
         if: ${{ inputs.skip_e2e != true }}
         id: playwright-ver
-        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(node -p "require('./node_modules/@playwright/test/package.json').version")
+          test -n "$v" || { echo "::error::could not resolve @playwright/test version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         # inputs.skip_e2e is only set on workflow_call; push/PR leave it empty → run e2e.
         if: ${{ inputs.skip_e2e != true }}

@@ -37,7 +37,9 @@ permissions:
 
 jobs:
   build:
-    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' }}
+    # Same-repo only: a fork can name its branch changeset-release/main, so the
+    # branch name alone must not be enough to skip this job.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository }}
     name: Build & test (macOS)
     runs-on: macos-26
     timeout-minutes: 30
