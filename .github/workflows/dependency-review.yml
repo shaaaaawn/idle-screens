@@ -11,6 +11,11 @@ permissions:
 
 jobs:
   review:
+    # Same-repo only: a fork can name its branch changeset-release/main, so the
+    # branch name alone must not be enough to skip this job. Accepted limit: a
+    # collaborator with push access could use that branch name to skip this
+    # check, but push access already lets them edit this workflow file itself.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

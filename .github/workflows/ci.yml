@@ -1,10 +1,14 @@
 name: CI
 
+# `push: main` is deliberately NOT a trigger. release.yml calls this workflow via
+# `workflow_call` (with skip_e2e: true) on push to main, so product merges are
+# gated without running CI twice on the same commit (PRs already ran full E2E).
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    # No `paths-ignore` here on purpose: a workflow that never starts leaves a
+    # required `build` check pending forever. The `changes` job below decides
+    # instead, and a job skipped by `if:` reports as passing.
   workflow_call:
     inputs:
       skip_e2e:
@@ -12,11 +16,52 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel superseded PR runs; never cancel workflow_call from release.yml.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
+  # Cheap gate (~10s): does this PR touch anything the JS build/test/e2e covers?
+  # PRs that only touch native apps (their own CI), docs or changelogs skip
+  # `build`. Non-PR runs (workflow_call from release.yml) always build.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          # The PR merge commit plus its parents: HEAD^1 is the base tip, so
+          # HEAD^1..HEAD is exactly what this PR changes.
+          fetch-depth: 2
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD)
+          relevant=$(printf '%s\n' "$changed" | grep -Ev '^(apps/ios/|apps/linux/|docs/|README\.md$|AGENTS\.md$|CREDITS\.md$|THREAT-MODEL\.md$|packages/[^/]+/CHANGELOG\.md$)' | grep -v '^$' || true)
+          # Fail safe: an empty diff (unexpected) still builds.
+          if [ -z "$changed" ] || [ -n "$relevant" ]; then code=true; else code=false; fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    # Skip PRs with no JS-relevant changes, and mechanical changeset version-bump
+    # PRs (release.yml auto-merges them). Same-repo only for the latter: a fork
+    # can name its branch changeset-release/main, so the branch name alone must
+    # not be enough to skip this job.
+    # If `changes` itself fails, build anyway: a skipped `build` would count as
+    # passing for required checks and let an unbuilt PR merge.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') && (github.event_name != 'pull_request' || github.head_ref != 'changeset-release/main' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,12 +78,23 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test:coverage
-      # Browsers live in ~/.cache/ms-playwright. Cache them by Playwright version
-      # so we skip the ~150–400MB Chromium download on hit. OS libs are NOT in
-      # that cache — always run install-deps on hit (apt, usually seconds).
-      # Official guidance: caching is optional; measured install here is ~25s cold.
-      # There is no usable "built-in Playwright" on ubuntu-latest; the closest
-      # built-in is system Google Chrome via channel:'chrome' (see playwright.config).
+      # Verify the Mac app's web bundle still compiles against the workspace
+      # packages on Linux (~3s) so mac-ci.yml doesn't have to burn a macos-26
+      # runner on every JS-only PR.
+      - name: Build mac web bundle (workspace integration check)
+        working-directory: apps/mac/web
+        run: node build.mjs
+      # Browsers live in ~/.cache/ms-playwright. Key on the resolved Playwright
+      # version (not pnpm-lock.yaml) so unrelated dependency bumps don't miss
+      # cache, re-download ~300 MB Chromium, or pile up orphan caches toward the
+      # 10 GB repo limit. OS libs are NOT in that cache — always run install-deps.
+      - name: Read Playwright version
+        if: ${{ inputs.skip_e2e != true }}
+        id: playwright-ver
+        run: |
+          v=$(node -p "require('./node_modules/@playwright/test/package.json').version")
+          test -n "$v" || { echo "::error::could not resolve @playwright/test version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         # inputs.skip_e2e is only set on workflow_call; push/PR leave it empty → run e2e.
         if: ${{ inputs.skip_e2e != true }}
@@ -46,7 +102,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}-chromium
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-ver.outputs.version }}-chromium
       - name: Install Playwright Chromium + OS deps
         if: ${{ inputs.skip_e2e != true && steps.playwright-cache.outputs.cache-hit != 'true' }}
         run: pnpm --filter @idle-screens/playground exec playwright install --with-deps chromium
