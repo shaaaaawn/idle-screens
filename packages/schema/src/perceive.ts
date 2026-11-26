@@ -18,7 +18,7 @@ import { adviseSpec } from './advise';
 import { cohesionOf, type LayerCohesion } from './cohesion';
 import { backgroundLuma, backgroundRgb, hexLuma, hexRgb, spriteHex, spriteLuma } from './luma';
 import { FIELD_RASTER_SHORT_SIDE, fieldRgbAt, fieldSampleTime, rgb255Luma } from './field';
-import { barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, polygonInkArea, polygonUnitRing, ringFill, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FONT_PX_RE, barBox, barFraction, flattenSprite, gradientSpace, isPathPolygon, pathFrame, isShapedSprite, gradientStopWeights, partInkArea, pathInkArea, pathLength, pathParts, polygonArea, polygonInkArea, polygonUnitRing, ringFill, type ResolvedPart, polygonFill, polygonFillRule, polygonPoints, strokeDrawnSamples, strokeLines, strokeSamples, strokeTaper, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 import {
   alphaAt,
@@ -167,7 +167,7 @@ function fontScaleFor(spec: SaverSpec, w: number, h: number): number {
 
 /** Px size a text sprite draws at: its font's px × the font scale, else the entity's size. */
 function textFontPx(s: Extract<LayerSpec['sprite'], { kind: 'text' }>, size: number, fontScale: number): number {
-  const m = s.font ? /(\d+(?:\.\d+)?)px/.exec(s.font) : null;
+  const m = s.font ? FONT_PX_RE.exec(s.font) : null;
   return m ? Number(m[1]) * fontScale : size;
 }
 

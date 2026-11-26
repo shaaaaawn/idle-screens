@@ -526,6 +526,13 @@ describe('F162 (X997): a path stroke width is unit-box units, capped at 0.5, and
     expect(checkJson(drawing(1.39))).toBe(false);
   });
 
+  it('the JSON Schema description gives both px forms (viewport and units: "px")', () => {
+    const schema = readFileSync(['packages/schema/saver-spec.schema.json', 'saver-spec.schema.json'].map((f) => resolve(process.cwd(), f)).find((f) => existsSync(f))!, 'utf8');
+    const line = schema.split('\n').find((l) => l.includes('"width"') && l.includes('Unit-box units'))!;
+    expect(line).toContain('width × radius × min(width, height) px');
+    expect(line).toContain('width × radius px under units: \\"px\\"');
+  });
+
   it('FORMAT.md states the cap and its px meaning, and carves path strokes out of the min(w, h) rule', () => {
     expect(format).toContain('**`0 < width ≤ 0.5`**');
     expect(format).toMatch(/`width × radius ×\s+min\(width, height\)` px/);
@@ -550,6 +557,20 @@ describe('F162 (X939): a px size in a text font makes layer.size a no-op, and th
     expect(codes(label('bold 80px monospace'))).toEqual([]);
     expect(codes(label(undefined, [0.05, 0.05]))).toEqual([]);
     expect(codes(label('.5px serif', [0.05, 0.05]))).toEqual(['layers[0].size no-effect']);
+  });
+
+  it('says what size still does under bounce / rise: the edge margin, not the glyphs', () => {
+    const moving = (type: string): string => {
+      const spec = label('bold 80px monospace', [0.05, 0.05]);
+      (spec.layers[0] as unknown as { motion: unknown }).motion = { type, speed: [0.05, 0.1] };
+      const res = validateSpec(structuredClone(spec));
+      expect(res.errors).toEqual([]);
+      return res.warnings!.find((w) => w.code === 'no-effect' && w.path === 'layers[0].size')!.message;
+    };
+    expect(moving('bounce')).toContain('here it only sets the bounce edge margin');
+    expect(moving('rise')).toContain('here it only sets the rise edge margin');
+    const still = validateSpec(structuredClone(label('bold 80px monospace', [0.05, 0.05]))).warnings![0]!.message;
+    expect(still).not.toContain('edge margin');
   });
 
   it('a sprite.size aliased onto the layer warns both ways, and a long font is cut in the message', () => {

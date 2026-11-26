@@ -365,7 +365,7 @@ on the sprite tier (the `basic` tier rule).
 | `count` | int 1..400 | — | entities in this layer. **At most 800 entities across all layers** (and ≤ 36 layers): the validator rejects a spec whose counts sum past 800, and density scaling never takes a screen past it |
 | `sprite` | SpriteSpec | — | what each entity looks like |
 | `motion` | MotionSpec | — | how entities move |
-| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. On a `text` sprite whose `font` carries a px size it does not set the glyph size (that px size does; the validator warns `no-effect`). A **layer** field: it goes next to `count`, never inside `sprite` |
+| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. On a `text` sprite whose `font` carries a px size it does not set the glyph size (that px size does; the validator warns `no-effect`) — it is left setting only a `bounce` / `rise` layer's edge margin. A **layer** field: it goes next to `count`, never inside `sprite` |
 | `wrap` | boolean | `true` | wrap to the opposite edge when leaving the viewport |
 | `flip` | boolean | `false` | mirror the sprite to face its heading |
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
@@ -1285,7 +1285,9 @@ stands still.
   layer whose paint opacity (`opacity`, a textBlock's `opacity`, its group's)
   or text colour is keyed is re-judged at its most visible key before
   `sparse-scene`, the `dense` density mismatch or `text-legibility` fires, so
-  a caption that has faded out by 5 s is not reported as empty or unreadable.
+  a caption that has faded out by 5 s is not reported as empty or unreadable
+  (nor is one set against a glow that only fades in once it has left: it is
+  also read at the moments its own keys settle, beside what is on screen then).
   `giant-entity` flags an emoji/text layer
   whose glyphs come out taller than the viewport's min dimension — usually
   px numbers in a viewport-unit spec (`size: [20, 40]` is 21,600 px at

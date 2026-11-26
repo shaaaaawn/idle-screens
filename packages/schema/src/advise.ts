@@ -2,12 +2,12 @@ import { createRng } from '@idle-screens/core';
 import { analyzeFlashes, srgbToLinear } from '@idle-screens/validator';
 import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSeparation, hexLuma, hexRgb, legibilityRatio, relativeLuminance, sourceOverPlate, spriteHex, spriteInks, type Rgb } from './luma';
 import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
-import { barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonInkArea, polygonPoints, ruleArea } from './shapes';
+import { FONT_PX_RE, barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonInkArea, polygonPoints, ruleArea } from './shapes';
 import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, revealState, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
 import { describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
-import { resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
+import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
 import { SEAMLESS_PERIOD_KINDS, periodWithoutTimeline } from './period';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
@@ -219,7 +219,7 @@ export function adviseSpec(
     if (layer.sprite.kind === 'emoji' || layer.sprite.kind === 'text') {
       const vpMin = Math.min(w, h);
       const fontPx = layer.sprite.kind === 'text' && layer.sprite.font
-        ? /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/.exec(layer.sprite.font)
+        ? FONT_PX_RE.exec(layer.sprite.font)
         : null;
       const maxGlyph = fontPx
         ? Number(fontPx[1]) * (spec.units === 'px' ? 1 : vpMin / (spec.referenceViewport ?? LIMITS.referenceViewport))
@@ -845,7 +845,16 @@ export function adviseSpec(
         const readable = inks.some((hex) => {
           const atPeak = worstOf(p.spec, peakBoxes, hex);
           return !atPeak || Math.min(atPeak.ground, atPeak.plate) >= READ_LEGIBILITY_FLOOR;
-        });
+        })
+          // The peak maxes every layer's opacity on its own, so it can set
+          // this caption against a glow or chip that is only on screen once
+          // the caption has gone. Before warning, look at the moments its own
+          // keys settle, with every keyed opacity as it stands then: readable
+          // at one of those real instants is readable.
+          || p.settled(b.li).some((at) => {
+            const then = worstOf(at.spec, staticTextBoxes(at.spec, allEntities, hidden, w, h, scale, new Set([b.li])), at.ink ?? s.color ?? '#e6e8ef');
+            return !!then && Math.min(then.ground, then.plate) >= READ_LEGIBILITY_FLOOR;
+          });
         if (readable) worst = null;
       }
     }
@@ -1393,7 +1402,7 @@ function textBoxAt(
   w: number,
   h: number,
 ): Box {
-  const m = s.font ? /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/.exec(s.font) : null;
+  const m = s.font ? FONT_PX_RE.exec(s.font) : null;
   const fontScale = spec.units === 'px' ? 1 : Math.min(w, h) / (spec.referenceViewport ?? LIMITS.referenceViewport);
   const fh = m ? Number(m[1]) * fontScale : e.size;
   const str = s.strings[e.spriteIndex] ?? s.strings[0] ?? '';
@@ -1472,7 +1481,10 @@ function hiddenLayers(spec: SaverSpec): boolean[] | null {
  * per sample. Each path is maxed on its own, which can only overstate
  * visibility, so callers use it to silence, never to raise. A path a
  * whole-object key on an ancestor (`layers.0`, `groups.g`) can also set is
- * left at the instant. Keys at or after `until` (a segment's end) never play.
+ * left at the instant. Keys at or after `until` (a segment's end) never play,
+ * and a glide `until` cuts short counts only as far as it has got by then.
+ * `settled` is the time-coherent fallback for a check the per-path max
+ * misleads (a caption set against a glow that only arrives after it leaves).
  * Null when no key lifts anything — the common case.
  */
 interface PeakVisibility {
@@ -1481,7 +1493,18 @@ interface PeakVisibility {
   lifted: Set<number>;
   /** A text layer's keyed colours, the instant's own first. */
   colours: Map<number, string[]>;
+  /**
+   * The scene at each moment one of layer `li`'s own visibility keys settles
+   * (at most `PEAK_SETTLE_CAP`): `resolved` with every keyed paint opacity —
+   * of every layer and group, not just `li` — at its value then, and `ink`
+   * the layer's keyed text colour then. Unlike `spec`, each is one real
+   * instant, so layers that are never on screen together stay apart.
+   */
+  settled: (li: number) => Array<{ spec: SaverSpec; ink?: string }>;
 }
+
+/** Most settle instants `PeakVisibility.settled` resolves for one layer. */
+const PEAK_SETTLE_CAP = 8;
 
 function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number): PeakVisibility | null {
   const tl = authored.timeline;
@@ -1494,10 +1517,20 @@ function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number
     for (const p of tracks.keys()) if (path.startsWith(`${p}.`)) return true;
     return false;
   };
+  let untilMemo: SaverSpec | undefined;
+  const atUntil = (u: number): SaverSpec => (untilMemo ??= resolveTimelineAt(authored, u, true));
   const valuesOf = (path: string): unknown[] | null => {
     const keys = tracks.get(path);
     if (!keys || shadowed(path)) return null;
-    const out: unknown[] = keys.filter((k) => until === undefined || k.t < until).map((k) => k.value);
+    const out: unknown[] = [];
+    for (const k of keys) {
+      if (until === undefined) out.push(k.value);
+      else if (k.t >= until) continue;
+      // A glide the segment cuts short never reaches its value: it gets as
+      // far as the path stands at `until`, no further.
+      else if (k.t + Math.max(0, k.dur ?? DEFAULT_KEY_DUR) <= until) out.push(k.value);
+      else out.push(readSpecPath(atUntil(until), path));
+    }
     if (!loop) out.push(readSpecPath(base, path));
     return out;
   };
@@ -1547,7 +1580,49 @@ function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number
     }
   });
   if (lifted.size === 0) return null;
-  return { spec: { ...resolved, layers, ...(groups === undefined ? {} : { groups }) }, lifted, colours };
+
+  const ownTrack = (path: string): boolean => tracks.has(path) && !shadowed(path);
+  const settled = (li: number): Array<{ spec: SaverSpec; ink?: string }> => {
+    const layer = resolved.layers[li];
+    if (!layer) return [];
+    const colourPath = `layers.${li}.sprite.color`;
+    const paths = [`layers.${li}.opacity`, `layers.${li}.sprite.opacity`, colourPath];
+    if (layer.group !== undefined) paths.push(`groups.${layer.group}.opacity`);
+    // When a key has finished its glide; the base scene (t = 0) shows first unless the timeline loops.
+    const times = new Set<number>(loop ? [] : [0]);
+    for (const path of paths) {
+      if (!ownTrack(path)) continue;
+      for (const k of tracks.get(path)!) {
+        const end = k.t + Math.max(0, k.dur ?? DEFAULT_KEY_DUR);
+        if (Number.isFinite(end) && (until === undefined || end < until)) times.add(end);
+      }
+    }
+    return [...times].sort((a, b) => a - b).slice(0, PEAK_SETTLE_CAP).map((t) => {
+      const then = resolveTimelineAt(authored, t, true);
+      const opacityAt = (path: string, now: number | undefined): number | undefined => {
+        if (!ownTrack(path)) return now;
+        const v = readSpecPath(then, path);
+        return typeof v === 'number' && Number.isFinite(v) ? v : now;
+      };
+      const groupsThen = resolved.groups && Object.fromEntries(Object.entries(resolved.groups).map(([name, g]) => {
+        const op = opacityAt(`groups.${name}.opacity`, g.opacity);
+        return [name, op === g.opacity ? g : { ...g, opacity: op }];
+      }));
+      const layersThen = resolved.layers.map((l, lj) => {
+        const op = opacityAt(`layers.${lj}.opacity`, l.opacity);
+        const sp = l.sprite.kind === 'textBlock' ? opacityAt(`layers.${lj}.sprite.opacity`, l.sprite.opacity) : undefined;
+        const spriteMoved = l.sprite.kind === 'textBlock' && sp !== l.sprite.opacity;
+        if (op === l.opacity && !spriteMoved) return l;
+        return { ...l, ...(op === l.opacity ? {} : { opacity: op }), ...(spriteMoved ? { sprite: { ...l.sprite, opacity: sp } } : {}) } as LayerSpec;
+      });
+      const ink = ownTrack(colourPath) ? readSpecPath(then, colourPath) : undefined;
+      return {
+        spec: { ...resolved, layers: layersThen, ...(groupsThen === undefined ? {} : { groups: groupsThen }) },
+        ...(typeof ink === 'string' ? { ink } : {}),
+      };
+    });
+  };
+  return { spec: { ...resolved, layers, ...(groups === undefined ? {} : { groups }) }, lifted, colours, settled };
 }
 
 /**

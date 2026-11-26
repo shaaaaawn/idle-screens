@@ -1112,4 +1112,53 @@ describe('F160 (X969): with no `t`, keyed visibility is judged at its peak, not 
     spec.layers.push({ ...structuredClone(spec.layers[0]!), key: 'second' });
     expect(codes(spec)).not.toContain('text-overlap');
   });
+
+  it('a glide cut short by `until` lifts only as far as it gets (cubic)', () => {
+    // 0 → 1 over 4 s from 1 s, then out again before the 5 s instant. A
+    // segment that ends at 1.4 s only ever sees the first tenth of the fade-in.
+    const spec = caption({ keys: [
+      { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 3000 },
+      { t: 4500, path: 'caption.sprite.opacity', value: 0, dur: 100 },
+    ] });
+    const until = (u?: number): string[] => adviseSpec(spec, { width: 1920, height: 1080 }, u === undefined ? {} : { until: u }).map((w) => w.code);
+    expect(until()).not.toContain('text-legibility');
+    expect(until(4200)).not.toContain('text-legibility');
+    expect(until(1300)).toEqual(expect.arrayContaining(['text-legibility']));
+  });
+
+  // The per-path peak puts the caption at full opacity beside every other
+  // layer at ITS peak — including a glow that only arrives after the caption
+  // has gone. The settle instants of the caption's own keys are real moments.
+  describe('a caption is judged against what is on screen with it', () => {
+    const withGlow = (glowOpacity: number, glowKeys: unknown[]): SaverSpec => ({
+      schemaVersion: 1, id: 'x969-glow', label: 'X969 glow',
+      background: { type: 'solid', color: '#000000' },
+      layers: [
+        { key: 'glow', count: 1, position: { x: 0.5, y: 0.5 }, blend: 'lighter', opacity: glowOpacity, sprite: { kind: 'circle', radius: [0.4, 0.4], color: '#ffffff' }, motion: { type: 'static' } },
+        { key: 'caption', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'The tide is coming in', maxWidth: 0.6, fontSize: 0.05, color: '#ffffff', role: 'read', opacity: 0 }, motion: { type: 'static' } },
+      ],
+      timeline: { keys: [
+        { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 300 },
+        { t: 3000, path: 'caption.sprite.opacity', value: 0, dur: 300 },
+        ...glowKeys,
+      ] },
+    } as unknown as SaverSpec);
+
+    it('a glow that fades in after the caption has gone does not make it unreadable', () => {
+      const spec = withGlow(0, [{ t: 4000, path: 'glow.opacity', value: 1, dur: 300 }]);
+      expect(codes(spec)).not.toContain('text-legibility');
+      expect(codes(spec, { t: 2000 })).not.toContain('text-legibility');
+      expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    });
+
+    it('control: a glow that is up while the caption shows still warns, though it is gone by 5 s', () => {
+      const spec = withGlow(1, [{ t: 3500, path: 'glow.opacity', value: 0, dur: 300 }]);
+      expect(codes(spec, { t: 2000 })).toContain('text-legibility');
+      expect(codes(spec)).toContain('text-legibility');
+    });
+
+    it('control: an unkeyed glow under the caption still warns', () => {
+      expect(codes(withGlow(1, []))).toContain('text-legibility');
+    });
+  });
 });

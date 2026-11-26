@@ -2,7 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
+import { FONT_PX_RE, MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 import { scalarWanted } from './validate-hints';
 import { nearest } from './nearest';
 
@@ -418,14 +418,7 @@ const SPRITE_SIZE_FIELD: Record<string, string> = {
   circle: 'radius', ring: 'radius', polygon: 'radius', streak: 'length', stroke: 'length',
   rect: 'width', bar: 'length and thickness', textBlock: 'fontSize',
 };
-/**
- * A px size token in a CSS font shorthand — the same bounded pattern as
- * compile.ts's `FONT_PX_RE` (which imports this module, so it cannot be
- * shared from there): a text sprite whose `font` matches draws at that size.
- */
-const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
-
-const SPRITE_SIZE_MISPLACED ="'size' belongs on the layer, not inside sprite — move it up one level";
+const SPRITE_SIZE_MISPLACED = "'size' belongs on the layer, not inside sprite — move it up one level";
 
 /**
  * Repair (F24): `size` misplaced inside an emoji/text sprite. It sits naturally
@@ -982,10 +975,14 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
   }
   // F162 (X939): a px size in a text sprite's `font` sets the glyph size, so
   // a layer `size` beside it draws nothing different. Silent until now; the
-  // renderer's rule is compile.ts's `FONT_PX_RE` test.
+  // renderer's rule is the same `FONT_PX_RE` test (shapes.ts). The one thing
+  // `size` still does there is set how far a `bounce` / `rise` entity keeps
+  // from the edges (simulate.ts `positionAt`), so those say so.
   if (layer.size !== undefined && isObj(layer.sprite) && layer.sprite.kind === 'text' && isStr(layer.sprite.font) && FONT_PX_RE.test(layer.sprite.font)) {
     const font = layer.sprite.font.length > 60 ? `${layer.sprite.font.slice(0, 57)}...` : layer.sprite.font;
-    warn(`${path}.size`, 'no-effect', `layer.size does not set the glyph size — the px size in font ('${font}') does; use a family-only font (e.g. 'bold monospace') to size the text by size`);
+    const motion = isObj(layer.motion) ? layer.motion.type : undefined;
+    const margin = motion === 'bounce' || motion === 'rise' ? ` (here it only sets the ${motion} edge margin)` : '';
+    warn(`${path}.size`, 'no-effect', `layer.size does not set the glyph size${margin} — the px size in font ('${font}') does; use a family-only font (e.g. 'bold monospace') to size the text by size`);
   }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
