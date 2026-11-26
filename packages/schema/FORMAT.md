@@ -194,7 +194,10 @@ must exist, have `count: 1`, and not themselves orbit a layer.
 
 With `units: "viewport"` (the default) every dimensional value — sizes, radii,
 speeds, distances, wavelengths, stroke widths — is a fraction of
-`min(width, height)`, so specs scale to any display. Text sprites with an
+`min(width, height)`, so specs scale to any display. One exception: a path
+drawing's `parts[].stroke.width` is in the drawing's own unit box (a fraction
+of the sprite's `radius`, at most 0.5), not of `min(width, height)` — see
+`stroke` under the path sprite. Text sprites with an
 explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`) are no
 exception: the compiler rescales that number by
 `min(width, height) / referenceViewport` so the text holds its apparent size,
@@ -362,7 +365,7 @@ on the sprite tier (the `basic` tier rule).
 | `count` | int 1..400 | — | entities in this layer. **At most 800 entities across all layers** (and ≤ 36 layers): the validator rejects a spec whose counts sum past 800, and density scaling never takes a screen past it |
 | `sprite` | SpriteSpec | — | what each entity looks like |
 | `motion` | MotionSpec | — | how entities move |
-| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. A **layer** field: it goes next to `count`, never inside `sprite` |
+| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites, and for a `text` sprite whose `font` carries a px size (that px size wins; the validator warns `no-effect`). A **layer** field: it goes next to `count`, never inside `sprite` |
 | `wrap` | boolean | `true` | wrap to the opposite edge when leaving the viewport |
 | `flip` | boolean | `false` | mirror the sprite to face its heading |
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
@@ -407,7 +410,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   ```
 - `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
-  viewport (verbatim only under `units: "px"`); a family/weight only
+  viewport (verbatim only under `units: "px"`), and the layer's `size` then
+  does not set the glyph size (the validator warns `no-effect` when both are
+  set); a family/weight only
   (`"bold monospace"`) composes with the seeded per-entity `size` (faces
   installed on the viewer only — see `font` under `textBlock`); `role` is
   the legibility opt-in described under `textBlock` below (same field, same
@@ -486,7 +491,13 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   - **`stroke`** — `{ "color": "#1f2a1c", "width": 0.006, "opacity": 0.8, "join": "round", "cap": "round" }`
     — an outline along every subpath **as drawn** (holes included; open
     subpaths too). `width` is in unit-box units (0.01 = 1% of the drawing's
-    half-size). Overlapping pieces show their inner edges, as in SVG.
+    half-size), **`0 < width ≤ 0.5`**: it draws `width × radius ×
+    min(width, height)` px wide (`width × radius` px under `units: "px"`;
+    before `grow` and transform scale), so the widest line is half the
+    sprite's radius — a `radius` 0.2 drawing at 1080p strokes at most 108 px.
+    It is not a fraction of `min(width, height)` like other stroke widths:
+    for a heavier line, raise the radius or fill a shape.
+    Overlapping pieces show their inner edges, as in SVG.
     `draw: {start?, end?}` on a stroke paints only that stretch of it, the
     part's subpaths counted as one pen run in the order the path draws them
     (a closed ring includes its closing edge, and comes back open when cut) —

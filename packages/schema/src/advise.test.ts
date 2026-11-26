@@ -992,3 +992,99 @@ describe('layout-text-overlap: list / table cells narrower than their labels (X2
     }
   });
 });
+
+describe('F160 (X969): with no `t`, keyed visibility is judged at its peak, not at 5 s', () => {
+  // The repro: a caption that fades in at 1 s and out at 4 s (gone by 4.6 s),
+  // so the default instant (COHESION_T = 5 s) sees nothing.
+  const caption = (over: { keys?: unknown[]; opacity?: number; loop?: boolean; color?: string } = {}): SaverSpec => ({
+    schemaVersion: 1, id: 'x969', label: 'X969',
+    background: { type: 'solid', color: '#0a0f1e' },
+    layers: [{
+      key: 'caption', count: 1, position: { x: 0.5, y: 0.5 },
+      sprite: { kind: 'textBlock', text: 'The tide is coming in', maxWidth: 0.6, fontSize: 0.05, color: over.color ?? '#f4f1e8', role: 'read', opacity: over.opacity ?? 0 },
+      motion: { type: 'static' },
+    }],
+    ...(over.keys ? { timeline: { ...(over.loop ? { loop: true, duration: 8000 } : {}), keys: over.keys } } : {}),
+  } as unknown as SaverSpec);
+  const fadeInOut = [
+    { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 600 },
+    { t: 4000, path: 'caption.sprite.opacity', value: 0, dur: 600 },
+  ];
+  const codes = (spec: SaverSpec, opts?: { t?: number }): string[] => adviseSpec(spec, { width: 1920, height: 1080 }, opts).map((w) => w.code);
+
+  it('a faded-in caption raises neither text-legibility nor sparse-scene without a t', () => {
+    const c = codes(caption({ keys: fadeInOut }));
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('an explicit t is still judged at exactly that t', () => {
+    expect(codes(caption({ keys: fadeInOut }), { t: 5000 })).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+    expect(codes(caption({ keys: fadeInOut }), { t: 2000 })).not.toContain('text-legibility');
+  });
+
+  it('a looping timeline lifts the same way', () => {
+    const c = codes(caption({ keys: fadeInOut, loop: true }));
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('control: truly invisible text still warns (no keys)', () => {
+    expect(codes(caption())).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('control: a key that does not touch visibility lifts nothing', () => {
+    const c = codes(caption({ keys: [{ t: 1000, path: 'caption.transform.x', value: 0.1, dur: 1000 }] }));
+    expect(c).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('control: keyed but never visible (0 → 0) still warns', () => {
+    const c = codes(caption({ keys: [{ t: 1000, path: 'caption.sprite.opacity', value: 0, dur: 600 }] }));
+    expect(c).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('a layer opacity key lifts the same way as sprite.opacity', () => {
+    const spec = caption({ opacity: 1, keys: [
+      { t: 1000, path: 'caption.opacity', value: 1, dur: 600 },
+      { t: 4000, path: 'caption.opacity', value: 0, dur: 600 },
+    ] });
+    (spec.layers[0] as { opacity?: number }).opacity = 0;
+    const c = codes(spec);
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+  });
+
+  it('a group opacity key lifts its members', () => {
+    const spec = caption({ opacity: 1, keys: [
+      { t: 1000, path: 'groups.title.opacity', value: 1, dur: 600 },
+      { t: 4000, path: 'groups.title.opacity', value: 0, dur: 600 },
+    ] });
+    spec.groups = { title: { opacity: 0 } };
+    (spec.layers[0] as { group?: string }).group = 'title';
+    const c = codes(spec);
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('a keyed colour is judged at its most legible key: ink that matches the ground at 5 s but not at 2 s', () => {
+    const spec = caption({ opacity: 1, color: '#f4f1e8', keys: [
+      { t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 1000 },
+    ] });
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    expect(codes(spec)).not.toContain('text-legibility');
+    // Every key colour unreadable: still raised.
+    const dim = caption({ opacity: 1, color: '#0b101f', keys: [{ t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 1000 }] });
+    expect(codes(dim)).toContain('text-legibility');
+  });
+
+  it('crossfading captions in one spot are not judged visible together (no text-overlap)', () => {
+    const spec = caption({ keys: [
+      ...fadeInOut,
+      { t: 5000, path: 'second.sprite.opacity', value: 1, dur: 600 },
+      { t: 7000, path: 'second.sprite.opacity', value: 0, dur: 600 },
+    ] });
+    spec.layers.push({ ...structuredClone(spec.layers[0]!), key: 'second' });
+    expect(codes(spec)).not.toContain('text-overlap');
+  });
+});

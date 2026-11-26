@@ -509,3 +509,60 @@ describe('F24: FORMAT.md\'s emoji example puts size on the layer', () => {
     expect(validateSpec(structuredClone(spec))).toEqual({ valid: true, errors: [], warnings: [] });
   });
 });
+
+describe('F162 (X997): a path stroke width is unit-box units, capped at 0.5, and the docs say so', () => {
+  const format = readFileSync(['packages/schema/FORMAT.md', 'FORMAT.md'].map((f) => resolve(process.cwd(), f)).find((f) => existsSync(f))!, 'utf8');
+  const drawing = (width: number): SaverSpec => scene([{
+    count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+    sprite: { kind: 'polygon', radius: [0.2, 0.2], color: '#ffffff', parts: [{ path: 'M -1 0 L 1 0', fill: false, stroke: { color: '#ffffff', width } }] },
+  }]);
+
+  it('the validator accepts 0.5 and refuses 1.39 with the px meaning in the message', () => {
+    expect(validateSpec(structuredClone(drawing(0.5))).errors).toEqual([]);
+    const errs = validateSpec(structuredClone(drawing(1.39))).errors;
+    expect(errs.map((e) => e.path)).toEqual(['layers[0].sprite.parts[0].stroke.width']);
+    expect(errs[0]!.message).toContain('<= 0.5');
+    expect(errs[0]!.message).toContain('width × radius × min(width, height) px');
+    expect(checkJson(drawing(1.39))).toBe(false);
+  });
+
+  it('FORMAT.md states the cap and its px meaning, and carves path strokes out of the min(w, h) rule', () => {
+    expect(format).toContain('**`0 < width ≤ 0.5`**');
+    expect(format).toMatch(/`width × radius ×\s+min\(width, height\)` px/);
+    const units = format.slice(format.indexOf('With `units: "viewport"` (the default)'), format.indexOf('Text sprites with an'));
+    expect(units).toContain('`parts[].stroke.width` is in the drawing\'s own unit box');
+  });
+});
+
+describe('F162 (X939): a px size in a text font makes layer.size a no-op, and the validator says so', () => {
+  const label = (font: string | undefined, size?: [number, number]): SaverSpec => scene([{
+    count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' }, ...(size ? { size } : {}),
+    sprite: { kind: 'text', strings: ['HELLO'], color: '#ffffff', ...(font === undefined ? {} : { font }) },
+  }]);
+
+  it('warns no-effect on layer.size beside a px font, and only then', () => {
+    const spec = label('bold 80px monospace', [0.05, 0.05]);
+    const res = validateSpec(structuredClone(spec));
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([expect.objectContaining({ path: 'layers[0].size', code: 'no-effect' })]);
+    expect(res.warnings![0]!.message).toContain("the px size in font ('bold 80px monospace')");
+    expect(codes(label('bold monospace', [0.05, 0.05]))).toEqual([]);
+    expect(codes(label('bold 80px monospace'))).toEqual([]);
+    expect(codes(label(undefined, [0.05, 0.05]))).toEqual([]);
+    expect(codes(label('.5px serif', [0.05, 0.05]))).toEqual(['layers[0].size no-effect']);
+  });
+
+  it('a sprite.size aliased onto the layer warns both ways, and a long font is cut in the message', () => {
+    const spec = scene([{ count: 1, position: { x: 0.5, y: 0.5 }, motion: { type: 'static' },
+      sprite: { kind: 'text', strings: ['HI'], color: '#ffffff', font: `12px ${'x'.repeat(200)}`, size: [0.05, 0.05] } }]);
+    const res = validateSpec(structuredClone(spec));
+    expect(res.warnings!.map((w) => w.code).sort()).toEqual(['misplaced-property', 'no-effect']);
+    expect(res.warnings!.find((w) => w.code === 'no-effect')!.message.length).toBeLessThan(240);
+  });
+
+  it('FORMAT.md says so where size and the text font are described', () => {
+    const format = readFileSync(['packages/schema/FORMAT.md', 'FORMAT.md'].map((f) => resolve(process.cwd(), f)).find((f) => existsSync(f))!, 'utf8');
+    expect(format).toMatch(/\| `size` \|[^\n]*`font` carries a px size[^\n]*`no-effect`/);
+    expect(format).toMatch(/layer's `size` then\s+does not set the glyph size/);
+  });
+});

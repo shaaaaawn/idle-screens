@@ -418,7 +418,14 @@ const SPRITE_SIZE_FIELD: Record<string, string> = {
   circle: 'radius', ring: 'radius', polygon: 'radius', streak: 'length', stroke: 'length',
   rect: 'width', bar: 'length and thickness', textBlock: 'fontSize',
 };
-const SPRITE_SIZE_MISPLACED = "'size' belongs on the layer, not inside sprite — move it up one level";
+/**
+ * A px size token in a CSS font shorthand — the same bounded pattern as
+ * compile.ts's `FONT_PX_RE` (which imports this module, so it cannot be
+ * shared from there): a text sprite whose `font` matches draws at that size.
+ */
+const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
+
+const SPRITE_SIZE_MISPLACED ="'size' belongs on the layer, not inside sprite — move it up one level";
 
 /**
  * Repair (F24): `size` misplaced inside an emoji/text sprite. It sits naturally
@@ -972,6 +979,13 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         ? `unknown sprite property 'size' — will be ignored; a ${kind} sprite is sized by its ${field}`
         : `unknown sprite property 'size' — will be ignored`);
     }
+  }
+  // F162 (X939): a px size in a text sprite's `font` sets the glyph size, so
+  // a layer `size` beside it draws nothing different. Silent until now; the
+  // renderer's rule is compile.ts's `FONT_PX_RE` test.
+  if (layer.size !== undefined && isObj(layer.sprite) && layer.sprite.kind === 'text' && isStr(layer.sprite.font) && FONT_PX_RE.test(layer.sprite.font)) {
+    const font = layer.sprite.font.length > 60 ? `${layer.sprite.font.slice(0, 57)}...` : layer.sprite.font;
+    warn(`${path}.size`, 'no-effect', `layer.size does not set the glyph size — the px size in font ('${font}') does; use a family-only font (e.g. 'bold monospace') to size the text by size`);
   }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
@@ -1867,7 +1881,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err, '`color` is required on a stroke (a hex colour like #0a3a52); a stroke does not inherit the entity colour');
-  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
+  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units, not a fraction of min(width, height): 0.01 is 1% of the drawing\'s half-size, so it draws width × radius × min(width, height) px and 0.5 is half the radius — raise the radius for a heavier line)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");

@@ -4,10 +4,10 @@ import { additivePlate, backgroundLuma, backgroundRgb, backgroundRgbAt, colourSe
 import { buriedAreaOf, COHESION_T, cohesionOf, seamsWorthWarning } from './cohesion';
 import { barFraction, flattenSprite, gradientStopWeights, isPathPolygon, pathFrame, pathInkArea, pathParts, polygonInkArea, polygonPoints, ruleArea } from './shapes';
 import { breakTextBlock, textBlockText, buildEntities, entityScales, linkEdges, linkMaxDistPx, linkPairs, positionAt, revealState, rotationAt, textBlockAnchorOffset, textMetricsClassFor, textWidthEm, WARP_MAX_SCALE, type Entity } from './simulate';
-import { describeStructuralDifferences, morphNothingMorphable, structuralSignature } from './steer';
+import { describeStructuralDifferences, morphNothingMorphable, readSpecPath, structuralSignature } from './steer';
 import { luminanceGrid } from './perceive';
 import { groupOf, mapBox, paintMap, paintOpacity, paintSize } from './paint';
-import { resolveTimelineAt, timelineSampleTimes, timelineTracks } from './timeline';
+import { resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
 import { flashSampleTimes, lumaKeyTimes } from './flash-timeline';
 import { SEAMLESS_PERIOD_KINDS, periodWithoutTimeline } from './period';
 import { LIMITS, type IdleSequence, type LayerSpec, type SaverSpec, type SpecWarning, type WarningBox } from './types';
@@ -114,6 +114,16 @@ export function adviseSpec(
   const keyed = keyedLayers(authored);
   // A `timeline` resolves at the sample time; without one this is `spec` itself.
   spec = resolveTimelineAt(spec, opts.t ?? COHESION_T);
+  // F160 (X969): without an explicit `t`, one default instant is not "the
+  // scene" — a caption faded out at 5 s is still a caption. Each layer whose
+  // visibility a key changes is re-judged at its peak (`peakVisibility`), but
+  // only by the checks that call this, only after they would fire, and never
+  // when the caller named a `t` (that instant is the question asked).
+  let peakMemo: PeakVisibility | null | undefined;
+  const peak = (): PeakVisibility | null => {
+    if (peakMemo === undefined) peakMemo = opts.t === undefined ? peakVisibility(authored, spec, opts.until) : null;
+    return peakMemo;
+  };
   const warnings: SpecWarning[] = [];
   const w = viewport.width;
   const h = viewport.height;
@@ -287,86 +297,98 @@ export function adviseSpec(
 
   }
 
-  // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled"
-  let totalCoverage = 0;
-  let additiveInk = 0;
-  for (let li = 0; li < spec.layers.length; li++) {
-    if (hidden?.[li]) continue;
-    const layer = spec.layers[li]!;
-    const entities = allEntities[li]!;
-    // Paint opacity weighs coverage like alpha does (unset ⇒ exactly as before).
-    const paintA = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(spec, layer);
-    // A layer/group transform scales what is painted, so it scales the area
-    // too — the text boxes below already land where the transform puts them,
-    // and coverage must judge the same picture (X418: a word zoomed 8× read
-    // as both "the scene is empty" and "the text runs 33 000 px off-screen").
-    const map = paintMap(spec, layer, w, h, scale);
-    const areaScale = map ? paintSize(spec, layer) ** 2 : 1;
-    const additive = layer.blend === 'lighter' || layer.blend === 'screen';
-    for (const e of entities) {
-      const r = e.size / 2;
-      let pixArea: number;
-      if (layer.sprite.kind === 'circle') {
-        pixArea = Math.PI * r * r;
-      } else if (layer.sprite.kind === 'polygon') {
-        // The outline's own area, not its bounding square (4r²) — a flat band
-        // or ridge fills a fraction of that. A path drawing counts what its
-        // parts paint: an unfilled line is its stroke, not the area its
-        // points enclose (X605), and a part at opacity 0 is nothing.
-        if (isPathPolygon(layer.sprite)) {
-          const fr = pathFrame(layer.sprite, r, w, h);
-          pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy, r);
-        } else pixArea = polygonInkArea(layer.sprite, r);
-      } else if (layer.sprite.kind === 'bar') {
-        pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
-      } else if (layer.sprite.kind === 'textBlock') {
-        const fsPx = layer.sprite.fontSize * scale;
-        const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
-        const maxWPx = layer.sprite.maxWidth * scale;
-        const lines = breakTextBlock(textBlockText(layer.sprite), maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
-        pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
-      } else if (layer.sprite.kind === 'text') {
-        // The renderer's own box (a px `font` wins over the seeded size), at
-        // the ~55 % ink fill a textBlock line is credited with.
-        const b = textBoxAt(layer.sprite, e, positionAt(e, 0, w, h), spec, w, h);
-        pixArea = (b.x1 - b.x0) * (b.y1 - b.y0) * 0.55;
-      } else {
-        pixArea = e.size * e.size; // emoji: approximate as square of its size
+  // Alpha-weighted pixel coverage: how much of the viewport is "visibly filled".
+  // A closure over the built entities so the F160 peak (below) can re-measure
+  // the same picture with only its paint opacities changed.
+  const coverageOf = (at: SaverSpec): { total: number; additive: number } => {
+    let totalCoverage = 0;
+    let additiveInk = 0;
+    for (let li = 0; li < at.layers.length; li++) {
+      if (hidden?.[li]) continue;
+      const layer = at.layers[li]!;
+      const entities = allEntities[li]!;
+      // Paint opacity weighs coverage like alpha does (unset ⇒ exactly as before).
+      const paintA = layer.opacity === undefined && layer.group === undefined ? 1 : paintOpacity(at, layer);
+      // A layer/group transform scales what is painted, so it scales the area
+      // too — the text boxes below already land where the transform puts them,
+      // and coverage must judge the same picture (X418: a word zoomed 8× read
+      // as both "the scene is empty" and "the text runs 33 000 px off-screen").
+      const map = paintMap(at, layer, w, h, scale);
+      const areaScale = map ? paintSize(at, layer) ** 2 : 1;
+      const additive = layer.blend === 'lighter' || layer.blend === 'screen';
+      for (const e of entities) {
+        const r = e.size / 2;
+        let pixArea: number;
+        if (layer.sprite.kind === 'circle') {
+          pixArea = Math.PI * r * r;
+        } else if (layer.sprite.kind === 'polygon') {
+          // The outline's own area, not its bounding square (4r²) — a flat band
+          // or ridge fills a fraction of that. A path drawing counts what its
+          // parts paint: an unfilled line is its stroke, not the area its
+          // points enclose (X605), and a part at opacity 0 is nothing.
+          if (isPathPolygon(layer.sprite)) {
+            const fr = pathFrame(layer.sprite, r, w, h);
+            pixArea = pathInkArea(layer.sprite, fr.sx, fr.sy, r);
+          } else pixArea = polygonInkArea(layer.sprite, r);
+        } else if (layer.sprite.kind === 'bar') {
+          pixArea = e.size * barFraction(layer.sprite, e.barIndex ?? 0) * (e.size2 ?? e.size * 0.2);
+        } else if (layer.sprite.kind === 'textBlock') {
+          const fsPx = layer.sprite.fontSize * scale;
+          const lh = (layer.sprite.lineHeight ?? 1.4) * fsPx;
+          const maxWPx = layer.sprite.maxWidth * scale;
+          const lines = breakTextBlock(textBlockText(layer.sprite), maxWPx / fsPx, textMetricsClassFor(layer.sprite.font));
+          pixArea = maxWPx * lines.length * lh * 0.55 * (layer.sprite.opacity ?? 1);
+        } else if (layer.sprite.kind === 'text') {
+          // The renderer's own box (a px `font` wins over the seeded size), at
+          // the ~55 % ink fill a textBlock line is credited with.
+          const b = textBoxAt(layer.sprite, e, positionAt(e, 0, w, h), at, w, h);
+          pixArea = (b.x1 - b.x0) * (b.y1 - b.y0) * 0.55;
+        } else {
+          pixArea = e.size * e.size; // emoji: approximate as square of its size
+        }
+        // Scaled by the transform, and never more than the frame it lands in.
+        if (areaScale !== 1) pixArea *= areaScale;
+        if (pixArea > w * h) pixArea = w * h;
+        // Sparse-event layers are lit only for `life` of every `every` ms, at a
+        // mean envelope of ~½, and at a mean grown size — judge their coverage
+        // by that duty, not by whichever instant we happen to sample.
+        let duty = 1;
+        if (layer.emit) {
+          // Area scales with size², so the time-mean over a linear size ramp
+          // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
+          const [ga, gb] = layer.emit.grow ?? [1, 1];
+          const g2 = (ga * ga + ga * gb + gb * gb) / 3;
+          duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
+        }
+        const ink = paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
+        totalCoverage += ink;
+        if (additive) additiveInk += ink;
       }
-      // Scaled by the transform, and never more than the frame it lands in.
-      if (areaScale !== 1) pixArea *= areaScale;
-      if (pixArea > w * h) pixArea = w * h;
-      // Sparse-event layers are lit only for `life` of every `every` ms, at a
-      // mean envelope of ~½, and at a mean grown size — judge their coverage
-      // by that duty, not by whichever instant we happen to sample.
-      let duty = 1;
-      if (layer.emit) {
-        // Area scales with size², so the time-mean over a linear size ramp
-        // a→b is mean(f²) = (a² + ab + b²) / 3, not mean(f)².
-        const [ga, gb] = layer.emit.grow ?? [1, 1];
-        const g2 = (ga * ga + ga * gb + gb * gb) / 3;
-        duty = (Math.min(layer.emit.life, layer.emit.every) / layer.emit.every) * 0.5 * g2;
+      // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
+      if (layer.links) {
+        const positions = entities.map((e) => positionAt(e, 0, w, h));
+        const edges = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false, w, h);
+        const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
+        const lwPx = (layer.links.width ?? defaultWidth) * scale;
+        const la = layer.links.alpha ?? 1;
+        for (const edge of edges) totalCoverage += paintA === 1 ? (edge.dist * lwPx * la) / (w * h) : (edge.dist * lwPx * la * paintA) / (w * h);
       }
-      const ink = paintA === 1 ? (pixArea * e.alpha * duty) / (w * h) : (pixArea * e.alpha * duty * paintA) / (w * h);
-      totalCoverage += ink;
-      if (additive) additiveInk += ink;
     }
-    // Link lines are visual coverage too (for Mystify-style scenes they ARE the scene).
-    if (layer.links) {
-      const positions = entities.map((e) => positionAt(e, 0, w, h));
-      const edges = linkEdges(layer.links, positions, linkMaxDistPx(layer.links, scale), layer.wrap !== false, w, h);
-      const defaultWidth = scale === 1 ? 1 : 1 / LIMITS.referenceViewport;
-      const lwPx = (layer.links.width ?? defaultWidth) * scale;
-      const la = layer.links.alpha ?? 1;
-      for (const edge of edges) totalCoverage += paintA === 1 ? (edge.dist * lwPx * la) / (w * h) : (edge.dist * lwPx * la * paintA) / (w * h);
-    }
-  }
+    return { total: totalCoverage, additive: additiveInk };
+  };
+  const { total: totalCoverage, additive: additiveInk } = coverageOf(spec);
 
   // A declared `density` is read before either density advisory fires — and
   // then checked against the measurement, so the declaration cannot be used
   // to silence a scene that is empty by accident rather than by intent.
   const density = spec.density ?? 'normal';
-  const wouldBeSparse = totalCoverage < 0.0005 && spec.layers.length > 0;
+  // F160 (X969): with no `t`, a scene empty only because a keyed fade is out
+  // at the sample instant is not empty — re-measured at its peak visibility,
+  // lazily, and only to silence. Additive saturation and the declared-sparse
+  // mismatch stay at the instant: summing the peaks of acts never on screen
+  // together would invent ink.
+  const wouldBeSparse = totalCoverage < 0.0005 && spec.layers.length > 0
+    && !((): boolean => { const p = peak(); return !!p && coverageOf(p.spec).total >= 0.0005; })();
   if (wouldBeSparse && density !== 'sparse') {
     warnings.push({
       path: 'layers',
@@ -758,50 +780,73 @@ export function adviseSpec(
     const boxes = textBoxes.filter((x) => x.li === b.li);
     readFlagged.add(b.li);
 
-    const ink = hexRgb(s.color ?? '#e6e8ef');
-    // What the layer actually paints over `base`, at its own alpha and blend —
-    // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
-    // `multiply`, is not free to hide behind a source-over assumption.
-    const textPlate = (base: Rgb, alpha: number): Rgb => {
-      if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
-      if (layer.blend === 'multiply') {
-        return {
-          r: base.r * (1 - alpha + ink.r * alpha),
-          g: base.g * (1 - alpha + ink.g * alpha),
-          b: base.b * (1 - alpha + ink.b * alpha),
-        };
-      }
-      return sourceOverPlate(base, ink, alpha);
-    };
-    let worst: { ground: number; plate: number; plateLabel: string | null; onSolid: boolean } | null = null;
-    for (const box of boxes) {
-      const cy = (box.y0 + box.y1) / 2;
-      const cx = (box.x0 + box.x1) / 2;
-      const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(spec, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
-      // The ground is what is painted behind the text, not just the page: a
-      // solid backing chip drawn under a label is the standard remedy, and
-      // the one this message recommends (X562 — the same root cause as X388
-      // on low-contrast-layer). The chip must cover the whole box to replace
-      // the page: centre and corners are probed, and any probe it misses
-      // keeps the page at the box centre in play, judged as before.
-      const ix = (box.x1 - box.x0) * 0.02;
-      const iy = (box.y1 - box.y0) * 0.02;
-      const probes = [[cx, cy], [box.x0 + ix, box.y0 + iy], [box.x1 - ix, box.y0 + iy], [box.x0 + ix, box.y1 - iy], [box.x1 - ix, box.y1 - iy]] as const;
-      const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
-      let bare = false;
-      for (const [x, y] of probes) {
-        const under = groundUnder(spec, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
-        if (under) grounds.push({ rgb: under.rgb, onSolid: true });
-        else bare = true;
-      }
-      if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
-      for (const g of grounds) {
-        const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
-        const lit = brightestAdditivePlate(spec, allEntities, g.rgb, box, w, h);
-        const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
-        if (!worst || Math.min(ground, plate) < Math.min(worst.ground, worst.plate)) {
-          worst = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
+    // The worst ratio over every box of the layer, judged in `at` (the
+    // instant, or the F160 peak) with `inkHex` as the text colour.
+    type Worst = { ground: number; plate: number; plateLabel: string | null; onSolid: boolean };
+    const worstOf = (at: SaverSpec, layerBoxes: TextBoxAt[], inkHex: string): Worst | null => {
+      const ink = hexRgb(inkHex);
+      // What the layer actually paints over `base`, at its own alpha and blend —
+      // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
+      // `multiply`, is not free to hide behind a source-over assumption.
+      const textPlate = (base: Rgb, alpha: number): Rgb => {
+        if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
+        if (layer.blend === 'multiply') {
+          return {
+            r: base.r * (1 - alpha + ink.r * alpha),
+            g: base.g * (1 - alpha + ink.g * alpha),
+            b: base.b * (1 - alpha + ink.b * alpha),
+          };
         }
+        return sourceOverPlate(base, ink, alpha);
+      };
+      let out: Worst | null = null;
+      for (const box of layerBoxes) {
+        const cy = (box.y0 + box.y1) / 2;
+        const cx = (box.x0 + box.x1) / 2;
+        const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(at, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+        // The ground is what is painted behind the text, not just the page: a
+        // solid backing chip drawn under a label is the standard remedy, and
+        // the one this message recommends (X562 — the same root cause as X388
+        // on low-contrast-layer). The chip must cover the whole box to replace
+        // the page: centre and corners are probed, and any probe it misses
+        // keeps the page at the box centre in play, judged as before.
+        const ix = (box.x1 - box.x0) * 0.02;
+        const iy = (box.y1 - box.y0) * 0.02;
+        const probes = [[cx, cy], [box.x0 + ix, box.y0 + iy], [box.x1 - ix, box.y0 + iy], [box.x0 + ix, box.y1 - iy], [box.x1 - ix, box.y1 - iy]] as const;
+        const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
+        let bare = false;
+        for (const [x, y] of probes) {
+          const under = groundUnder(at, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
+          if (under) grounds.push({ rgb: under.rgb, onSolid: true });
+          else bare = true;
+        }
+        if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
+        for (const g of grounds) {
+          const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
+          const lit = brightestAdditivePlate(at, allEntities, g.rgb, box, w, h);
+          const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
+          if (!out || Math.min(ground, plate) < Math.min(out.ground, out.plate)) {
+            out = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
+          }
+        }
+      }
+      return out;
+    };
+    let worst = worstOf(spec, boxes, s.color ?? '#e6e8ef');
+    // F160 (X969): no `t` was asked for and a key changes this layer's
+    // opacity or colour — it is unreadable only if it is unreadable at its
+    // peak too, in any of its keyed colours. Its peak boxes carry the peak
+    // alpha, and the ground lookup sees a backing chip that fades in with it.
+    if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
+      const p = peak();
+      if (p?.lifted.has(b.li)) {
+        const peakBoxes = staticTextBoxes(p.spec, allEntities, hidden, w, h, scale, new Set([b.li]));
+        const inks = p.colours.get(b.li) ?? [s.color ?? '#e6e8ef'];
+        const readable = inks.some((hex) => {
+          const atPeak = worstOf(p.spec, peakBoxes, hex);
+          return !atPeak || Math.min(atPeak.ground, atPeak.plate) >= READ_LEGIBILITY_FLOOR;
+        });
+        if (readable) worst = null;
       }
     }
     if (worst && Math.min(worst.ground, worst.plate) < READ_LEGIBILITY_FLOOR) {
@@ -1414,6 +1459,95 @@ function hiddenLayers(spec: SaverSpec): boolean[] | null {
     return !!g && pinnedZero(`groups.${l.group}.opacity`, g.opacity, ['groups', `groups.${l.group}`]);
   });
   return out.some(Boolean) ? out : null;
+}
+
+/**
+ * Each layer at its most visible (F160, X969): `resolved` (the scene at the
+ * default instant) with every keyed paint opacity a layer reads — its own
+ * `opacity`, a textBlock's `sprite.opacity`, its group's `opacity` — raised
+ * to the largest value the timeline ever gives it, and the colours a keyed
+ * `sprite.color` passes through on a text layer. Analytic: the max over the
+ * key values (plus the base value, which shows before the first key unless
+ * the timeline loops), so it costs one pass over the keys, not a re-advise
+ * per sample. Each path is maxed on its own, which can only overstate
+ * visibility, so callers use it to silence, never to raise. A path a
+ * whole-object key on an ancestor (`layers.0`, `groups.g`) can also set is
+ * left at the instant. Keys at or after `until` (a segment's end) never play.
+ * Null when no key lifts anything — the common case.
+ */
+interface PeakVisibility {
+  spec: SaverSpec;
+  /** Layers whose visibility the peak changes. */
+  lifted: Set<number>;
+  /** A text layer's keyed colours, the instant's own first. */
+  colours: Map<number, string[]>;
+}
+
+function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number): PeakVisibility | null {
+  const tl = authored.timeline;
+  if (!tl) return null;
+  const tracks = timelineTracks(authored);
+  if (tracks.size === 0) return null;
+  const base = withoutTimeline(authored);
+  const loop = !!tl.loop && (tl.duration ?? 0) > 0;
+  const shadowed = (path: string): boolean => {
+    for (const p of tracks.keys()) if (path.startsWith(`${p}.`)) return true;
+    return false;
+  };
+  const valuesOf = (path: string): unknown[] | null => {
+    const keys = tracks.get(path);
+    if (!keys || shadowed(path)) return null;
+    const out: unknown[] = keys.filter((k) => until === undefined || k.t < until).map((k) => k.value);
+    if (!loop) out.push(readSpecPath(base, path));
+    return out;
+  };
+  /** The track's largest opacity, when it beats the instant's; else undefined. */
+  const peakOf = (path: string, now: number | undefined): number | undefined => {
+    const vs = valuesOf(path);
+    if (!vs) return undefined;
+    const at = now ?? 1;
+    let m = at;
+    for (const v of vs) if (typeof v === 'number' && Number.isFinite(v) && v > m) m = v;
+    return m > at ? Math.min(1, m) : undefined;
+  };
+
+  const lifted = new Set<number>();
+  const colours = new Map<number, string[]>();
+  let layers = resolved.layers;
+  let groups = resolved.groups;
+  for (const [name, g] of Object.entries(resolved.groups ?? {})) {
+    const op = peakOf(`groups.${name}.opacity`, g.opacity);
+    if (op === undefined) continue;
+    if (groups === resolved.groups) groups = { ...resolved.groups };
+    groups![name] = { ...g, opacity: op };
+    resolved.layers.forEach((l, li) => { if (l.group === name) lifted.add(li); });
+  }
+  resolved.layers.forEach((layer, li) => {
+    const s = layer.sprite;
+    const own = peakOf(`layers.${li}.opacity`, layer.opacity);
+    const sprite = s.kind === 'textBlock' ? peakOf(`layers.${li}.sprite.opacity`, s.opacity) : undefined;
+    if (own !== undefined || sprite !== undefined) {
+      if (layers === resolved.layers) layers = [...resolved.layers];
+      layers[li] = {
+        ...layer,
+        ...(own === undefined ? {} : { opacity: own }),
+        ...(sprite === undefined ? {} : { sprite: { ...s, opacity: sprite } }),
+      } as LayerSpec;
+      lifted.add(li);
+    }
+    if (s.kind === 'text' || s.kind === 'textBlock') {
+      const vs = valuesOf(`layers.${li}.sprite.color`);
+      if (vs) {
+        const hexes = [...new Set([s.color ?? '#e6e8ef', ...vs.filter((v): v is string => typeof v === 'string')])];
+        if (hexes.length > 1) {
+          colours.set(li, hexes);
+          lifted.add(li);
+        }
+      }
+    }
+  });
+  if (lifted.size === 0) return null;
+  return { spec: { ...resolved, layers, ...(groups === undefined ? {} : { groups }) }, lifted, colours };
 }
 
 /**
