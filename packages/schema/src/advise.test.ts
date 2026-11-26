@@ -1078,6 +1078,31 @@ describe('F160 (X969): with no `t`, keyed visibility is judged at its peak, not 
     expect(codes(dim)).toContain('text-legibility');
   });
 
+  it('a whole-object key on an ancestor leaves the layer at the instant (it still warns)', () => {
+    const spec = caption({ keys: [
+      ...fadeInOut,
+      { t: 6000, path: 'caption.sprite', value: { kind: 'textBlock', text: 'x', maxWidth: 0.6, fontSize: 0.05, color: '#f4f1e8', role: 'read', opacity: 0 }, dur: 0 },
+    ] });
+    expect(codes(spec)).toContain('text-legibility');
+  });
+
+  it('a shaped layer with keyed opacity is lifted for sparse-scene too', () => {
+    const glow = (keys: unknown[] | undefined): SaverSpec => ({
+      schemaVersion: 1, id: 'glow', label: 'Glow', background: { type: 'solid', color: '#000000' },
+      layers: [{ key: 'orb', count: 3, opacity: 0, sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#ffd9a0' }, motion: { type: 'drift', speed: [0.01, 0.02] } }],
+      ...(keys ? { timeline: { keys } } : {}),
+    } as unknown as SaverSpec);
+    expect(codes(glow([{ t: 0, path: 'orb.opacity', value: 0, dur: 0 }]))).toContain('sparse-scene');
+    expect(codes(glow([{ t: 1000, path: 'orb.opacity', value: 1, dur: 600 }, { t: 4000, path: 'orb.opacity', value: 0, dur: 600 }]))).not.toContain('sparse-scene');
+    expect(codes(glow([{ t: 1000, path: 'orb.opacity', value: 1, dur: 600 }, { t: 4000, path: 'orb.opacity', value: 0, dur: 600 }]), { t: 5000 })).toContain('sparse-scene');
+  });
+
+  it('a short-hex keyed colour counts as a candidate ink', () => {
+    const spec = caption({ opacity: 1, color: '#0a0f1e', keys: [{ t: 1000, path: 'caption.sprite.color', value: '#fff', dur: 600 }, { t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 600 }] });
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    expect(codes(spec)).not.toContain('text-legibility');
+  });
+
   it('crossfading captions in one spot are not judged visible together (no text-overlap)', () => {
     const spec = caption({ keys: [
       ...fadeInOut,

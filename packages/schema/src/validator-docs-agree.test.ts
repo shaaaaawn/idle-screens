@@ -530,7 +530,7 @@ describe('F162 (X997): a path stroke width is unit-box units, capped at 0.5, and
     expect(format).toContain('**`0 < width ≤ 0.5`**');
     expect(format).toMatch(/`width × radius ×\s+min\(width, height\)` px/);
     const units = format.slice(format.indexOf('With `units: "viewport"` (the default)'), format.indexOf('Text sprites with an'));
-    expect(units).toContain('`parts[].stroke.width` is in the drawing\'s own unit box');
+    expect(units).toMatch(/drawing's `stroke.width` \(on the sprite or on one of its `parts`\) is in the\s+drawing's own unit box/);
   });
 });
 
@@ -562,7 +562,7 @@ describe('F162 (X939): a px size in a text font makes layer.size a no-op, and th
 
   it('FORMAT.md says so where size and the text font are described', () => {
     const format = readFileSync(['packages/schema/FORMAT.md', 'FORMAT.md'].map((f) => resolve(process.cwd(), f)).find((f) => existsSync(f))!, 'utf8');
-    expect(format).toMatch(/\| `size` \|[^\n]*`font` carries a px size[^\n]*`no-effect`/);
+    expect(format).toMatch(/\| `size` \|[^\n]*`font` carries a px size it does not set the glyph size[^\n]*`no-effect`/);
     expect(format).toMatch(/layer's `size` then\s+does not set the glyph size/);
   });
 });

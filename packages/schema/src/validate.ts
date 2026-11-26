@@ -1881,7 +1881,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err, '`color` is required on a stroke (a hex colour like #0a3a52); a stroke does not inherit the entity colour');
-  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units, not a fraction of min(width, height): 0.01 is 1% of the drawing\'s half-size, so it draws width × radius × min(width, height) px and 0.5 is half the radius — raise the radius for a heavier line)');
+  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units, not a fraction of min(width, height): 0.01 is 1% of the drawing\'s half-size, so it draws width × radius × min(width, height) px (width × radius px under units: "px") and 0.5 is half the radius — raise the radius for a heavier line)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");
