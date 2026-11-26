@@ -30,8 +30,15 @@ import type { PathGradient, PathPart, PathStroke, SpriteSpec, StrokeDraw } from 
  * The bounds are far past anything real: no CSS font size needs more than
  * five integer digits or four decimals. `.5px` still parses via the second
  * branch.
+ *
+ * The number must start the string or follow something that is not a digit
+ * or a dot, so the match is the whole size token or nothing: an over-long
+ * number (`1.23456px`, `123456px`) carries no size rather than lending its
+ * tail (`23456px`). That lead is matched, not looked behind for (lookbehind
+ * is a syntax error in the older WebKit the native clients can meet), so the
+ * match may begin one character before the number — group 1 is the number.
  */
-export const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
+export const FONT_PX_RE = /(?:^|[^\d.])(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
 
 export type ShapedSprite = Extract<SpriteSpec, { kind: 'circle' | 'ring' | 'streak' | 'rect' | 'polygon' | 'stroke' | 'bar' }>;
 export type BarSprite = Extract<SpriteSpec, { kind: 'bar' }>;

@@ -76,7 +76,8 @@ const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})
  */
 function scaleFontPx(font: string, factor: number): string {
   if (factor === 1) return font;
-  return font.replace(FONT_PX_RE, (_m, n: string) => `${(Number(n) * factor).toFixed(2)}px`);
+  // The match may begin one character before the number (FONT_PX_RE): keep it.
+  return font.replace(FONT_PX_RE, (m: string, n: string) => `${m.slice(0, m.length - n.length - 2)}${(Number(n) * factor).toFixed(2)}px`);
 }
 
 /** Build a valid CSS font shorthand: weight/style tokens must precede the size. */

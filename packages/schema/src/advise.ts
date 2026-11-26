@@ -771,6 +771,8 @@ export function adviseSpec(
   // Everything below is opt-in: a layer without the role is never measured,
   // so the atmospheric text the examples paint at 2–3:1 stays silent.
   const readFlagged = new Set<number>();
+  // Entities per scene structure, for the F160 settle instants (built on demand).
+  const settleBuilt = new Map<string, Entity[][]>([[structuralSignature(spec), allEntities]]);
   for (const b of textBoxes) {
     if (readFlagged.has(b.li)) continue;
     const layer = spec.layers[b.li]!;
@@ -783,14 +785,15 @@ export function adviseSpec(
     // The worst ratio over every box of the layer, judged in `at` (the
     // instant, or the F160 peak) with `inkHex` as the text colour.
     type Worst = { ground: number; plate: number; plateLabel: string | null; onSolid: boolean };
-    const worstOf = (at: SaverSpec, layerBoxes: TextBoxAt[], inkHex: string): Worst | null => {
+    const worstOf = (at: SaverSpec, layerBoxes: TextBoxAt[], inkHex: string, scene: { entities: Entity[][]; t: number; scale: number } = { entities: allEntities, t: opts.t ?? COHESION_T, scale }): Worst | null => {
       const ink = hexRgb(inkHex);
+      const blend = (at.layers[b.li] ?? layer).blend;
       // What the layer actually paints over `base`, at its own alpha and blend —
       // a `role: 'read'` label at low opacity, or under `lighter`/`screen`/
       // `multiply`, is not free to hide behind a source-over assumption.
       const textPlate = (base: Rgb, alpha: number): Rgb => {
-        if (layer.blend === 'lighter' || layer.blend === 'screen') return additivePlate(base, ink, alpha, layer.blend);
-        if (layer.blend === 'multiply') {
+        if (blend === 'lighter' || blend === 'screen') return additivePlate(base, ink, alpha, blend);
+        if (blend === 'multiply') {
           return {
             r: base.r * (1 - alpha + ink.r * alpha),
             g: base.g * (1 - alpha + ink.g * alpha),
@@ -803,7 +806,7 @@ export function adviseSpec(
       for (const box of layerBoxes) {
         const cy = (box.y0 + box.y1) / 2;
         const cx = (box.x0 + box.x1) / 2;
-        const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(at, y, h, scale, x, w, opts.backgroundSeed ?? opts.seed, opts.t ?? COHESION_T);
+        const bgAt = (x: number, y: number): Rgb => backgroundRgbAt(at, y, h, scene.scale, x, w, opts.backgroundSeed ?? opts.seed, scene.t);
         // The ground is what is painted behind the text, not just the page: a
         // solid backing chip drawn under a label is the standard remedy, and
         // the one this message recommends (X562 — the same root cause as X388
@@ -816,14 +819,14 @@ export function adviseSpec(
         const grounds: Array<{ rgb: Rgb; onSolid: boolean }> = [];
         let bare = false;
         for (const [x, y] of probes) {
-          const under = groundUnder(at, allEntities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
+          const under = groundUnder(at, scene.entities, box.li, hidden, { x, y }, w, h, bgAt(x, y));
           if (under) grounds.push({ rgb: under.rgb, onSolid: true });
           else bare = true;
         }
         if (bare) grounds.push({ rgb: bgAt(cx, cy), onSolid: false });
         for (const g of grounds) {
           const ground = legibilityRatio(textPlate(g.rgb, box.alpha), g.rgb);
-          const lit = brightestAdditivePlate(at, allEntities, g.rgb, box, w, h);
+          const lit = brightestAdditivePlate(at, scene.entities, g.rgb, box, w, h);
           const plate = lit ? legibilityRatio(textPlate(lit.rgb, box.alpha), lit.rgb) : Infinity;
           if (!out || Math.min(ground, plate) < Math.min(out.ground, out.plate)) {
             out = { ground, plate, plateLabel: lit?.label ?? null, onSolid: g.onSolid };
@@ -849,11 +852,22 @@ export function adviseSpec(
           // The peak maxes every layer's opacity on its own, so it can set
           // this caption against a glow or chip that is only on screen once
           // the caption has gone. Before warning, look at the moments its own
-          // keys settle, with every keyed opacity as it stands then: readable
-          // at one of those real instants is readable.
-          || p.settled(b.li).some((at) => {
-            const then = worstOf(at.spec, staticTextBoxes(at.spec, allEntities, hidden, w, h, scale, new Set([b.li])), at.ink ?? s.color ?? '#e6e8ef');
-            return !!then && Math.min(then.ground, then.plate) >= READ_LEGIBILITY_FLOOR;
+          // keys settle — the whole scene resolved there, as `text-overlap`
+          // samples it: readable at one of those instants is readable.
+          || p.settleTimes(b.li).some((t) => {
+            const at = resolveTimelineAt(authored, t, true);
+            const then = at.layers[b.li]?.sprite;
+            if (!then || (then.kind !== 'text' && then.kind !== 'textBlock')) return false;
+            const sc = entityScales(at, w, h);
+            const sig = structuralSignature(at);
+            let entities = settleBuilt.get(sig);
+            if (!entities) {
+              const rngAt = createRng(opts.seed ?? spec.seed ?? 42);
+              entities = at.layers.map((l) => buildEntities(l, rngAt, w, h, sc.scale, sc.countScale));
+              settleBuilt.set(sig, entities);
+            }
+            const atT = worstOf(at, staticTextBoxes(at, entities, hidden, w, h, sc.scale, new Set([b.li])), then.color ?? '#e6e8ef', { entities, t, scale: sc.scale });
+            return !!atT && Math.min(atT.ground, atT.plate) >= READ_LEGIBILITY_FLOOR;
           });
         if (readable) worst = null;
       }
@@ -1483,7 +1497,7 @@ function hiddenLayers(spec: SaverSpec): boolean[] | null {
  * whole-object key on an ancestor (`layers.0`, `groups.g`) can also set is
  * left at the instant. Keys at or after `until` (a segment's end) never play,
  * and a glide `until` cuts short counts only as far as it has got by then.
- * `settled` is the time-coherent fallback for a check the per-path max
+ * `settleTimes` are the instants to fall back on where the per-path max
  * misleads (a caption set against a glow that only arrives after it leaves).
  * Null when no key lifts anything — the common case.
  */
@@ -1494,17 +1508,18 @@ interface PeakVisibility {
   /** A text layer's keyed colours, the instant's own first. */
   colours: Map<number, string[]>;
   /**
-   * The scene at each moment one of layer `li`'s own visibility keys settles
-   * (at most `PEAK_SETTLE_CAP`): `resolved` with every keyed paint opacity —
-   * of every layer and group, not just `li` — at its value then, and `ink`
-   * the layer's keyed text colour then. Unlike `spec`, each is one real
-   * instant, so layers that are never on screen together stay apart.
+   * Scene times at which one of layer `li`'s own visibility keys (its paint
+   * opacities, its text colour) has finished its glide, plus 0 unless the
+   * timeline loops — the moments worth resolving the whole scene at when a
+   * check needs to know what is on screen WITH the layer, which `spec`
+   * (every path at its own peak) cannot say. At most `PEAK_SETTLE_CAP`,
+   * spread evenly over the timeline when there are more.
    */
-  settled: (li: number) => Array<{ spec: SaverSpec; ink?: string }>;
+  settleTimes: (li: number) => number[];
 }
 
-/** Most settle instants `PeakVisibility.settled` resolves for one layer. */
-const PEAK_SETTLE_CAP = 8;
+/** Most settle instants `PeakVisibility.settleTimes` returns for one layer. */
+const PEAK_SETTLE_CAP = 12;
 
 function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number): PeakVisibility | null {
   const tl = authored.timeline;
@@ -1581,48 +1596,25 @@ function peakVisibility(authored: SaverSpec, resolved: SaverSpec, until?: number
   });
   if (lifted.size === 0) return null;
 
-  const ownTrack = (path: string): boolean => tracks.has(path) && !shadowed(path);
-  const settled = (li: number): Array<{ spec: SaverSpec; ink?: string }> => {
+  const settleTimes = (li: number): number[] => {
     const layer = resolved.layers[li];
     if (!layer) return [];
-    const colourPath = `layers.${li}.sprite.color`;
-    const paths = [`layers.${li}.opacity`, `layers.${li}.sprite.opacity`, colourPath];
+    const paths = [`layers.${li}.opacity`, `layers.${li}.sprite.opacity`, `layers.${li}.sprite.color`];
     if (layer.group !== undefined) paths.push(`groups.${layer.group}.opacity`);
-    // When a key has finished its glide; the base scene (t = 0) shows first unless the timeline loops.
     const times = new Set<number>(loop ? [] : [0]);
     for (const path of paths) {
-      if (!ownTrack(path)) continue;
-      for (const k of tracks.get(path)!) {
+      if (shadowed(path)) continue;
+      for (const k of tracks.get(path) ?? []) {
         const end = k.t + Math.max(0, k.dur ?? DEFAULT_KEY_DUR);
         if (Number.isFinite(end) && (until === undefined || end < until)) times.add(end);
       }
     }
-    return [...times].sort((a, b) => a - b).slice(0, PEAK_SETTLE_CAP).map((t) => {
-      const then = resolveTimelineAt(authored, t, true);
-      const opacityAt = (path: string, now: number | undefined): number | undefined => {
-        if (!ownTrack(path)) return now;
-        const v = readSpecPath(then, path);
-        return typeof v === 'number' && Number.isFinite(v) ? v : now;
-      };
-      const groupsThen = resolved.groups && Object.fromEntries(Object.entries(resolved.groups).map(([name, g]) => {
-        const op = opacityAt(`groups.${name}.opacity`, g.opacity);
-        return [name, op === g.opacity ? g : { ...g, opacity: op }];
-      }));
-      const layersThen = resolved.layers.map((l, lj) => {
-        const op = opacityAt(`layers.${lj}.opacity`, l.opacity);
-        const sp = l.sprite.kind === 'textBlock' ? opacityAt(`layers.${lj}.sprite.opacity`, l.sprite.opacity) : undefined;
-        const spriteMoved = l.sprite.kind === 'textBlock' && sp !== l.sprite.opacity;
-        if (op === l.opacity && !spriteMoved) return l;
-        return { ...l, ...(op === l.opacity ? {} : { opacity: op }), ...(spriteMoved ? { sprite: { ...l.sprite, opacity: sp } } : {}) } as LayerSpec;
-      });
-      const ink = ownTrack(colourPath) ? readSpecPath(then, colourPath) : undefined;
-      return {
-        spec: { ...resolved, layers: layersThen, ...(groupsThen === undefined ? {} : { groups: groupsThen }) },
-        ...(typeof ink === 'string' ? { ink } : {}),
-      };
-    });
+    const sorted = [...times].sort((a, b) => a - b);
+    if (sorted.length <= PEAK_SETTLE_CAP) return sorted;
+    const step = sorted.length / PEAK_SETTLE_CAP;
+    return Array.from({ length: PEAK_SETTLE_CAP }, (_, i) => sorted[Math.floor(i * step)]!);
   };
-  return { spec: { ...resolved, layers, ...(groups === undefined ? {} : { groups }) }, lifted, colours, settled };
+  return { spec: { ...resolved, layers, ...(groups === undefined ? {} : { groups }) }, lifted, colours, settleTimes };
 }
 
 /**

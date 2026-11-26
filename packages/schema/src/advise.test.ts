@@ -1114,8 +1114,8 @@ describe('F160 (X969): with no `t`, keyed visibility is judged at its peak, not 
   });
 
   it('a glide cut short by `until` lifts only as far as it gets (cubic)', () => {
-    // 0 → 1 over 4 s from 1 s, then out again before the 5 s instant. A
-    // segment that ends at 1.4 s only ever sees the first tenth of the fade-in.
+    // 0 → 1 over 3 s from 1 s, then out again before the 5 s instant. A
+    // segment that ends at 1.3 s only ever sees the first tenth of the fade-in.
     const spec = caption({ keys: [
       { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 3000 },
       { t: 4500, path: 'caption.sprite.opacity', value: 0, dur: 100 },

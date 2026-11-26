@@ -12,7 +12,7 @@ import jsonSchema from '../saver-spec.schema.json';
 import { compileSaver } from './compile';
 import { luminanceGrid } from './perceive';
 import { transformPoint, transformSize } from './paint';
-import { flattenPath, isPathPolygon, pathParts, strokeLines, trimLines, type PolygonSprite } from './shapes';
+import { FONT_PX_RE, flattenPath, isPathPolygon, pathParts, strokeLines, trimLines, type PolygonSprite } from './shapes';
 import { graphemeClusters, revealState, textBlockText } from './simulate';
 import { lerpSpec } from './steer';
 import { resolveTimelineAt } from './timeline';
@@ -557,6 +557,22 @@ describe('F162 (X939): a px size in a text font makes layer.size a no-op, and th
     expect(codes(label('bold 80px monospace'))).toEqual([]);
     expect(codes(label(undefined, [0.05, 0.05]))).toEqual([]);
     expect(codes(label('.5px serif', [0.05, 0.05]))).toEqual(['layers[0].size no-effect']);
+  });
+
+  it('an over-long number is no size token at all, never its tail (FONT_PX_RE)', () => {
+    expect(FONT_PX_RE.exec('bold 80px monospace')![1]).toBe('80');
+    expect(FONT_PX_RE.exec('12.5px serif')![1]).toBe('12.5');
+    expect(FONT_PX_RE.exec('.5px serif')![1]).toBe('.5');
+    expect(FONT_PX_RE.exec('italic\t26px/1.2 serif')![1]).toBe('26');
+    expect(FONT_PX_RE.exec('1.23456px serif')).toBeNull();
+    expect(FONT_PX_RE.exec('123456px serif')).toBeNull();
+    expect(FONT_PX_RE.exec('bold monospace')).toBeNull();
+    // So the validator, like the renderer, sees no px size there: size applies.
+    expect(codes(label('1.23456px serif', [0.05, 0.05]))).toEqual([]);
+    // Still linear on a hostile digit run.
+    const t0 = performance.now();
+    FONT_PX_RE.test('9'.repeat(200_000));
+    expect(performance.now() - t0).toBeLessThan(500);
   });
 
   it('says what size still does under bounce / rise: the edge margin, not the glyphs', () => {
