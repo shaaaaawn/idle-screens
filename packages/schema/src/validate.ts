@@ -2,7 +2,7 @@ import { LIMITS, SCHEMA_VERSION, type IdleSequence, type SaverSpec, type SpecErr
 import { applyDeltasShared, canonicalSpecPath, describeStructuralDifferences, morphNothingMorphable, readSpecPath, steerablePaths, structuralSignature, suggestSpecPath } from './steer';
 import { canWrapMorph, morphChainRoot } from './sequence';
 import { DEFAULT_KEY_DUR, resolveTimelineAt, timelineSampleTimes, timelineTracks, withoutTimeline } from './timeline';
-import { MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
+import { FONT_PX_RE, MAX_PATH_POINTS, MAX_SCENE_PATH_POINTS, PATH_TOKENS, flattenPath, isPointsPath, pointsPathD, type PathFillRule } from './shapes';
 import { scalarWanted } from './validate-hints';
 import { nearest } from './nearest';
 
@@ -973,6 +973,17 @@ function validateLayer(layer: unknown, path: string, err: (p: string, m: string)
         : `unknown sprite property 'size' — will be ignored`);
     }
   }
+  // F162 (X939): a px size in a text sprite's `font` sets the glyph size, so
+  // a layer `size` beside it draws nothing different. Silent until now; the
+  // renderer's rule is the same `FONT_PX_RE` test (shapes.ts). The one thing
+  // `size` still does there is set how far a `bounce` / `rise` entity keeps
+  // from the edges (simulate.ts `positionAt`), so those say so.
+  if (layer.size !== undefined && isObj(layer.sprite) && layer.sprite.kind === 'text' && isStr(layer.sprite.font) && FONT_PX_RE.test(layer.sprite.font)) {
+    const font = layer.sprite.font.length > 60 ? `${layer.sprite.font.slice(0, 57)}...` : layer.sprite.font;
+    const motion = isObj(layer.motion) ? layer.motion.type : undefined;
+    const margin = motion === 'bounce' || motion === 'rise' ? ` (here it only sets the ${motion} edge margin)` : '';
+    warn(`${path}.size`, 'no-effect', `layer.size does not set the glyph size${margin} — the px size in font ('${font}') does; use a family-only font (e.g. 'bold monospace') to size the text by size`);
+  }
   if (layer.wrap !== undefined && typeof layer.wrap !== 'boolean') err(`${path}.wrap`, 'must be a boolean');
   if (layer.flip !== undefined && typeof layer.flip !== 'boolean') err(`${path}.flip`, 'must be a boolean');
 
@@ -1867,7 +1878,7 @@ function validatePathGradient(g: unknown, path: string, err: (p: string, m: stri
 function validatePathStroke(st: unknown, path: string, err: (p: string, m: string) => void, warn: WarnFn): void {
   if (!isObj(st)) return err(path, "must be { color, width, opacity?, join?, cap?, draw? }");
   color(st.color, `${path}.color`, err, '`color` is required on a stroke (a hex colour like #0a3a52); a stroke does not inherit the entity colour');
-  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units: 0.01 is 1% of the drawing\'s half-size)');
+  if (!isNum(st.width) || st.width <= 0 || st.width > 0.5) err(`${path}.width`, 'must be > 0 and <= 0.5 (unit-box units, not a fraction of min(width, height): 0.01 is 1% of the drawing\'s half-size, so it draws width × radius × min(width, height) px (width × radius px under units: "px") and 0.5 is half the radius — raise the radius for a heavier line)');
   if (st.opacity !== undefined && (!isNum(st.opacity) || st.opacity < 0 || st.opacity > 1)) err(`${path}.opacity`, 'must be 0..1');
   if (st.join !== undefined && !['round', 'miter', 'bevel'].includes(st.join as string)) err(`${path}.join`, "must be 'round' | 'miter' | 'bevel'");
   if (st.cap !== undefined && !['round', 'butt', 'square'].includes(st.cap as string)) err(`${path}.cap`, "must be 'round' | 'butt' | 'square'");

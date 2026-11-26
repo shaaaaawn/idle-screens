@@ -44,7 +44,7 @@
       "additionalProperties": false,
       "properties": {
         "color": { "$ref": "#/definitions/hexColor" },
-        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Unit-box units (0.01 = 1% of the drawing's half-size)." },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.5, "description": "Unit-box units (0.01 = 1% of the drawing's half-size), not a fraction of min(width, height): it draws width × radius × min(width, height) px (width × radius px under units: \"px\"), so the 0.5 cap is half the sprite's radius." },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "join": { "enum": ["round", "miter", "bevel"] },
         "cap": { "enum": ["round", "butt", "square"] },

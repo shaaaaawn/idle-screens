@@ -992,3 +992,173 @@ describe('layout-text-overlap: list / table cells narrower than their labels (X2
     }
   });
 });
+
+describe('F160 (X969): with no `t`, keyed visibility is judged at its peak, not at 5 s', () => {
+  // The repro: a caption that fades in at 1 s and out at 4 s (gone by 4.6 s),
+  // so the default instant (COHESION_T = 5 s) sees nothing.
+  const caption = (over: { keys?: unknown[]; opacity?: number; loop?: boolean; color?: string } = {}): SaverSpec => ({
+    schemaVersion: 1, id: 'x969', label: 'X969',
+    background: { type: 'solid', color: '#0a0f1e' },
+    layers: [{
+      key: 'caption', count: 1, position: { x: 0.5, y: 0.5 },
+      sprite: { kind: 'textBlock', text: 'The tide is coming in', maxWidth: 0.6, fontSize: 0.05, color: over.color ?? '#f4f1e8', role: 'read', opacity: over.opacity ?? 0 },
+      motion: { type: 'static' },
+    }],
+    ...(over.keys ? { timeline: { ...(over.loop ? { loop: true, duration: 8000 } : {}), keys: over.keys } } : {}),
+  } as unknown as SaverSpec);
+  const fadeInOut = [
+    { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 600 },
+    { t: 4000, path: 'caption.sprite.opacity', value: 0, dur: 600 },
+  ];
+  const codes = (spec: SaverSpec, opts?: { t?: number }): string[] => adviseSpec(spec, { width: 1920, height: 1080 }, opts).map((w) => w.code);
+
+  it('a faded-in caption raises neither text-legibility nor sparse-scene without a t', () => {
+    const c = codes(caption({ keys: fadeInOut }));
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('an explicit t is still judged at exactly that t', () => {
+    expect(codes(caption({ keys: fadeInOut }), { t: 5000 })).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+    expect(codes(caption({ keys: fadeInOut }), { t: 2000 })).not.toContain('text-legibility');
+  });
+
+  it('a looping timeline lifts the same way', () => {
+    const c = codes(caption({ keys: fadeInOut, loop: true }));
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('control: truly invisible text still warns (no keys)', () => {
+    expect(codes(caption())).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('control: a key that does not touch visibility lifts nothing', () => {
+    const c = codes(caption({ keys: [{ t: 1000, path: 'caption.transform.x', value: 0.1, dur: 1000 }] }));
+    expect(c).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('control: keyed but never visible (0 → 0) still warns', () => {
+    const c = codes(caption({ keys: [{ t: 1000, path: 'caption.sprite.opacity', value: 0, dur: 600 }] }));
+    expect(c).toEqual(expect.arrayContaining(['text-legibility', 'sparse-scene']));
+  });
+
+  it('a layer opacity key lifts the same way as sprite.opacity', () => {
+    const spec = caption({ opacity: 1, keys: [
+      { t: 1000, path: 'caption.opacity', value: 1, dur: 600 },
+      { t: 4000, path: 'caption.opacity', value: 0, dur: 600 },
+    ] });
+    (spec.layers[0] as { opacity?: number }).opacity = 0;
+    const c = codes(spec);
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+  });
+
+  it('a group opacity key lifts its members', () => {
+    const spec = caption({ opacity: 1, keys: [
+      { t: 1000, path: 'groups.title.opacity', value: 1, dur: 600 },
+      { t: 4000, path: 'groups.title.opacity', value: 0, dur: 600 },
+    ] });
+    spec.groups = { title: { opacity: 0 } };
+    (spec.layers[0] as { group?: string }).group = 'title';
+    const c = codes(spec);
+    expect(c).not.toContain('text-legibility');
+    expect(c).not.toContain('sparse-scene');
+  });
+
+  it('a keyed colour is judged at its most legible key: ink that matches the ground at 5 s but not at 2 s', () => {
+    const spec = caption({ opacity: 1, color: '#f4f1e8', keys: [
+      { t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 1000 },
+    ] });
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    expect(codes(spec)).not.toContain('text-legibility');
+    // Every key colour unreadable: still raised.
+    const dim = caption({ opacity: 1, color: '#0b101f', keys: [{ t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 1000 }] });
+    expect(codes(dim)).toContain('text-legibility');
+  });
+
+  it('a whole-object key on an ancestor leaves the layer at the instant (it still warns)', () => {
+    const spec = caption({ keys: [
+      ...fadeInOut,
+      { t: 6000, path: 'caption.sprite', value: { kind: 'textBlock', text: 'x', maxWidth: 0.6, fontSize: 0.05, color: '#f4f1e8', role: 'read', opacity: 0 }, dur: 0 },
+    ] });
+    expect(codes(spec)).toContain('text-legibility');
+  });
+
+  it('a shaped layer with keyed opacity is lifted for sparse-scene too', () => {
+    const glow = (keys: unknown[] | undefined): SaverSpec => ({
+      schemaVersion: 1, id: 'glow', label: 'Glow', background: { type: 'solid', color: '#000000' },
+      layers: [{ key: 'orb', count: 3, opacity: 0, sprite: { kind: 'circle', radius: [0.05, 0.05], color: '#ffd9a0' }, motion: { type: 'drift', speed: [0.01, 0.02] } }],
+      ...(keys ? { timeline: { keys } } : {}),
+    } as unknown as SaverSpec);
+    expect(codes(glow([{ t: 0, path: 'orb.opacity', value: 0, dur: 0 }]))).toContain('sparse-scene');
+    expect(codes(glow([{ t: 1000, path: 'orb.opacity', value: 1, dur: 600 }, { t: 4000, path: 'orb.opacity', value: 0, dur: 600 }]))).not.toContain('sparse-scene');
+    expect(codes(glow([{ t: 1000, path: 'orb.opacity', value: 1, dur: 600 }, { t: 4000, path: 'orb.opacity', value: 0, dur: 600 }]), { t: 5000 })).toContain('sparse-scene');
+  });
+
+  it('a short-hex keyed colour counts as a candidate ink', () => {
+    const spec = caption({ opacity: 1, color: '#0a0f1e', keys: [{ t: 1000, path: 'caption.sprite.color', value: '#fff', dur: 600 }, { t: 3000, path: 'caption.sprite.color', value: '#0a0f1e', dur: 600 }] });
+    expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    expect(codes(spec)).not.toContain('text-legibility');
+  });
+
+  it('crossfading captions in one spot are not judged visible together (no text-overlap)', () => {
+    const spec = caption({ keys: [
+      ...fadeInOut,
+      { t: 5000, path: 'second.sprite.opacity', value: 1, dur: 600 },
+      { t: 7000, path: 'second.sprite.opacity', value: 0, dur: 600 },
+    ] });
+    spec.layers.push({ ...structuredClone(spec.layers[0]!), key: 'second' });
+    expect(codes(spec)).not.toContain('text-overlap');
+  });
+
+  it('a glide cut short by `until` lifts only as far as it gets (cubic)', () => {
+    // 0 → 1 over 3 s from 1 s, then out again before the 5 s instant. A
+    // segment that ends at 1.3 s only ever sees the first tenth of the fade-in.
+    const spec = caption({ keys: [
+      { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 3000 },
+      { t: 4500, path: 'caption.sprite.opacity', value: 0, dur: 100 },
+    ] });
+    const until = (u?: number): string[] => adviseSpec(spec, { width: 1920, height: 1080 }, u === undefined ? {} : { until: u }).map((w) => w.code);
+    expect(until()).not.toContain('text-legibility');
+    expect(until(4200)).not.toContain('text-legibility');
+    expect(until(1300)).toEqual(expect.arrayContaining(['text-legibility']));
+  });
+
+  // The per-path peak puts the caption at full opacity beside every other
+  // layer at ITS peak — including a glow that only arrives after the caption
+  // has gone. The settle instants of the caption's own keys are real moments.
+  describe('a caption is judged against what is on screen with it', () => {
+    const withGlow = (glowOpacity: number, glowKeys: unknown[]): SaverSpec => ({
+      schemaVersion: 1, id: 'x969-glow', label: 'X969 glow',
+      background: { type: 'solid', color: '#000000' },
+      layers: [
+        { key: 'glow', count: 1, position: { x: 0.5, y: 0.5 }, blend: 'lighter', opacity: glowOpacity, sprite: { kind: 'circle', radius: [0.4, 0.4], color: '#ffffff' }, motion: { type: 'static' } },
+        { key: 'caption', count: 1, position: { x: 0.5, y: 0.5 }, sprite: { kind: 'textBlock', text: 'The tide is coming in', maxWidth: 0.6, fontSize: 0.05, color: '#ffffff', role: 'read', opacity: 0 }, motion: { type: 'static' } },
+      ],
+      timeline: { keys: [
+        { t: 1000, path: 'caption.sprite.opacity', value: 1, dur: 300 },
+        { t: 3000, path: 'caption.sprite.opacity', value: 0, dur: 300 },
+        ...glowKeys,
+      ] },
+    } as unknown as SaverSpec);
+
+    it('a glow that fades in after the caption has gone does not make it unreadable', () => {
+      const spec = withGlow(0, [{ t: 4000, path: 'glow.opacity', value: 1, dur: 300 }]);
+      expect(codes(spec)).not.toContain('text-legibility');
+      expect(codes(spec, { t: 2000 })).not.toContain('text-legibility');
+      expect(codes(spec, { t: 5000 })).toContain('text-legibility');
+    });
+
+    it('control: a glow that is up while the caption shows still warns, though it is gone by 5 s', () => {
+      const spec = withGlow(1, [{ t: 3500, path: 'glow.opacity', value: 0, dur: 300 }]);
+      expect(codes(spec, { t: 2000 })).toContain('text-legibility');
+      expect(codes(spec)).toContain('text-legibility');
+    });
+
+    it('control: an unkeyed glow under the caption still warns', () => {
+      expect(codes(withGlow(1, []))).toContain('text-legibility');
+    });
+  });
+});

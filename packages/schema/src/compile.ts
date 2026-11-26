@@ -30,7 +30,7 @@ import { LIMITS } from './types';
 import { FIELD_RASTER_SHORT_SIDE, FIELD_RASTER_SHORT_SIDE_LOW, fieldRgbAt, fieldSampleTime } from './field';
 import { createFinishPass, createSceneCanvas, presentWithFinish, type FinishPass } from './finish';
 import { canMorph, canWrapMorph, morphChainRoot, normalizeSeed, resolveSegment, segmentRenderSeed, segmentStart, sequenceSwapCompatible, sequenceWantsFinish } from './sequence';
-import { FEATHER_MASK_SIZE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnAt, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
+import { FEATHER_MASK_SIZE, FONT_PX_RE, barBox, barFraction, featherRamp, isPathPolygon, isShapedSprite, pathDrawCost, pathFrame, pathPaintSig, pathParts, polygonFillRule, polygonPoints, ribbonSides, strokeDrawnAt, strokeDrawnSamples, strokeLines, strokeOutline, strokeWidthPx, type PolygonSprite } from './shapes';
 import { trailEchoes, trailFillBudget } from './trail';
 
 const DEFAULT_STEER_DUR = 1000;
@@ -64,24 +64,6 @@ function hexToRgba(hex: string, alpha: number): string {
 const FONT_PREFIX_RE = /^((?:(?:italic|oblique|bold|bolder|lighter|normal|\d{3})\s+)+)/;
 
 /**
- * Matches the size token in a CSS font shorthand ("bold 26px monospace").
- *
- * The digit runs are bounded on purpose. This ran as `(\d*\.?\d+)px`, where
- * `\d*` and `\d+` can split the same digit run many ways, so a long run that
- * never reaches "px" makes the engine retry every split at every start
- * position. `sprite.font` comes straight from an authored SaverSpec, so that
- * input is reachable by anyone who can publish a scene: 1 000 digits took
- * 600 ms and 5 000 took 62 SECONDS, which is a denial of service rather than
- * a slow path. Bounding each run makes the work per start position constant —
- * 200 000 chars now costs about 4 ms.
- *
- * The bounds are far past anything real: no CSS font size needs more than
- * five integer digits or four decimals. `.5px` still parses via the second
- * branch.
- */
-const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
-
-/**
  * Rescale an explicit px size inside a font shorthand.
  *
  * A spec in the default `viewport` units expresses every other dimension as a
@@ -94,7 +76,8 @@ const FONT_PX_RE = /(\d{1,5}(?:\.\d{1,4})?|\.\d{1,4})px/;
  */
 function scaleFontPx(font: string, factor: number): string {
   if (factor === 1) return font;
-  return font.replace(FONT_PX_RE, (_m, n: string) => `${(Number(n) * factor).toFixed(2)}px`);
+  // The match may begin one character before the number (FONT_PX_RE): keep it.
+  return font.replace(FONT_PX_RE, (m: string, n: string) => `${m.slice(0, m.length - n.length - 2)}${(Number(n) * factor).toFixed(2)}px`);
 }
 
 /** Build a valid CSS font shorthand: weight/style tokens must precede the size. */

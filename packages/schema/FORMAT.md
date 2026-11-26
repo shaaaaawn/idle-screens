@@ -194,7 +194,10 @@ must exist, have `count: 1`, and not themselves orbit a layer.
 
 With `units: "viewport"` (the default) every dimensional value — sizes, radii,
 speeds, distances, wavelengths, stroke widths — is a fraction of
-`min(width, height)`, so specs scale to any display. Text sprites with an
+`min(width, height)`, so specs scale to any display. One exception: a path
+drawing's `stroke.width` (on the sprite or on one of its `parts`) is in the
+drawing's own unit box (a fraction of the sprite's `radius`, at most 0.5),
+not of `min(width, height)` — see `stroke` under the path sprite. Text sprites with an
 explicit `px` size in their `font` string (e.g. `"bold 14px monospace"`) are no
 exception: the compiler rescales that number by
 `min(width, height) / referenceViewport` so the text holds its apparent size,
@@ -362,7 +365,7 @@ on the sprite tier (the `basic` tier rule).
 | `count` | int 1..400 | — | entities in this layer. **At most 800 entities across all layers** (and ≤ 36 layers): the validator rejects a spec whose counts sum past 800, and density scaling never takes a screen past it |
 | `sprite` | SpriteSpec | — | what each entity looks like |
 | `motion` | MotionSpec | — | how entities move |
-| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. A **layer** field: it goes next to `count`, never inside `sprite` |
+| `size` | `[min,max]` > 0 | sprite-dependent | font size for emoji/text; ignored for shaped sprites. On a `text` sprite whose `font` carries a px size it does not set the glyph size (that px size does; the validator warns `no-effect`) — it is left setting only a `bounce` / `rise` layer's edge margin. A **layer** field: it goes next to `count`, never inside `sprite` |
 | `wrap` | boolean | `true` | wrap to the opposite edge when leaving the viewport |
 | `flip` | boolean | `false` | mirror the sprite to face its heading |
 | `alpha` | `[min,max]` 0..1 | `[1,1]` | per-entity opacity range |
@@ -407,7 +410,9 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   ```
 - `{ "kind": "text", "strings": ["HELLO"], "color": "#e6e8ef", "font": "bold monospace", "align": "center", "baseline": "middle", "maxWidth": 300, "cycle": ..., "role": "read" }`
   — a `font` **with** a px size keeps that shorthand, its number rescaled to the
-  viewport (verbatim only under `units: "px"`); a family/weight only
+  viewport (verbatim only under `units: "px"`), and the layer's `size` then
+  does not set the glyph size (the validator warns `no-effect` when both are
+  set); a family/weight only
   (`"bold monospace"`) composes with the seeded per-entity `size` (faces
   installed on the viewer only — see `font` under `textBlock`); `role` is
   the legibility opt-in described under `textBlock` below (same field, same
@@ -486,7 +491,13 @@ for `"nearest"` and `"random"`; a `"chain"` may omit both, except that
   - **`stroke`** — `{ "color": "#1f2a1c", "width": 0.006, "opacity": 0.8, "join": "round", "cap": "round" }`
     — an outline along every subpath **as drawn** (holes included; open
     subpaths too). `width` is in unit-box units (0.01 = 1% of the drawing's
-    half-size). Overlapping pieces show their inner edges, as in SVG.
+    half-size), **`0 < width ≤ 0.5`**: it draws `width × radius ×
+    min(width, height)` px wide (`width × radius` px under `units: "px"`;
+    before `grow` and transform scale), so the widest line is half the
+    sprite's radius — a `radius` 0.2 drawing at 1080p strokes at most 108 px.
+    It is not a fraction of `min(width, height)` like other stroke widths:
+    for a heavier line, raise the radius or fill a shape.
+    Overlapping pieces show their inner edges, as in SVG.
     `draw: {start?, end?}` on a stroke paints only that stretch of it, the
     part's subpaths counted as one pen run in the order the path draws them
     (a closed ring includes its closing edge, and comes back open when cut) —
@@ -1269,7 +1280,15 @@ stands still.
   toward `dense-scene`; coverage is weighed by paint opacity) (also on
   `perceiveScene().advisories`). Count-based advisories (`dense-scene`,
   `full-coherence`) read the **declared** `count`, not the density-scaled
-  build, so a small preview and a 4K screen agree on them. `giant-entity` flags an emoji/text layer
+  build, so a small preview and a 4K screen agree on them. A `timeline` is
+  judged at the `t` passed to `adviseSpec` (5 s without one); with no `t`, a
+  layer whose paint opacity (`opacity`, a textBlock's `opacity`, its group's)
+  or text colour is keyed is re-judged at its most visible key before
+  `sparse-scene`, the `dense` density mismatch or `text-legibility` fires, so
+  a caption that has faded out by 5 s is not reported as empty or unreadable
+  (nor is one set against a glow that only fades in once it has left: it is
+  also read at the moments its own keys settle, beside what is on screen then).
+  `giant-entity` flags an emoji/text layer
   whose glyphs come out taller than the viewport's min dimension — usually
   px numbers in a viewport-unit spec (`size: [20, 40]` is 21,600 px at
   1080p), which blankets the frame and otherwise reads as healthy coverage.
